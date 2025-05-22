@@ -1,2 +1,3 @@
 traefik/certs/acme.json
+*.swp
 
