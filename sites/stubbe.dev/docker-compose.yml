@@ -1,0 +1,15 @@
+services:
+  stubbedev:
+    image: nginx
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stubbedev.rule=Host(`stubbe.dev`)"
+      - "traefik.http.routers.stubbedev.entrypoints=websecure"
+      - "traefik.http.routers.stubbedev.tls.certresolver=letsencrypt"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
+

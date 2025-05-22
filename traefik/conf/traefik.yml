@@ -1,0 +1,18 @@
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    exposedByDefault: false
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: alexander.bugge.stage@gmail.com
+      storage: /certs/acme.json
+      httpChallenge:
+        entryPoint: web
+

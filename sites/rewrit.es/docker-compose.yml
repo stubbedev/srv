@@ -1,0 +1,15 @@
+services:
+  rewrites:
+    image: nginx
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rewrites.rule=Host(`rewrit.es`)"
+      - "traefik.http.routers.rewrites.entrypoints=websecure"
+      - "traefik.http.routers.rewrites.tls.certresolver=letsencrypt"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
+
