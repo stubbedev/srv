@@ -1,11 +1,16 @@
 services:
-  stubbedev:
+  site:
+    container_name: "${HOST}"
+    restart: always
     image: nginx
+    expose:
+      - "${PORT}"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.stubbedev.rule=Host(`stubbe.dev`)"
+      - "traefik.http.routers.stubbedev.rule=Host(`${HOST}`)"
       - "traefik.http.routers.stubbedev.entrypoints=websecure"
       - "traefik.http.routers.stubbedev.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=${PORT}"
     networks:
       - web
 
