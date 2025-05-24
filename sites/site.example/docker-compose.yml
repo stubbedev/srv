@@ -1,5 +1,6 @@
 services:
   site:
+    env_file: .env
     container_name: "${HOST}"
     restart: always
     image: nginx
