@@ -3,8 +3,6 @@ services:
     container_name: "${HOST}"
     restart: always
     image: nginx
-    expose:
-      - "${PORT}"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.stubbedev.rule=Host(`${HOST}`)"
