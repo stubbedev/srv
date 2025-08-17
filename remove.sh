@@ -33,4 +33,4 @@ function remove_site() {
   rm -rf "$target_dir"
 }
 
-remoive_site "$@"
+remove_site "$@"
