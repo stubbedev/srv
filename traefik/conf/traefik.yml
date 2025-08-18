@@ -11,7 +11,7 @@ providers:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: alexander.bugge.stage@gmail.com
+      email: ${TRAEFIK_CERTBOT_EMAIL}
       storage: /certs/acme.json
       httpChallenge:
         entryPoint: web

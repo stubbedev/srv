@@ -1,15 +1,15 @@
 services:
   site:
     env_file: .env
-    container_name: "${HOST}"
+    container_name: "${TRAEFIK_HOST}"
     restart: always
     image: nginx
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.${ROUTER_NAME}.rule=Host(`${HOST}`)"
-      - "traefik.http.routers.${ROUTER_NAME}.entrypoints=websecure"
-      - "traefik.http.routers.${ROUTER_NAME}.tls.certresolver=letsencrypt"
-      - "traefik.http.services.app.loadbalancer.server.port=${PORT}"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.rule=Host(`${TRAEFIK_HOST}`)"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=${TRAEFIK_PORT}"
     networks:
       - web
 
