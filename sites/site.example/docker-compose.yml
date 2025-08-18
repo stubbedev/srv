@@ -6,9 +6,9 @@ services:
     image: nginx
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.stubbedev.rule=Host(`${HOST}`)"
-      - "traefik.http.routers.stubbedev.entrypoints=websecure"
-      - "traefik.http.routers.stubbedev.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${ROUTER_NAME}.rule=Host(`${HOST}`)"
+      - "traefik.http.routers.${ROUTER_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.${ROUTER_NAME}.tls.certresolver=letsencrypt"
       - "traefik.http.services.app.loadbalancer.server.port=${PORT}"
     networks:
       - web
