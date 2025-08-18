@@ -14,8 +14,26 @@ function init() {
   docker compose up -d
   cd "$current_dir" || exit
   docker network inspect web >/dev/null 2>&1 || docker network create web
+
   for d in sites/*/; do
-    [ -d "$d" ] && cd "$current_dir/$d" && docker compose up -d && cd "$current_dir" || exit
+    site_name=$(basename "$d")
+    if [[ "$site_name" == "site.example" ]]; then
+      echo "Skipping test site: $site_name"
+      continue
+    fi
+
+    if [[ ! -f "$d/docker-compose.yaml" && ! -f "$d/docker-compose.yml" ]]; then
+      echo "Skipping $site_name: missing docker-compose.yaml/yml"
+      continue
+    fi
+
+    if [[ ! -f "$d/.env" ]]; then
+      echo "Skipping $site_name: missing .env file"
+      continue
+    fi
+
+
+    cd "$current_dir/$d" && docker compose up -d && cd "$current_dir" || exit
   done
 }
 
