@@ -11,7 +11,6 @@ providers:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: ${TRAEFIK_CERTBOT_EMAIL}
       storage: /certs/acme.json
       httpChallenge:
         entryPoint: web
