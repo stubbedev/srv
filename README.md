@@ -52,7 +52,7 @@ srv version
 ## Quick Start
 
 ```bash
-# Initialize (creates network, starts Traefik and DNS)
+# Initialize (creates network, starts Traefik and DNS, configures firewall)
 srv init
 
 # Set up local DNS (one-time, requires sudo)
@@ -67,11 +67,31 @@ srv add /path/to/my-app --domain myapp.test --start
 # Visit https://myapp.test - it just works!
 ```
 
+### Valet-Style Quick Start
+
+If you prefer a Laravel Valet-style workflow:
+
+```bash
+# Initialize srv
+srv init && srv dns setup && srv trust
+
+# Navigate to your project
+cd /path/to/my-project
+
+# Link it (auto-creates myproject.test)
+srv link
+
+# Start and open in browser
+srv start my-project && srv open my-project
+```
+
 ## Commands
+
+### Core Commands
 
 | Command | Description |
 |---------|-------------|
-| `srv init` | Create Docker network, start Traefik and DNS server |
+| `srv init` | Create Docker network, start Traefik and DNS server, configure firewall |
 | `srv add PATH` | Register a new site |
 | `srv remove SITE` | Stop and unregister a site |
 | `srv list` | List all registered sites with status |
@@ -80,13 +100,57 @@ srv add /path/to/my-app --domain myapp.test --start
 | `srv start SITE` | Start a specific site |
 | `srv stop SITE` | Stop a specific site |
 | `srv restart SITE` | Restart a specific site |
+| `srv doctor` | Diagnose common issues (including firewall) |
+
+### SSL & Trust
+
+| Command | Description |
+|---------|-------------|
 | `srv trust` | Install mkcert CA and generate local SSL certificates |
 | `srv trust --force` | Regenerate local SSL certificates |
+| `srv secure [SITE]` | Enable local SSL for a site |
+| `srv unsecure [SITE]` | Disable local SSL, use Let's Encrypt instead |
+
+### DNS
+
+| Command | Description |
+|---------|-------------|
 | `srv dns` | Show local DNS status |
 | `srv dns setup` | Configure system to use local DNS |
 | `srv dns remove` | Remove local DNS configuration |
+
+### Valet-Style Commands
+
+| Command | Description |
+|---------|-------------|
+| `srv link [NAME]` | Link current directory as a site (auto-configures .test domain) |
+| `srv unlink [NAME]` | Unlink a site (alias for remove) |
+| `srv links` | List all linked sites (alias for list) |
+| `srv open [SITE]` | Open a site in the browser |
+
+### Proxying
+
+| Command | Description |
+|---------|-------------|
+| `srv proxy add NAME URL` | Proxy a .test domain to a local service |
+| `srv proxy remove NAME` | Remove a proxy |
+| `srv proxy list` | List all configured proxies |
+
+### Directory Parking
+
+| Command | Description |
+|---------|-------------|
+| `srv park add [PATH]` | Register a directory for site discovery |
+| `srv park remove [PATH]` | Unregister a parked directory |
+| `srv park list` | List all parked directories |
+
+### Sharing & Utilities
+
+| Command | Description |
+|---------|-------------|
+| `srv share [SITE]` | Share a site publicly via cloudflared/ngrok |
+| `srv paths` | Show srv configuration paths |
 | `srv update` | Pull latest Traefik image and restart |
-| `srv doctor` | Diagnose common issues |
 
 ### `srv add` Options
 
@@ -281,6 +345,40 @@ srv completion fish | source
 
 Add to your shell profile for persistence.
 
+## Proxying Services
+
+Proxy local services (non-Docker) through Traefik:
+
+```bash
+# Proxy api.test to a local Node.js server
+srv proxy add api http://127.0.0.1:3000
+
+# Proxy with HTTPS (generates local SSL cert)
+srv proxy add api http://127.0.0.1:3000 --secure
+
+# List proxies
+srv proxy list
+# NAME   DOMAIN     TARGET
+# api    api.test   http://127.0.0.1:3000
+
+# Remove proxy
+srv proxy remove api
+```
+
+## Sharing Sites Publicly
+
+Share your local site with others using a tunnel service:
+
+```bash
+# Share using cloudflared (recommended)
+srv share mysite
+
+# Or specify the tool
+srv share mysite --tool ngrok
+```
+
+Requires `cloudflared` or `ngrok` to be installed.
+
 ## Traefik Dashboard
 
 Access at http://localhost:8080/dashboard/
@@ -316,6 +414,11 @@ srv remove myapp-staging
 ```
 
 ## Troubleshooting
+
+**Firewall blocking ports**
+- Run `srv doctor` to check firewall status
+- Run `srv init` again to configure firewall (will prompt to open ports 80/443)
+- Supported firewalls: ufw, firewalld, iptables
 
 **Site shows "broken" status in list**
 - The symlink target directory no longer exists
