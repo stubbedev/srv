@@ -30,7 +30,9 @@ jobs:
       - name: Build binaries
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
-          LDFLAGS="-s -w -X main.Version=${VERSION}"
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}"
 
           # Create output directory
           mkdir -p dist

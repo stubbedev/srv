@@ -5,19 +5,48 @@ A single binary CLI tool for managing containerized sites with Traefik as a reve
 ## Requirements
 
 - **Docker** - Must be installed and running
-- **Go 1.21+** - Only needed to build the binary
 - **mkcert** - Optional, for local development SSL (installed via `srv trust`)
 
 ## Installation
 
-```bash
-# Clone and build
-git clone <repo-url>
-cd srv
-go build -o srv ./cmd/srv/
+### Download Binary (Recommended)
 
-# Optionally move to PATH
+Download the latest release for your platform from the [releases page](https://github.com/stubbedev/srv/releases/latest).
+
+```bash
+# Linux (amd64)
+curl -Lo srv https://github.com/stubbedev/srv/releases/latest/download/srv-linux-amd64
+chmod +x srv
 sudo mv srv /usr/local/bin/
+
+# Linux (arm64)
+curl -Lo srv https://github.com/stubbedev/srv/releases/latest/download/srv-linux-arm64
+chmod +x srv
+sudo mv srv /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -Lo srv https://github.com/stubbedev/srv/releases/latest/download/srv-darwin-arm64
+chmod +x srv
+sudo mv srv /usr/local/bin/
+
+# macOS (Intel)
+curl -Lo srv https://github.com/stubbedev/srv/releases/latest/download/srv-darwin-amd64
+chmod +x srv
+sudo mv srv /usr/local/bin/
+```
+
+### Using Go Install
+
+Requires Go 1.21+:
+
+```bash
+go install github.com/stubbedev/srv@latest
+```
+
+### Verify Installation
+
+```bash
+srv version
 ```
 
 ## Quick Start

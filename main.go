@@ -18,8 +18,10 @@ import (
 )
 
 var (
-	// Version is set at build time
-	Version = "dev"
+	// Version information - set at build time via ldflags
+	Version   = "dev"
+	Commit    = "none"
+	BuildDate = "unknown"
 
 	// Root command flags
 	verbose bool
@@ -1236,6 +1238,12 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Info("srv %s", Version)
+		if Commit != "none" {
+			ui.Dim("Commit: %s", Commit)
+		}
+		if BuildDate != "unknown" {
+			ui.Dim("Built:  %s", BuildDate)
+		}
 	},
 }
 
