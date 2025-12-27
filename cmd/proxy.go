@@ -21,21 +21,22 @@ import (
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
 	Short: "Manage proxies",
-	Long: `Proxy domains to services running outside of Docker.
+	Long: `Proxy local domains to services running outside of Docker.
 
-This is useful for proxying to services running on other ports,
-such as local development servers or other applications.`,
+This is useful for proxying to local development servers or other
+applications running on localhost ports.
+
+Proxies always use local SSL (mkcert) and register with local DNS.`,
 }
 
 var proxyAddCmd = &cobra.Command{
-	Use:   "add NAME URL",
+	Use:   "add",
 	Short: "Add a proxy",
-	Long: `Create a proxy from a .test domain to a local service URL.
+	Long: `Create a proxy from a local domain to a localhost port.
 
-Example:
-  srv proxy add api http://127.0.0.1:3000
-  srv proxy add app http://localhost:8000 --secure`,
-	Args: cobra.ExactArgs(2),
+Examples:
+  srv proxy add --domain api.test --port 3000
+  srv proxy add -d myapp.test -p 8080`,
 	RunE: runProxyAdd,
 }
 
@@ -58,28 +59,48 @@ var proxyListCmd = &cobra.Command{
 }
 
 var proxyAddFlags struct {
-	secure bool
+	domain string
+	port   string
+	name   string
 }
 
 func init() {
 	proxyCmd.AddCommand(proxyAddCmd)
 	proxyCmd.AddCommand(proxyRemoveCmd)
 	proxyCmd.AddCommand(proxyListCmd)
-	proxyAddCmd.Flags().BoolVarP(&proxyAddFlags.secure, "secure", "s", false, "Use HTTPS for the proxy")
+
+	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.domain, "domain", "d", "", "Domain name (e.g., api.test)")
+	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.port, "port", "p", "", "Localhost port to proxy to")
+	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.name, "name", "n", "", "Proxy name (default: derived from domain)")
+	proxyAddCmd.MarkFlagRequired("domain")
+	proxyAddCmd.MarkFlagRequired("port")
+
 	RootCmd.AddCommand(proxyCmd)
 }
 
 func runProxyAdd(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	targetURL := args[1]
-	domain := name + ".test"
+	domain := proxyAddFlags.domain
+	port := proxyAddFlags.port
 
-	// Validate inputs
+	// Validate domain
+	if err := ValidateDomain(domain); err != nil {
+		return fmt.Errorf("invalid domain: %w", err)
+	}
+
+	// Validate port
+	if err := ValidatePort(port); err != nil {
+		return fmt.Errorf("invalid port: %w", err)
+	}
+
+	// Derive name from domain if not provided
+	name := proxyAddFlags.name
+	if name == "" {
+		// Use first part of domain as name (e.g., "api" from "api.test")
+		name = strings.Split(domain, ".")[0]
+	}
+
 	if err := ValidateSiteName(name); err != nil {
 		return fmt.Errorf("invalid proxy name: %w", err)
-	}
-	if err := ValidateProxyURL(targetURL); err != nil {
-		return err
 	}
 
 	cfg, err := config.Load()
@@ -87,23 +108,44 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Check mkcert if using secure
-	if proxyAddFlags.secure {
-		if err := traefik.CheckMkcert(); err != nil {
-			return err
-		}
-		if !traefik.IsCAInstalled() {
-			return fmt.Errorf("mkcert CA not installed. Run 'srv trust' first")
-		}
+	// Check if proxy already exists
+	proxyFile := filepath.Join(cfg.TraefikConfDir(), "proxy-"+name+".yml")
+	if _, err := os.Stat(proxyFile); err == nil {
+		return fmt.Errorf("proxy '%s' already exists. Use 'srv proxy remove %s' first", name, name)
+	}
 
-		// Generate certificate
-		if err := traefik.EnsureLocalCert(domain); err != nil {
-			return fmt.Errorf("failed to generate certificate: %w", err)
+	// Setup mkcert
+	if err := traefik.CheckMkcert(); err != nil {
+		return err
+	}
+
+	// Auto-install CA if not already installed
+	if !traefik.IsCAInstalled() {
+		ui.Dim("Installing mkcert CA...")
+		if err := traefik.InstallCA(); err != nil {
+			return fmt.Errorf("failed to install mkcert CA: %w", err)
 		}
+		ui.Success("mkcert CA installed")
+		ui.Dim("Restart your browser for the CA to take effect")
+	}
+
+	// Generate certificate (or renew if expiring)
+	renewed, err := traefik.EnsureLocalCert(domain)
+	if err != nil {
+		return fmt.Errorf("failed to generate certificate: %w", err)
+	}
+	if renewed {
+		ui.Dim("Generated SSL certificate for %s", domain)
+	}
+
+	// Register domain for local DNS
+	if err := traefik.RegisterLocalDomain(domain); err != nil {
+		ui.Warn("Warning: Failed to register DNS for %s: %v", domain, err)
 	}
 
 	// Create proxy config file
-	if err := writeProxyConfig(cfg, name, domain, targetURL, proxyAddFlags.secure); err != nil {
+	targetURL := fmt.Sprintf("http://host.docker.internal:%s", port)
+	if err := writeProxyConfig(cfg, name, domain, targetURL); err != nil {
 		return err
 	}
 
@@ -113,11 +155,7 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Success("Proxy '%s' created", name)
-	protocol := "http"
-	if proxyAddFlags.secure {
-		protocol = "https"
-	}
-	ui.Dim("%s://%s -> %s", protocol, domain, targetURL)
+	ui.Dim("https://%s -> localhost:%s", domain, port)
 	return nil
 }
 
@@ -129,6 +167,9 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Read proxy config to get domain before removing
+	domain := readProxyDomain(cfg, name)
+
 	// Remove proxy config file
 	proxyFile := filepath.Join(cfg.TraefikConfDir(), "proxy-"+name+".yml")
 	if err := os.Remove(proxyFile); err != nil {
@@ -138,11 +179,17 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to remove proxy: %w", err)
 	}
 
-	// Remove certificate if exists (best effort cleanup)
-	domain := name + ".test"
-	if err := traefik.RemoveLocalCerts(domain); err != nil {
-		ui.Warn("Warning: Failed to remove certificate: %v", err)
+	// Remove certificate and DNS if we found the domain
+	if domain != "" {
+		if err := traefik.RemoveLocalCerts(domain); err != nil {
+			ui.Warn("Warning: Failed to remove certificate: %v", err)
+		}
+		if err := traefik.UnregisterLocalDomain(domain); err != nil {
+			ui.Warn("Warning: Failed to unregister DNS for %s: %v", domain, err)
+		}
 	}
+
+	// Update Traefik dynamic config
 	if err := traefik.UpdateDynamicConfig(); err != nil {
 		ui.Warn("Warning: Failed to update Traefik config: %v", err)
 	}
@@ -159,21 +206,42 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 
 	proxies := getProxyNames()
 	if len(proxies) == 0 {
-		ui.Dim("No proxies configured. Use 'srv proxy add NAME URL' to create one.")
+		ui.Dim("No proxies configured. Use 'srv proxy add --domain DOMAIN --port PORT' to create one.")
 		return nil
 	}
 
-	headers := []string{"NAME", "DOMAIN", "TARGET"}
+	headers := []string{"NAME", "DOMAIN", "TARGET", "SSL"}
 	rows := make([][]string, 0, len(proxies))
 
 	for _, name := range proxies {
-		domain := name + ".test"
+		domain := readProxyDomain(cfg, name)
 		target := readProxyTarget(cfg, name)
-		rows = append(rows, []string{name, domain, target})
+		sslStatus := getProxySSLStatus(domain)
+		rows = append(rows, []string{name, domain, target, sslStatus})
 	}
 
 	ui.PrintTable(headers, rows)
 	return nil
+}
+
+// getProxySSLStatus returns a formatted SSL status string for a proxy
+func getProxySSLStatus(domain string) string {
+	if domain == "" {
+		return ui.DimText("-")
+	}
+
+	// All proxies use local mkcert certificates
+	cert := traefik.GetLocalCertInfo(domain)
+	if !cert.Exists {
+		return ui.StatusColor("missing")
+	}
+	if cert.IsExpired {
+		return ui.StatusColor("expired")
+	}
+	if cert.DaysLeft <= 30 {
+		return ui.StatusColor("expiring")
+	}
+	return ui.StatusColor("valid")
 }
 
 func getProxyNames() []string {
@@ -198,12 +266,7 @@ func getProxyNames() []string {
 	return names
 }
 
-func writeProxyConfig(cfg *config.Config, name, domain, targetURL string, secure bool) error {
-	entrypoint := "web"
-	if secure {
-		entrypoint = "websecure"
-	}
-
+func writeProxyConfig(cfg *config.Config, name, domain, targetURL string) error {
 	// Build the config using proper types to avoid YAML injection
 	type Server struct {
 		URL string `yaml:"url"`
@@ -215,10 +278,11 @@ func writeProxyConfig(cfg *config.Config, name, domain, targetURL string, secure
 		LoadBalancer LoadBalancer `yaml:"loadBalancer"`
 	}
 	type Router struct {
-		Rule        string    `yaml:"rule"`
-		EntryPoints []string  `yaml:"entryPoints"`
-		Service     string    `yaml:"service"`
-		TLS         *struct{} `yaml:"tls,omitempty"`
+		Rule        string   `yaml:"rule"`
+		EntryPoints []string `yaml:"entryPoints"`
+		Service     string   `yaml:"service"`
+		TLS         *struct {
+		} `yaml:"tls,omitempty"`
 	}
 	type HTTP struct {
 		Routers  map[string]Router  `yaml:"routers"`
@@ -230,11 +294,9 @@ func writeProxyConfig(cfg *config.Config, name, domain, targetURL string, secure
 
 	router := Router{
 		Rule:        fmt.Sprintf("Host(`%s`)", domain),
-		EntryPoints: []string{entrypoint},
+		EntryPoints: []string{"websecure"},
 		Service:     "proxy-" + name,
-	}
-	if secure {
-		router.TLS = &struct{}{}
+		TLS:         &struct{}{},
 	}
 
 	proxyConfig := ProxyConfig{
@@ -258,10 +320,41 @@ func writeProxyConfig(cfg *config.Config, name, domain, targetURL string, secure
 	}
 
 	// Add header comment
-	content := fmt.Sprintf("# Proxy configuration for %s - generated by srv\n%s", name, data)
+	content := fmt.Sprintf("# Proxy configuration for %s - generated by srv\n# Domain: %s\n%s", name, domain, data)
 
 	proxyFile := filepath.Join(cfg.TraefikConfDir(), "proxy-"+name+".yml")
 	return os.WriteFile(proxyFile, []byte(content), 0o644)
+}
+
+func readProxyDomain(cfg *config.Config, name string) string {
+	proxyFile := filepath.Join(cfg.TraefikConfDir(), "proxy-"+name+".yml")
+	data, err := os.ReadFile(proxyFile)
+	if err != nil {
+		return ""
+	}
+
+	// Extract domain from comment or Host rule
+	content := string(data)
+
+	// Try comment first (# Domain: xxx)
+	if idx := strings.Index(content, "# Domain: "); idx != -1 {
+		start := idx + 10
+		end := strings.Index(content[start:], "\n")
+		if end != -1 {
+			return strings.TrimSpace(content[start : start+end])
+		}
+	}
+
+	// Fallback to Host rule
+	if idx := strings.Index(content, "Host(`"); idx != -1 {
+		start := idx + 6
+		end := strings.Index(content[start:], "`)")
+		if end != -1 {
+			return content[start : start+end]
+		}
+	}
+
+	return ""
 }
 
 func readProxyTarget(cfg *config.Config, name string) string {
@@ -271,13 +364,22 @@ func readProxyTarget(cfg *config.Config, name string) string {
 		return "unknown"
 	}
 
-	// Simple extraction of URL from the config
+	// Extract URL from config
 	content := string(data)
-	if idx := strings.Index(content, "url: \""); idx != -1 {
-		start := idx + 6
-		end := strings.Index(content[start:], "\"")
-		if end != -1 {
-			return content[start : start+end]
+	if idx := strings.Index(content, "url: "); idx != -1 {
+		start := idx + 5
+		// Handle both quoted and unquoted URLs
+		if content[start] == '"' {
+			start++
+			end := strings.Index(content[start:], "\"")
+			if end != -1 {
+				return content[start : start+end]
+			}
+		} else {
+			end := strings.IndexAny(content[start:], "\n\r")
+			if end != -1 {
+				return strings.TrimSpace(content[start : start+end])
+			}
 		}
 	}
 	return "unknown"

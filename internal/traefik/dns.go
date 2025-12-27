@@ -1,12 +1,16 @@
 package traefik
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
+	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/shell"
 )
 
@@ -223,4 +227,176 @@ func GetResolverName() string {
 	default:
 		return "unknown"
 	}
+}
+
+// =============================================================================
+// Local Domain Registry
+// =============================================================================
+
+// localDomainsFile returns the path to the local domains registry file.
+func localDomainsFile() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cfg.TraefikDir, "local-domains.txt"), nil
+}
+
+// LoadLocalDomains returns the list of registered local domains.
+func LoadLocalDomains() ([]string, error) {
+	path, err := localDomainsFile()
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	var domains []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		domain := strings.TrimSpace(scanner.Text())
+		if domain != "" && !strings.HasPrefix(domain, "#") {
+			domains = append(domains, domain)
+		}
+	}
+
+	return domains, scanner.Err()
+}
+
+// SaveLocalDomains saves the list of local domains to the registry.
+func SaveLocalDomains(domains []string) error {
+	path, err := localDomainsFile()
+	if err != nil {
+		return err
+	}
+
+	// Sort and deduplicate
+	sort.Strings(domains)
+	unique := make([]string, 0, len(domains))
+	seen := make(map[string]bool)
+	for _, d := range domains {
+		if !seen[d] {
+			seen[d] = true
+			unique = append(unique, d)
+		}
+	}
+
+	content := strings.Join(unique, "\n")
+	if len(unique) > 0 {
+		content += "\n"
+	}
+
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// RegisterLocalDomain adds a domain to the local DNS registry and updates dnsmasq.
+func RegisterLocalDomain(domain string) error {
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		return err
+	}
+
+	// Check if already registered
+	for _, d := range domains {
+		if d == domain {
+			return nil // Already registered
+		}
+	}
+
+	domains = append(domains, domain)
+	if err := SaveLocalDomains(domains); err != nil {
+		return err
+	}
+
+	return UpdateDnsmasqConfig()
+}
+
+// UnregisterLocalDomain removes a domain from the local DNS registry and updates dnsmasq.
+func UnregisterLocalDomain(domain string) error {
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		return err
+	}
+
+	// Filter out the domain
+	filtered := make([]string, 0, len(domains))
+	found := false
+	for _, d := range domains {
+		if d == domain {
+			found = true
+		} else {
+			filtered = append(filtered, d)
+		}
+	}
+
+	if !found {
+		return nil // Not registered
+	}
+
+	if err := SaveLocalDomains(filtered); err != nil {
+		return err
+	}
+
+	return UpdateDnsmasqConfig()
+}
+
+// UpdateDnsmasqConfig regenerates dnsmasq.conf based on registered domains and reloads DNS.
+func UpdateDnsmasqConfig() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		return err
+	}
+
+	// Generate dnsmasq.conf
+	var content strings.Builder
+	content.WriteString("# Local domains managed by srv\n")
+	content.WriteString("# Do not edit manually - changes will be overwritten\n\n")
+
+	if len(domains) == 0 {
+		content.WriteString("# No local domains registered\n")
+	} else {
+		for _, domain := range domains {
+			content.WriteString(fmt.Sprintf("address=/%s/127.0.0.1\n", domain))
+		}
+	}
+
+	content.WriteString("\n# Forward all other queries to upstream DNS\n")
+	content.WriteString("server=8.8.8.8\n")
+	content.WriteString("server=8.8.4.4\n")
+	content.WriteString("\n# Don't read /etc/resolv.conf\n")
+	content.WriteString("no-resolv\n")
+
+	dnsmasqPath := filepath.Join(cfg.TraefikDir, "dnsmasq.conf")
+	if err := os.WriteFile(dnsmasqPath, []byte(content.String()), 0o644); err != nil {
+		return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
+	}
+
+	// Reload DNS container if running
+	if IsDNSRunning() {
+		return ReloadDNS()
+	}
+
+	return nil
+}
+
+// ReloadDNS restarts the DNS container to pick up config changes.
+func ReloadDNS() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	return docker.Compose(cfg.TraefikDir, "restart", "dns")
 }

@@ -22,7 +22,6 @@ Serve any directory with trusted local SSL.
 # One-time setup
 srv init
 srv dns setup    # Configure local DNS (requires sudo)
-srv trust        # Install local CA
 
 # Add a site (static files or docker-compose)
 srv add ~/my-project --domain mysite.test --local
@@ -132,27 +131,26 @@ srv doctor            Check for issues
 | `--service` | Service name for multi-service docker-compose |
 | `--force`, `-f` | Overwrite existing configuration |
 
-### DNS & SSL
+### DNS
 
 ```
 srv dns               Show DNS status
 srv dns setup         Configure system DNS
 srv dns remove        Remove DNS configuration
-srv trust             Install local CA
-srv secure [SITE]     Enable local SSL for a site
-srv unsecure [SITE]   Switch to Let's Encrypt
 ```
 
 ### Proxying
 
-Proxy non-Docker services:
+Proxy non-Docker services running on localhost:
 
 ```bash
-srv proxy add api.test http://127.0.0.1:3000 --local
-srv proxy add api.example.com http://127.0.0.1:3000
+srv proxy add --domain api.test --port 3000
+srv proxy add -d myapp.test -p 8080
 srv proxy list
 srv proxy remove api
 ```
+
+Proxies always use local SSL (mkcert) and automatically register with local DNS.
 
 ### Sharing
 
@@ -165,9 +163,10 @@ srv share mysite --tool ngrok
 
 ## How It Works
 
-- **Local (`--local`)** - Uses mkcert for trusted local SSL certificates
+- **Local (`--local`)** - Uses mkcert for trusted local SSL certificates. Domains are automatically registered with the local DNS server.
 - **Production** - Uses Let's Encrypt for automatic SSL certificates
 - **Traefik** - Routes requests to your containers based on domain
+- **DNS** - Local domains (`.test`, `.local`, `.localhost`) are resolved via a dnsmasq container. Only registered domains resolve to 127.0.0.1.
 
 ## Configuration
 
@@ -187,9 +186,8 @@ srv dns setup   # Configure system DNS
 ```
 
 **SSL not trusted?**
-```bash
-srv trust       # Install local CA
-```
+
+Restart your browser after adding your first local site (the mkcert CA is auto-installed).
 
 **Something broken?**
 ```bash

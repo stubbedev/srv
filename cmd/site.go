@@ -354,7 +354,7 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	return nil
 }
 
-// generateLocalCert generates SSL certificate for local domains
+// generateLocalCert generates SSL certificate for local domains and registers DNS
 func generateLocalCert(domain string) {
 	if err := traefik.CheckMkcert(); err != nil {
 		ui.Warn("Warning: %v", err)
@@ -362,20 +362,55 @@ func generateLocalCert(domain string) {
 		return
 	}
 
+	// Auto-install CA if not already installed
 	if !traefik.IsCAInstalled() {
-		ui.Warn("Warning: mkcert CA not installed")
-		ui.Dim("Run 'srv trust' to install the CA")
-		return
+		ui.Dim("Installing mkcert CA...")
+		if err := traefik.InstallCA(); err != nil {
+			ui.Warn("Warning: Failed to install mkcert CA: %v", err)
+			ui.Dim("Local HTTPS may not work in browsers")
+		} else {
+			ui.Success("mkcert CA installed")
+			ui.Dim("Restart your browser for the CA to take effect")
+		}
 	}
 
-	if err := traefik.EnsureLocalCert(domain); err != nil {
+	renewed, err := traefik.EnsureLocalCert(domain)
+	if err != nil {
 		ui.Warn("Warning: Failed to generate certificate: %v", err)
 		return
 	}
 
-	ui.Dim("Generated SSL certificate for %s", domain)
-	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Warning: Failed to update Traefik config: %v", err)
+	if renewed {
+		ui.Dim("Generated SSL certificate for %s", domain)
+		if err := traefik.UpdateDynamicConfig(); err != nil {
+			ui.Warn("Warning: Failed to update Traefik config: %v", err)
+		}
+	}
+
+	// Register domain for local DNS
+	if err := traefik.RegisterLocalDomain(domain); err != nil {
+		ui.Warn("Warning: Failed to register DNS for %s: %v", domain, err)
+	}
+}
+
+// renewLocalCertIfNeeded checks if a local cert needs renewal and renews it
+func renewLocalCertIfNeeded(domain string) {
+	cert := traefik.GetLocalCertInfo(domain)
+	if !cert.Exists || cert.IsExpired || cert.DaysLeft <= traefik.RenewThresholdDays {
+		if cert.IsExpired {
+			ui.Dim("Renewing expired SSL certificate for %s...", domain)
+		} else if cert.Exists && cert.DaysLeft <= traefik.RenewThresholdDays {
+			ui.Dim("Renewing SSL certificate for %s (expires in %d days)...", domain, cert.DaysLeft)
+		}
+
+		if err := traefik.GenerateLocalCert(domain); err != nil {
+			ui.Warn("Warning: Failed to renew certificate: %v", err)
+			return
+		}
+
+		if err := traefik.UpdateDynamicConfig(); err != nil {
+			ui.Warn("Warning: Failed to update Traefik config: %v", err)
+		}
 	}
 }
 
@@ -464,7 +499,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		site.RemoveGeneratedFiles(s.Dir)
 	}
 
-	// Remove SSL certificate for local domains
+	// Remove SSL certificate and DNS for local domains
 	if s.IsLocal && s.Domain != "" {
 		if err := traefik.RemoveLocalCerts(s.Domain); err != nil {
 			ui.Warn("Warning: Failed to remove certificate: %v", err)
@@ -472,6 +507,10 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		// Update Traefik dynamic config
 		if err := traefik.UpdateDynamicConfig(); err != nil {
 			ui.Warn("Warning: Failed to update Traefik config: %v", err)
+		}
+		// Unregister domain from local DNS
+		if err := traefik.UnregisterLocalDomain(s.Domain); err != nil {
+			ui.Warn("Warning: Failed to unregister DNS for %s: %v", s.Domain, err)
 		}
 	}
 
@@ -516,7 +555,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	})
 
 	// Build table
-	headers := []string{"NAME", "DOMAIN", "TYPE", "STATUS"}
+	headers := []string{"NAME", "DOMAIN", "TYPE", "SSL", "STATUS"}
 	rows := make([][]string, 0, len(sites))
 
 	for _, s := range sites {
@@ -525,16 +564,45 @@ func runList(cmd *cobra.Command, args []string) error {
 			status = "broken"
 		}
 
+		// Determine SSL status
+		sslStatus := getSSLStatus(s)
+
 		rows = append(rows, []string{
 			s.Name,
 			s.Domain,
 			ui.TypeColor(s.IsLocal),
+			sslStatus,
 			ui.StatusColor(status),
 		})
 	}
 
 	ui.PrintTable(headers, rows)
 	return nil
+}
+
+// getSSLStatus returns a formatted SSL status string for a site
+func getSSLStatus(s site.Site) string {
+	if s.IsBroken {
+		return ui.DimText("-")
+	}
+
+	if s.IsLocal {
+		// Local site - check mkcert certificate
+		cert := traefik.GetLocalCertInfo(s.Domain)
+		if !cert.Exists {
+			return ui.StatusColor("missing")
+		}
+		if cert.IsExpired {
+			return ui.StatusColor("expired")
+		}
+		if cert.DaysLeft <= 30 {
+			return ui.StatusColor("expiring")
+		}
+		return ui.StatusColor("valid")
+	}
+
+	// Production site - Let's Encrypt (auto-managed)
+	return ui.DimText("auto")
 }
 
 // =============================================================================
@@ -627,7 +695,7 @@ func showCertInfo(domain string) {
 
 	ui.Bold("SSL Certificate")
 	ui.Dim("  No certificate found for %s", domain)
-	ui.IndentedDim(1, "Run 'srv secure %s' to generate", domain)
+	ui.IndentedDim(1, "Certificate will be generated on 'srv start'")
 }
 
 // =============================================================================
@@ -721,7 +789,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	certs := traefik.ListLocalCerts()
 	if len(certs) == 0 {
 		ui.Dim("No local SSL certificates")
-		ui.IndentedDim(1, "Certificates are generated when adding .test/.local sites")
 	} else {
 		expired := 0
 		expiringSoon := 0
@@ -743,7 +810,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		} else {
 			ui.Success("Local SSL certificates: %d valid", valid)
 		}
-		ui.IndentedDim(1, "Run 'srv trust' for details")
 	}
 
 	ui.Blank()
@@ -799,6 +865,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
 	}
 
+	// Renew local SSL cert if needed
+	if s.IsLocal && s.Domain != "" {
+		renewLocalCertIfNeeded(s.Domain)
+	}
+
 	ui.Info("Starting %s...", s.Name)
 	if err := docker.ComposeUp(s.Dir); err != nil {
 		return fmt.Errorf("failed to start site: %w", err)
@@ -821,6 +892,13 @@ func startAllSites() error {
 	if len(sites) == 0 {
 		ui.Dim("No sites registered")
 		return nil
+	}
+
+	// Renew any expiring local certs before starting
+	for _, s := range sites {
+		if s.IsLocal && s.Domain != "" && !s.IsBroken {
+			renewLocalCertIfNeeded(s.Domain)
+		}
 	}
 
 	ui.Info("Starting %d site(s)...", len(sites))

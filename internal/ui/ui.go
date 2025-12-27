@@ -255,9 +255,9 @@ func StatusColor(status string) string {
 	switch status {
 	case "running", "valid":
 		return SuccessStyle.Render(status)
-	case "stopped":
+	case "stopped", "auto":
 		return DimStyle.Render(status)
-	case "broken", "expired":
+	case "broken", "expired", "missing":
 		return ErrorStyle.Render(status)
 	case "expiring":
 		return WarnStyle.Render(status)

@@ -230,7 +230,7 @@ func checkCertificates() int {
 		ui.IndentedSuccess(1, "CA is installed in system trust store")
 	} else {
 		ui.IndentedWarn(1, "CA not installed")
-		ui.IndentedDim(1, "Run 'srv trust' to install")
+		ui.IndentedDim(1, "CA will be auto-installed on first 'srv add --local'")
 		issues++
 	}
 
@@ -260,7 +260,7 @@ func checkCertificateExpiry() int {
 
 	if expired > 0 {
 		ui.IndentedError(1, "%d certificate(s) EXPIRED", expired)
-		ui.IndentedDim(1, "Run 'srv trust --force' to regenerate")
+		ui.IndentedDim(1, "Certificates auto-renew on 'srv start'")
 		return 1
 	}
 

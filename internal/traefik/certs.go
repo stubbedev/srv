@@ -110,12 +110,24 @@ func GenerateLocalCert(domain string) error {
 	return nil
 }
 
-// EnsureLocalCert generates an SSL certificate for a domain if it doesn't exist.
-func EnsureLocalCert(domain string) error {
-	if LocalCertsExist(domain) {
-		return nil
+// RenewThresholdDays is the number of days before expiry to trigger auto-renewal.
+const RenewThresholdDays = 30
+
+// EnsureLocalCert generates an SSL certificate for a domain if it doesn't exist
+// or if the existing certificate is expired or expiring soon.
+// Returns (renewed bool, err error) where renewed indicates if a cert was regenerated.
+func EnsureLocalCert(domain string) (bool, error) {
+	if !LocalCertsExist(domain) {
+		return true, GenerateLocalCert(domain)
 	}
-	return GenerateLocalCert(domain)
+
+	// Check if cert needs renewal
+	cert := GetLocalCertInfo(domain)
+	if cert.IsExpired || cert.DaysLeft <= RenewThresholdDays {
+		return true, GenerateLocalCert(domain)
+	}
+
+	return false, nil
 }
 
 // UpdateDynamicConfig regenerates the Traefik dynamic config with all local domain certs.

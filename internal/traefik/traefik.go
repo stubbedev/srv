@@ -149,11 +149,12 @@ func DockerComposeTemplate() string {
 	return r.Replace(dockerComposeTemplate)
 }
 
-// DnsmasqConf is the dnsmasq configuration for local domains.
-const DnsmasqConf = `# Resolve *.test, *.local, *.localhost to 127.0.0.1
-address=/test/127.0.0.1
-address=/local/127.0.0.1
-address=/localhost/127.0.0.1
+// DnsmasqConf is the initial dnsmasq configuration (no domains).
+// Domains are added dynamically via UpdateDnsmasqConfig().
+const DnsmasqConf = `# Local domains managed by srv
+# Do not edit manually - changes will be overwritten
+
+# No local domains registered
 
 # Forward all other queries to upstream DNS
 server=8.8.8.8
@@ -161,9 +162,6 @@ server=8.8.4.4
 
 # Don't read /etc/resolv.conf
 no-resolv
-
-# Log queries (disabled for less noise)
-# log-queries
 `
 
 // EnsureConfig ensures all Traefik configuration files exist.

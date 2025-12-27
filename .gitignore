@@ -1,5 +1,6 @@
 # Build artifacts
 srv
+main
 deploy
 *.exe
 
