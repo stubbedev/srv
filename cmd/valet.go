@@ -20,13 +20,21 @@ import (
 // link command (Valet-style alias for add)
 // =============================================================================
 
+var linkFlags struct {
+	port string
+}
+
 var linkCmd = &cobra.Command{
 	Use:   "link [NAME]",
-	Short: "Link current directory as a site (alias for add)",
+	Short: "Link current directory as a site",
 	Long: `Link the current directory as a site with srv.
 
 This is a Valet-style convenience command. If no name is provided,
 the directory name is used as the site name.
+
+If the directory contains a docker-compose.yml, it will be used.
+Otherwise, srv will automatically serve the directory as static files
+using nginx.
 
 The site will be accessible at NAME.test with local SSL.`,
 	Args: cobra.MaximumNArgs(1),
@@ -34,6 +42,7 @@ The site will be accessible at NAME.test with local SSL.`,
 }
 
 func init() {
+	linkCmd.Flags().StringVarP(&linkFlags.port, "port", "p", "80", "Container port (for docker-compose sites)")
 	RootCmd.AddCommand(linkCmd)
 }
 
@@ -49,12 +58,60 @@ func runLink(cmd *cobra.Command, args []string) error {
 		siteName = args[0]
 	}
 
-	// Check for compose file
-	composePath, err := site.FindComposeFile(cwd)
+	domain := siteName + ".test"
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
+	// Check if site already exists
+	if site.Exists(siteName) {
+		return fmt.Errorf("site '%s' already exists. Use 'srv remove %s' first", siteName, siteName)
+	}
+
+	// Check for compose file
+	composePath, err := site.FindComposeFile(cwd)
+	if err != nil {
+		// No docker-compose file found - serve as static site
+		return linkStaticSite(cwd, siteName, domain, cfg)
+	}
+
+	// Docker-compose file exists - link as compose-based site
+	return linkComposeSite(cwd, siteName, domain, composePath, cfg)
+}
+
+// linkStaticSite links a directory as a static file site using nginx
+func linkStaticSite(cwd, siteName, domain string, cfg *config.Config) error {
+	ui.Info("Linking static site: %s", siteName)
+
+	// Write env.site
+	if err := site.WriteEnvFile(cwd, domain, true, cfg.NetworkName); err != nil {
+		return fmt.Errorf("failed to write env.site: %w", err)
+	}
+
+	// Write static site docker-compose.yml
+	if err := site.WriteStaticSiteCompose(cwd, siteName, domain, cfg.NetworkName); err != nil {
+		return fmt.Errorf("failed to write docker-compose.yml: %w", err)
+	}
+
+	// Generate SSL certificate
+	generateLinkCert(domain)
+
+	// Register site
+	if err := site.Register(siteName, cwd); err != nil {
+		return fmt.Errorf("failed to register site: %w", err)
+	}
+
+	ui.Success("Static site '%s' linked!", siteName)
+	ui.Dim("https://%s", domain)
+	ui.Blank()
+	ui.Dim("Serving files from: %s", cwd)
+	ui.Dim("Run 'srv start %s' to start the site", siteName)
+	return nil
+}
+
+// linkComposeSite links a directory with an existing docker-compose file
+func linkComposeSite(cwd, siteName, domain, composePath string, cfg *config.Config) error {
 	// Get service name
 	services, err := site.GetServiceNames(composePath)
 	if err != nil {
@@ -83,38 +140,18 @@ func runLink(cmd *cobra.Command, args []string) error {
 		serviceName = selected
 	}
 
-	domain := siteName + ".test"
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	// Check if site already exists
-	if site.Exists(siteName) {
-		return fmt.Errorf("site '%s' already exists. Use 'srv remove %s' first", siteName, siteName)
-	}
-
-	// Write configuration files
 	ui.Info("Linking site: %s", siteName)
 
 	if err := site.WriteEnvFile(cwd, domain, true, cfg.NetworkName); err != nil {
 		return fmt.Errorf("failed to write env.site: %w", err)
 	}
 
-	if err := site.WriteSiteCompose(cwd, serviceName, siteName, domain, "80", true, cfg.NetworkName); err != nil {
+	if err := site.WriteSiteCompose(cwd, serviceName, siteName, domain, linkFlags.port, true, cfg.NetworkName); err != nil {
 		return fmt.Errorf("failed to write docker-compose.site.yml: %w", err)
 	}
 
 	// Generate SSL certificate
-	if err := traefik.CheckMkcert(); err == nil && traefik.IsCAInstalled() {
-		if err := traefik.EnsureLocalCert(domain); err != nil {
-			ui.Warn("Warning: Failed to generate certificate: %v", err)
-		} else {
-			if err := traefik.UpdateDynamicConfig(); err != nil {
-				ui.Warn("Warning: Failed to update Traefik config: %v", err)
-			}
-		}
-	}
+	generateLinkCert(domain)
 
 	// Add include to docker-compose.yml
 	if added, err := site.EnsureSiteComposeInclude(composePath); err != nil {
@@ -137,6 +174,19 @@ func runLink(cmd *cobra.Command, args []string) error {
 	ui.Blank()
 	ui.Dim("Run 'srv start %s' to start the site", siteName)
 	return nil
+}
+
+// generateLinkCert generates an SSL certificate for a linked site
+func generateLinkCert(domain string) {
+	if err := traefik.CheckMkcert(); err == nil && traefik.IsCAInstalled() {
+		if err := traefik.EnsureLocalCert(domain); err != nil {
+			ui.Warn("Warning: Failed to generate certificate: %v", err)
+		} else {
+			if err := traefik.UpdateDynamicConfig(); err != nil {
+				ui.Warn("Warning: Failed to update Traefik config: %v", err)
+			}
+		}
+	}
 }
 
 // =============================================================================
