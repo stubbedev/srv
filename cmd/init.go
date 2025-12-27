@@ -20,7 +20,7 @@ var initFlags struct {
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize srv (network, Traefik, start sites)",
+	Short: "Initialize srv",
 	Long: `Initialize the srv environment:
   1. Creates the Docker network
   2. Generates Traefik configuration

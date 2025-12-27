@@ -39,7 +39,7 @@ If no path is provided, the current directory is parked.`,
 var parkRemoveCmd = &cobra.Command{
 	Use:     "remove [PATH]",
 	Aliases: []string{"forget"},
-	Short:   "Unpark a directory",
+	Short:   "Remove parked directory",
 	Args:    cobra.MaximumNArgs(1),
 	RunE:    runParkRemove,
 }

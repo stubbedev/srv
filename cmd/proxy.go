@@ -20,7 +20,7 @@ import (
 
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
-	Short: "Manage proxied services",
+	Short: "Manage proxies",
 	Long: `Proxy domains to services running outside of Docker.
 
 This is useful for proxying to services running on other ports,
@@ -29,7 +29,7 @@ such as local development servers or other applications.`,
 
 var proxyAddCmd = &cobra.Command{
 	Use:   "add NAME URL",
-	Short: "Add a proxy to a service",
+	Short: "Add a proxy",
 	Long: `Create a proxy from a .test domain to a local service URL.
 
 Example:
@@ -53,7 +53,7 @@ var proxyRemoveCmd = &cobra.Command{
 var proxyListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
-	Short:   "List all proxies",
+	Short:   "List proxies",
 	RunE:    runProxyList,
 }
 

@@ -15,7 +15,7 @@ import (
 
 var dnsCmd = &cobra.Command{
 	Use:   "dns [command]",
-	Short: "Manage local DNS for *.test domains",
+	Short: "Show DNS status",
 	Long: `Manage the local DNS server that resolves *.test, *.local, and *.localhost
 domains to 127.0.0.1, eliminating the need to edit /etc/hosts.
 
@@ -25,7 +25,7 @@ Without a subcommand, shows current DNS status.`,
 
 var dnsSetupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Configure system to use local DNS",
+	Short: "Configure system DNS",
 	Long: `Configure your system's DNS resolver to use the local DNS server
 for *.test, *.local, and *.localhost domains.
 
@@ -35,7 +35,7 @@ This command requires sudo privileges to modify system DNS configuration.`,
 
 var dnsRemoveCmd = &cobra.Command{
 	Use:   "remove",
-	Short: "Remove local DNS configuration",
+	Short: "Remove DNS configuration",
 	Long:  `Remove the DNS configuration that was set up by 'srv dns setup'.`,
 	RunE:  runDNSRemove,
 }

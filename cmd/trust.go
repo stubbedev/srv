@@ -19,7 +19,7 @@ var trustFlags struct {
 
 var trustCmd = &cobra.Command{
 	Use:   "trust",
-	Short: "Install mkcert CA and list local SSL certificates",
+	Short: "Install local CA",
 	Long: `Install the mkcert CA certificate and show status of local SSL certificates.
 
 Certificates are automatically generated for each .test/.local/.localhost domain

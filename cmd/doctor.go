@@ -18,7 +18,7 @@ import (
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Diagnose common issues",
+	Short: "Check for issues",
 	Long: `Run diagnostic checks to identify common issues with your srv setup.
 
 Checks performed:
@@ -279,7 +279,7 @@ func checkCertificateExpiry() int {
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update Traefik to the latest version",
+	Short: "Update Traefik",
 	Long: `Pull the latest Traefik image and restart the container.
 
 This ensures you're running the latest Traefik version with security
@@ -321,7 +321,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print version information",
+	Short: "Show version",
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.Info("srv %s", Version)
 		if Commit != "none" {

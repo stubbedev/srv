@@ -34,7 +34,7 @@ var addFlags struct {
 
 var addCmd = &cobra.Command{
 	Use:   "add PATH",
-	Short: "Add a site to srv",
+	Short: "Add a site",
 	Long: `Register a new site with srv and generate Traefik configuration.
 
 The PATH should be a directory containing a docker-compose.yml file.
@@ -356,7 +356,7 @@ func startSiteAfterAdd(setup *siteSetup) error {
 var removeCmd = &cobra.Command{
 	Use:     "remove SITE",
 	Aliases: []string{"rm"},
-	Short:   "Remove a site from srv",
+	Short:   "Remove a site",
 	Long:    `Stop a site's containers and remove it from srv.`,
 	Args:    cobra.ExactArgs(1),
 	RunE:    runRemove,
@@ -425,7 +425,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
-	Short:   "List all registered sites",
+	Short:   "List sites",
 	RunE:    runList,
 }
 
@@ -477,7 +477,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 var infoCmd = &cobra.Command{
 	Use:   "info [SITE]",
-	Short: "Show detailed information about a site",
+	Short: "Show site details",
 	Long: `Display detailed information about a site including:
   - Site name and path
   - Domain and type (local/production)
@@ -570,7 +570,7 @@ func showCertInfo(domain string) {
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show srv status overview",
+	Short: "Show status",
 	Long: `Show comprehensive status information including:
   - Traefik status and dashboard URL
   - Number of registered sites
@@ -982,7 +982,7 @@ var logsFlags struct {
 
 var logsCmd = &cobra.Command{
 	Use:   "logs SITE",
-	Short: "View logs for a site",
+	Short: "View site logs",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runLogs,
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

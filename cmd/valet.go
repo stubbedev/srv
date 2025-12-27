@@ -26,7 +26,7 @@ var linkFlags struct {
 
 var linkCmd = &cobra.Command{
 	Use:   "link [NAME]",
-	Short: "Link current directory as a site",
+	Short: "Link directory as site",
 	Long: `Link the current directory as a site with srv.
 
 This is a Valet-style convenience command. If no name is provided,
@@ -195,7 +195,7 @@ func generateLinkCert(domain string) {
 
 var unlinkCmd = &cobra.Command{
 	Use:   "unlink [NAME]",
-	Short: "Unlink a site (alias for remove)",
+	Short: "Unlink a site",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runUnlink,
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -246,7 +246,7 @@ func runUnlink(cmd *cobra.Command, args []string) error {
 
 var linksCmd = &cobra.Command{
 	Use:   "links",
-	Short: "List all linked sites (alias for list)",
+	Short: "List linked sites",
 	RunE:  runList,
 }
 
@@ -260,7 +260,7 @@ func init() {
 
 var openCmd = &cobra.Command{
 	Use:   "open [SITE]",
-	Short: "Open a site in the browser",
+	Short: "Open site in browser",
 	Long: `Open a site in your default web browser.
 
 If no site is specified and you're in a site directory, opens that site.
@@ -339,7 +339,7 @@ func openBrowser(url string) error {
 
 var secureCmd = &cobra.Command{
 	Use:   "secure [SITE]",
-	Short: "Secure a site with local SSL",
+	Short: "Enable local SSL",
 	Long: `Enable local SSL (HTTPS) for a site using mkcert.
 
 If no site is specified and you're in a site directory, secures that site.
@@ -426,7 +426,7 @@ func runSecure(cmd *cobra.Command, args []string) error {
 
 var unsecureCmd = &cobra.Command{
 	Use:   "unsecure [SITE]",
-	Short: "Remove local SSL from a site",
+	Short: "Disable local SSL",
 	Long: `Disable local SSL for a site, reverting to Let's Encrypt (production) SSL.
 
 If no site is specified and you're in a site directory, unsecures that site.`,
@@ -502,7 +502,7 @@ func runUnsecure(cmd *cobra.Command, args []string) error {
 
 var pathsCmd = &cobra.Command{
 	Use:   "paths",
-	Short: "Show srv configuration paths",
+	Short: "Show config paths",
 	Long:  `Display all directories and files used by srv.`,
 	RunE:  runPaths,
 }
@@ -550,7 +550,7 @@ var shareFlags struct {
 
 var shareCmd = &cobra.Command{
 	Use:   "share [SITE]",
-	Short: "Share a site publicly via tunnel",
+	Short: "Share site via tunnel",
 	Long: `Share a local site publicly using a tunnel service.
 
 Supported tools:
