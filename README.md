@@ -4,11 +4,33 @@ A CLI tool for managing sites with Traefik reverse proxy. Works for both local d
 
 ## Install
 
+### Via Nix (recommended)
+
+With Nix flakes:
+
+```bash
+# Try it without installing
+nix run github:stubbedev/srv
+
+# Install it
+nix profile install github:stubbedev/srv
+```
+
+With traditional Nix:
+
+```bash
+nix-env -f https://github.com/stubbedev/srv/archive/master.tar.gz -i
+```
+
+### Via install script
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/stubbedev/srv/master/install.sh | sh
 ```
 
-Or download from [releases](https://github.com/stubbedev/srv/releases/latest).
+### Via releases
+
+Download from [releases](https://github.com/stubbedev/srv/releases/latest).
 
 **Requirements:** Docker
 
