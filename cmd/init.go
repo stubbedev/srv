@@ -1,0 +1,203 @@
+package cmd
+
+import (
+	"fmt"
+	"sync"
+
+	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
+	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/firewall"
+	"github.com/stubbedev/srv/internal/site"
+	"github.com/stubbedev/srv/internal/traefik"
+	"github.com/stubbedev/srv/internal/ui"
+)
+
+var initFlags struct {
+	fresh bool
+}
+
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize srv (network, Traefik, start sites)",
+	Long: `Initialize the srv environment:
+  1. Creates the Docker network
+  2. Generates Traefik configuration
+  3. Starts Traefik container
+  4. Starts all registered sites
+
+Use --fresh to remove all existing configuration and start fresh.`,
+	RunE: runInit,
+}
+
+func init() {
+	initCmd.Flags().BoolVar(&initFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
+	RootCmd.AddCommand(initCmd)
+}
+
+func runInit(cmd *cobra.Command, args []string) error {
+	// Handle fresh flag - reset everything
+	if initFlags.fresh {
+		ui.Warn("Removing existing configuration...")
+		if err := traefik.Reset(); err != nil {
+			return fmt.Errorf("failed to reset configuration: %w", err)
+		}
+		ui.Success("Configuration removed")
+		ui.Blank()
+	}
+
+	// Check Docker is running
+	if err := docker.EnsureRunning(); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// Check firewall status
+	fwStatus := firewall.CheckPorts()
+	needFirewall := firewall.IsActive() && (!fwStatus.HTTPOpen || !fwStatus.HTTPSOpen)
+
+	// Determine total steps
+	totalSteps := 3 // network, config, start traefik
+	if needFirewall {
+		totalSteps++
+	}
+	sites, _ := site.List()
+	if len(sites) > 0 {
+		totalSteps++
+	}
+	steps := ui.NewSteps(totalSteps)
+
+	// Step: Configure firewall if needed
+	if needFirewall {
+		steps.Next("Configuring firewall (%s)", firewall.Name(fwStatus.Firewall))
+		ui.Dim("Ports 80 and 443 need to be opened for HTTP/HTTPS traffic")
+
+		var openPorts bool
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Open ports 80 and 443?").
+					Description("This requires sudo privileges").
+					Value(&openPorts),
+			),
+		)
+		if err := form.Run(); err != nil {
+			return err
+		}
+
+		if openPorts {
+			if err := firewall.OpenPorts(); err != nil {
+				ui.Warn("Warning: Failed to configure firewall: %v", err)
+				ui.Dim("You may need to manually open ports 80 and 443")
+			} else {
+				steps.Done("Firewall configured")
+			}
+		} else {
+			steps.Skip("Firewall configuration skipped")
+			ui.Warn("Note: Traefik may not be accessible without opening ports 80/443")
+		}
+	}
+
+	// Step 1: Create network if needed
+	steps.Next("Setting up Docker network")
+	if !docker.NetworkExists(cfg.NetworkName) {
+		if err := docker.CreateNetwork(cfg.NetworkName); err != nil {
+			return fmt.Errorf("failed to create network: %w", err)
+		}
+		steps.Done("Created network: %s", cfg.NetworkName)
+	} else {
+		steps.Skip("Network %s already exists", cfg.NetworkName)
+	}
+
+	// Get or prompt for email
+	email, err := traefik.GetEmail(true)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Generate Traefik config
+	steps.Next("Configuring Traefik")
+	if err := traefik.EnsureConfig(email); err != nil {
+		return err
+	}
+	steps.Done("Traefik configured")
+
+	// Step 3: Start Traefik
+	steps.Next("Starting Traefik")
+	if err := docker.ComposeUp(cfg.TraefikDir); err != nil {
+		return fmt.Errorf("failed to start Traefik: %w", err)
+	}
+	steps.Done("Traefik started")
+
+	// Step 4: Start all sites (if any)
+	if len(sites) > 0 {
+		steps.Next("Starting %d site(s)", len(sites))
+		startSites(sites)
+		steps.Done("Sites started")
+	}
+
+	ui.Blank()
+	ui.Success("srv initialized successfully!")
+	ui.Info("Dashboard: %s", traefik.DashboardURL())
+
+	// Check DNS status
+	if !traefik.CheckSystemDNS() {
+		ui.Blank()
+		ui.Warn("Local DNS not configured")
+		ui.Dim("Run 'srv dns setup' to enable *.test domain resolution")
+	}
+
+	return nil
+}
+
+func startSites(sites []site.Site) {
+	// Filter out broken sites first
+	validSites := make([]site.Site, 0, len(sites))
+	for _, s := range sites {
+		if s.IsBroken {
+			ui.Warn("Skipping broken site: %s", s.Name)
+		} else {
+			validSites = append(validSites, s)
+		}
+	}
+
+	if len(validSites) == 0 {
+		return
+	}
+
+	// Start sites in parallel with a worker pool
+	const maxWorkers = 4
+	workers := min(maxWorkers, len(validSites))
+
+	var wg sync.WaitGroup
+	siteChan := make(chan site.Site, len(validSites))
+
+	// Start workers
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for s := range siteChan {
+				ui.IndentedDim(1, "Starting %s...", s.Name)
+				if err := docker.ComposeUp(s.Dir); err != nil {
+					ui.Error("Failed to start %s: %v", s.Name, err)
+				}
+			}
+		}()
+	}
+
+	// Send sites to workers
+	for _, s := range validSites {
+		siteChan <- s
+	}
+	close(siteChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+}

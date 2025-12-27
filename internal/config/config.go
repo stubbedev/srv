@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds the srv configuration.
@@ -16,6 +18,11 @@ type Config struct {
 	TraefikDir  string // Traefik configuration directory
 	SitesDir    string // Sites symlinks directory
 	NetworkName string // Docker network name
+}
+
+// UserConfig holds user-configurable settings stored in config.yml.
+type UserConfig struct {
+	ParkedPaths []string `yaml:"parked_paths,omitempty"`
 }
 
 var (
@@ -117,4 +124,71 @@ func ResetCache() {
 	configOnce = sync.Once{}
 	cachedConfig = nil
 	configErr = nil
+}
+
+// ConfigPath returns the path to the config.yml file.
+func (c *Config) ConfigPath() string {
+	return filepath.Join(c.Root, "config.yml")
+}
+
+// LoadUserConfig loads the user configuration from config.yml.
+func (c *Config) LoadUserConfig() (*UserConfig, error) {
+	configPath := c.ConfigPath()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &UserConfig{}, nil
+		}
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var userCfg UserConfig
+	if err := yaml.Unmarshal(data, &userCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return &userCfg, nil
+}
+
+// SaveUserConfig saves the user configuration to config.yml.
+func (c *Config) SaveUserConfig(userCfg *UserConfig) error {
+	configPath := c.ConfigPath()
+	data, err := yaml.Marshal(userCfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	return atomicWriteFile(configPath, data, 0o644)
+}
+
+// atomicWriteFile writes data to a file atomically by writing to a temp file first.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// GetParkedPaths returns the list of parked directories from config.yml.
+func (c *Config) GetParkedPaths() ([]string, error) {
+	userCfg, err := c.LoadUserConfig()
+	if err != nil {
+		return nil, err
+	}
+	if userCfg.ParkedPaths == nil {
+		return []string{}, nil
+	}
+	return userCfg.ParkedPaths, nil
+}
+
+// SetParkedPaths saves the list of parked directories to config.yml.
+func (c *Config) SetParkedPaths(paths []string) error {
+	userCfg, err := c.LoadUserConfig()
+	if err != nil {
+		// If we can't load, start with empty config
+		userCfg = &UserConfig{}
+	}
+	userCfg.ParkedPaths = paths
+	return c.SaveUserConfig(userCfg)
 }

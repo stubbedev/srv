@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -45,10 +46,10 @@ const (
 
 // Spinner represents an animated spinner for long-running operations.
 type Spinner struct {
-	message string
-	frames  []string
-	done    chan struct{}
-	stopped bool
+	message  string
+	frames   []string
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewSpinner creates a new spinner with a message.
@@ -79,23 +80,22 @@ func (s *Spinner) Start() {
 
 // Stop ends the spinner animation.
 func (s *Spinner) Stop() {
-	if !s.stopped {
-		s.stopped = true
+	s.stopOnce.Do(func() {
 		close(s.done)
 		fmt.Print("\r\033[K") // Clear line
-	}
+	})
 }
 
 // StopWithSuccess ends the spinner and prints a success message.
 func (s *Spinner) StopWithSuccess(message string) {
 	s.Stop()
-	Success(message)
+	Success("%s", message)
 }
 
 // StopWithError ends the spinner and prints an error message.
 func (s *Spinner) StopWithError(message string) {
 	s.Stop()
-	Error(message)
+	Error("%s", message)
 }
 
 // Steps tracks progress through a multi-step operation.
