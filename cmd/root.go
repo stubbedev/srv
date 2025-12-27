@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -140,14 +139,4 @@ func CommandExists(name string) bool {
 func RunCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	return cmd.Start()
-}
-
-// LoadParkedPaths loads the list of parked directories from config.
-func LoadParkedPaths(cfg *config.Config) ([]string, error) {
-	return cfg.GetParkedPaths()
-}
-
-// SaveParkedPaths saves the list of parked directories to config.
-func SaveParkedPaths(cfg *config.Config, paths []string) error {
-	return cfg.SetParkedPaths(paths)
 }

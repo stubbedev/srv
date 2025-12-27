@@ -37,8 +37,20 @@ var addCmd = &cobra.Command{
 	Short: "Add a site",
 	Long: `Register a new site with srv and generate Traefik configuration.
 
-The PATH should be a directory containing a docker-compose.yml file.
-If flags are not provided, you will be prompted interactively.`,
+If the PATH contains a docker-compose.yml file, srv will configure Traefik
+to route traffic to the specified service.
+
+If no docker-compose.yml is found, srv will serve the directory as static
+files using nginx.
+
+SSL certificates:
+  - Use --local to generate a local certificate with mkcert
+  - Without --local, Let's Encrypt will be used for production SSL
+
+Examples:
+  srv add /path/to/site --domain example.com          # Production with Let's Encrypt
+  srv add /path/to/site --domain myapp.test --local   # Local dev with mkcert
+  srv add . --domain example.com --start              # Add and start immediately`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAdd,
 }
@@ -48,7 +60,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addFlags.port, "port", "p", "80", "Container port")
 	addCmd.Flags().StringVarP(&addFlags.name, "name", "n", "", "Site name (default: directory name)")
 	addCmd.Flags().StringVar(&addFlags.service, "service", "", "Service name in docker-compose")
-	addCmd.Flags().BoolVarP(&addFlags.local, "local", "l", false, "Use local SSL (*.test domains)")
+	addCmd.Flags().BoolVarP(&addFlags.local, "local", "l", false, "Use local SSL via mkcert (otherwise Let's Encrypt)")
 	addCmd.Flags().BoolVarP(&addFlags.start, "start", "s", false, "Start the site after adding")
 	addCmd.Flags().BoolVarP(&addFlags.force, "force", "f", false, "Overwrite existing configuration")
 	addCmd.Flags().BoolVar(&addFlags.skipValidation, "skip-validation", false, "Skip compose file validation")
@@ -99,6 +111,7 @@ type siteSetup struct {
 	domain      string
 	port        string
 	isLocal     bool
+	isStatic    bool // true if serving static files (no docker-compose.yml)
 }
 
 // validateSiteSetup validates the path and discovers compose file
@@ -112,23 +125,32 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		return nil, fmt.Errorf("path does not exist: %s", sitePath)
 	}
 
-	composePath, err := site.FindComposeFile(sitePath)
-	if err != nil && !addFlags.skipValidation {
-		return nil, err
+	setup := &siteSetup{
+		sitePath: sitePath,
+		port:     addFlags.port,
 	}
 
-	return &siteSetup{
-		sitePath:    sitePath,
-		composePath: composePath,
-		port:        addFlags.port,
-	}, nil
+	// Try to find a compose file - if not found, treat as static site
+	composePath, err := site.FindComposeFile(sitePath)
+	if err != nil {
+		// No docker-compose file found - this will be a static site
+		if !addFlags.skipValidation {
+			setup.isStatic = true
+		}
+	} else {
+		setup.composePath = composePath
+	}
+
+	return setup, nil
 }
 
 // promptForMissingConfig prompts user for any missing configuration
 func promptForMissingConfig(setup *siteSetup) error {
-	// Get service name
-	if err := promptForService(setup); err != nil {
-		return err
+	// Get service name (only for non-static sites)
+	if !setup.isStatic {
+		if err := promptForService(setup); err != nil {
+			return err
+		}
 	}
 
 	// Get site name
@@ -147,8 +169,8 @@ func promptForMissingConfig(setup *siteSetup) error {
 		return err
 	}
 
-	// Determine if local
-	setup.isLocal = addFlags.local || site.IsLocalDomain(setup.domain)
+	// Determine if local - require --local flag explicitly, don't auto-detect from domain
+	setup.isLocal = addFlags.local
 
 	return nil
 }
@@ -243,14 +265,26 @@ func validateSiteInputs(setup *siteSetup) error {
 
 // setupSiteFiles writes configuration files for the site
 func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
-	ui.Info("Configuring site: %s", setup.siteName)
+	if setup.isStatic {
+		ui.Info("Configuring static site: %s", setup.siteName)
+	} else {
+		ui.Info("Configuring site: %s", setup.siteName)
+	}
 
 	if err := site.WriteEnvFile(setup.sitePath, setup.domain, setup.isLocal, cfg.NetworkName); err != nil {
 		return fmt.Errorf("failed to write env.site: %w", err)
 	}
 
-	if err := site.WriteSiteCompose(setup.sitePath, setup.serviceName, setup.siteName, setup.domain, setup.port, setup.isLocal, cfg.NetworkName); err != nil {
-		return fmt.Errorf("failed to write docker-compose.site.yml: %w", err)
+	if setup.isStatic {
+		// Static site: generate docker-compose.yml with nginx
+		if err := site.WriteStaticSiteCompose(setup.sitePath, setup.siteName, setup.domain, cfg.NetworkName, setup.isLocal); err != nil {
+			return fmt.Errorf("failed to write docker-compose.yml for static site: %w", err)
+		}
+	} else {
+		// Docker-compose site: generate docker-compose.site.yml overlay
+		if err := site.WriteSiteCompose(setup.sitePath, setup.serviceName, setup.siteName, setup.domain, setup.port, setup.isLocal, cfg.NetworkName); err != nil {
+			return fmt.Errorf("failed to write docker-compose.site.yml: %w", err)
+		}
 	}
 
 	return nil
@@ -275,12 +309,20 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 		return fmt.Errorf("failed to register site: %w", err)
 	}
 
+	siteType := "static"
+	if !setup.isStatic {
+		siteType = "docker"
+	}
 	ui.Success("Site '%s' added successfully!", setup.siteName)
-	ui.Dim("Domain: %s (%s)", setup.domain, ui.Highlight(TypeLabel(setup.isLocal)))
-	ui.Dim("Config: %s/docker-compose.site.yml", setup.sitePath)
+	ui.Dim("Domain: %s (%s, %s)", setup.domain, siteType, ui.Highlight(TypeLabel(setup.isLocal)))
 
-	// Add include to docker-compose.yml
-	updateComposeInclude(setup.composePath)
+	if setup.isStatic {
+		ui.Dim("Config: %s/docker-compose.yml", setup.sitePath)
+	} else {
+		ui.Dim("Config: %s/docker-compose.site.yml", setup.sitePath)
+		// Add include to docker-compose.yml (only for non-static sites)
+		updateComposeInclude(setup.composePath)
+	}
 
 	// Start if requested
 	if addFlags.start {
@@ -384,13 +426,15 @@ func runRemove(cmd *cobra.Command, args []string) error {
 			ui.Warn("Warning: Failed to stop containers: %v", err)
 		}
 
-		// Remove include from docker-compose.yml
-		composePath, err := site.FindComposeFile(s.Dir)
-		if err == nil {
-			if removed, err := site.RemoveSiteComposeInclude(composePath); err != nil {
-				ui.Warn("Warning: Could not update %s: %v", filepath.Base(composePath), err)
-			} else if removed {
-				ui.Dim("Removed include from %s", filepath.Base(composePath))
+		// For non-static sites, remove include from docker-compose.yml
+		if !site.IsStaticSite(s.Dir) {
+			composePath, err := site.FindComposeFile(s.Dir)
+			if err == nil {
+				if removed, err := site.RemoveSiteComposeInclude(composePath); err != nil {
+					ui.Warn("Warning: Could not update %s: %v", filepath.Base(composePath), err)
+				} else if removed {
+					ui.Dim("Removed include from %s", filepath.Base(composePath))
+				}
 			}
 		}
 
