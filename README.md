@@ -1,6 +1,6 @@
 # srv
 
-A CLI tool for managing local development sites with Traefik. Serve any directory at `https://mysite.test` with trusted SSL.
+A CLI tool for managing sites with Traefik reverse proxy. Works for both local development (`*.test` with mkcert) and production (automatic Let's Encrypt SSL).
 
 ## Install
 
@@ -12,19 +12,17 @@ Or download from [releases](https://github.com/stubbedev/srv/releases/latest).
 
 **Requirements:** Docker
 
-## Quick Start
+## Local Development
+
+Serve any directory at `https://mysite.test` with trusted local SSL.
 
 ```bash
-# Initialize srv
+# One-time setup
 srv init
+srv dns setup    # Configure local DNS (requires sudo)
+srv trust        # Install local CA
 
-# Set up local DNS (one-time, requires sudo)
-srv dns setup
-
-# Install local SSL CA (one-time)
-srv trust
-
-# Serve any directory
+# Serve a directory
 cd ~/my-project
 srv link
 srv start my-project
@@ -32,12 +30,31 @@ srv start my-project
 # Visit https://my-project.test
 ```
 
+## Production
+
+Serve sites with automatic Let's Encrypt SSL certificates.
+
+```bash
+# Initialize (prompts for Let's Encrypt email)
+srv init
+
+# Add a site with a real domain
+srv add /var/www/myapp --domain example.com --start
+
+# Visit https://example.com (cert auto-provisioned)
+```
+
+**Requirements:**
+- Domain DNS pointing to your server
+- Ports 80 and 443 open
+
 ## Commands
 
 ```
 srv init              Initialize srv
-srv link [NAME]       Link directory as site
-srv unlink [NAME]     Unlink a site
+srv add PATH          Add a site with docker-compose
+srv link [NAME]       Link directory as static site
+srv remove SITE       Remove a site
 srv start SITE        Start a site
 srv stop SITE         Stop a site
 srv restart SITE      Restart a site
@@ -56,7 +73,7 @@ srv dns setup         Configure system DNS
 srv dns remove        Remove DNS configuration
 srv trust             Install local CA
 srv secure [SITE]     Enable local SSL
-srv unsecure [SITE]   Disable local SSL
+srv unsecure [SITE]   Use Let's Encrypt instead
 ```
 
 ### Proxying
@@ -80,11 +97,11 @@ srv share mysite --tool ngrok
 
 ## How It Works
 
-1. **Link** - Creates a docker-compose config for nginx to serve your directory
-2. **Start** - Spins up the container with Traefik labels
-3. **Access** - Traefik routes `https://mysite.test` to your container
+- **Local (`*.test`)** - Uses mkcert for trusted local SSL certificates
+- **Production** - Uses Let's Encrypt for automatic SSL certificates
+- **Traefik** - Routes requests to your containers based on domain
 
-For directories with an existing `docker-compose.yml`, srv adds Traefik configuration without creating nginx.
+For static directories, srv generates an nginx container. For directories with `docker-compose.yml`, srv adds Traefik labels to your existing services.
 
 ## Configuration
 
@@ -94,7 +111,7 @@ All state stored in `~/.config/srv/`.
 |------|-------------|
 | `~/.config/srv/traefik/` | Traefik configuration |
 | `~/.config/srv/sites/` | Site symlinks |
-| `~/.config/srv/traefik/certs/local/` | Local SSL certificates |
+| `~/.config/srv/traefik/certs/` | SSL certificates |
 
 ## Troubleshooting
 
