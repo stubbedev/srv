@@ -33,6 +33,9 @@ var (
 
 	// Verbose mode flag
 	Verbose bool
+
+	// Mutex for thread-safe output
+	printMu sync.Mutex
 )
 
 // Status symbols (using ASCII for compatibility)
@@ -62,17 +65,25 @@ func NewSpinner(message string) *Spinner {
 }
 
 // Start begins the spinner animation.
+// The spinner will automatically stop after 10 minutes to prevent goroutine leaks.
 func (s *Spinner) Start() {
 	go func() {
 		i := 0
+		timeout := time.After(10 * time.Minute)
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-s.done:
 				return
-			default:
+			case <-timeout:
+				// Auto-stop after timeout to prevent goroutine leak
+				s.Stop()
+				return
+			case <-ticker.C:
 				fmt.Printf("\r%s %s", DimStyle.Render(s.frames[i%len(s.frames)]), s.message)
 				i++
-				time.Sleep(100 * time.Millisecond)
 			}
 		}
 	}()
@@ -214,15 +225,42 @@ func IndentedDim(level int, format string, args ...any) {
 	fmt.Println(DimStyle.Render(Indent(level, format, args...)))
 }
 
+// =============================================================================
+// Thread-safe output functions for parallel operations
+// =============================================================================
+
+// SafeIndentedDim prints an indented dimmed message (thread-safe).
+func SafeIndentedDim(level int, format string, args ...any) {
+	printMu.Lock()
+	defer printMu.Unlock()
+	fmt.Println(DimStyle.Render(Indent(level, format, args...)))
+}
+
+// SafeError prints an error message (thread-safe).
+func SafeError(format string, args ...any) {
+	printMu.Lock()
+	defer printMu.Unlock()
+	fmt.Fprintln(os.Stderr, ErrorStyle.Render(fmt.Sprintf(format, args...)))
+}
+
+// SafeWarn prints a warning message (thread-safe).
+func SafeWarn(format string, args ...any) {
+	printMu.Lock()
+	defer printMu.Unlock()
+	fmt.Println(WarnStyle.Render(fmt.Sprintf(format, args...)))
+}
+
 // StatusColor returns a colored status string.
 func StatusColor(status string) string {
 	switch status {
-	case "running":
+	case "running", "valid":
 		return SuccessStyle.Render(status)
 	case "stopped":
 		return DimStyle.Render(status)
-	case "broken":
+	case "broken", "expired":
 		return ErrorStyle.Render(status)
+	case "expiring":
+		return WarnStyle.Render(status)
 	default:
 		if len(status) > 0 && status[0] == 'p' { // partial
 			return WarnStyle.Render(status)

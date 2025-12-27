@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -157,47 +156,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 }
 
 func startSites(sites []site.Site) {
-	// Filter out broken sites first
-	validSites := make([]site.Site, 0, len(sites))
-	for _, s := range sites {
-		if s.IsBroken {
-			ui.Warn("Skipping broken site: %s", s.Name)
-		} else {
-			validSites = append(validSites, s)
-		}
-	}
-
-	if len(validSites) == 0 {
-		return
-	}
-
-	// Start sites in parallel with a worker pool
-	const maxWorkers = 4
-	workers := min(maxWorkers, len(validSites))
-
-	var wg sync.WaitGroup
-	siteChan := make(chan site.Site, len(validSites))
-
-	// Start workers
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for s := range siteChan {
-				ui.IndentedDim(1, "Starting %s...", s.Name)
-				if err := docker.ComposeUp(s.Dir); err != nil {
-					ui.Error("Failed to start %s: %v", s.Name, err)
-				}
-			}
-		}()
-	}
-
-	// Send sites to workers
-	for _, s := range validSites {
-		siteChan <- s
-	}
-	close(siteChan)
-
-	// Wait for all workers to complete
-	wg.Wait()
+	runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
+		return docker.ComposeUp(s.Dir)
+	})
 }

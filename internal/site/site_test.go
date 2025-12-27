@@ -567,14 +567,15 @@ func TestWriteEnvFile(t *testing.T) {
 		}
 
 		content := string(data)
-		if !containsString(content, "DEPLOY_DOMAIN=myapp.test") {
-			t.Error("expected DEPLOY_DOMAIN=myapp.test")
+		// Values are now quoted for safety
+		if !containsString(content, `DEPLOY_DOMAIN="myapp.test"`) {
+			t.Errorf("expected DEPLOY_DOMAIN=\"myapp.test\", got: %s", content)
 		}
 		if !containsString(content, "DEPLOY_LOCAL=true") {
 			t.Error("expected DEPLOY_LOCAL=true")
 		}
-		if !containsString(content, "DEPLOY_NETWORK=srv_traefik") {
-			t.Error("expected DEPLOY_NETWORK=srv_traefik")
+		if !containsString(content, `DEPLOY_NETWORK="srv_traefik"`) {
+			t.Errorf("expected DEPLOY_NETWORK=\"srv_traefik\", got: %s", content)
 		}
 	})
 
@@ -592,8 +593,9 @@ func TestWriteEnvFile(t *testing.T) {
 		}
 
 		content := string(data)
-		if !containsString(content, "DEPLOY_DOMAIN=example.com") {
-			t.Error("expected DEPLOY_DOMAIN=example.com")
+		// Values are now quoted for safety
+		if !containsString(content, `DEPLOY_DOMAIN="example.com"`) {
+			t.Errorf("expected DEPLOY_DOMAIN=\"example.com\", got: %s", content)
 		}
 		if !containsString(content, "DEPLOY_LOCAL=false") {
 			t.Error("expected DEPLOY_LOCAL=false")

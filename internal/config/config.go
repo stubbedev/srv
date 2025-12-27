@@ -26,14 +26,17 @@ type UserConfig struct {
 }
 
 var (
+	configMu     sync.Mutex
 	configOnce   sync.Once
 	cachedConfig *Config
 	configErr    error
 )
 
 // Load returns the srv configuration, creating directories as needed.
-// The result is cached after the first call.
+// The result is cached after the first call. This is thread-safe.
 func Load() (*Config, error) {
+	configMu.Lock()
+	defer configMu.Unlock()
 	configOnce.Do(func() {
 		cachedConfig, configErr = load()
 	})
@@ -120,7 +123,10 @@ func (c *Config) LocalCertsDir() string {
 }
 
 // ResetCache clears the cached configuration, forcing a reload on next Load() call.
+// This is thread-safe.
 func ResetCache() {
+	configMu.Lock()
+	defer configMu.Unlock()
 	configOnce = sync.Once{}
 	cachedConfig = nil
 	configErr = nil

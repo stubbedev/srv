@@ -101,7 +101,9 @@ func runTrust(cmd *cobra.Command, args []string) error {
 			ui.Info("Restarting Traefik to load new certificates...")
 			cfg, err := config.Load()
 			if err == nil {
-				_ = docker.ComposeRestart(cfg.TraefikDir)
+				if err := docker.ComposeRestart(cfg.TraefikDir); err != nil {
+					ui.Warn("Warning: Failed to restart Traefik: %v", err)
+				}
 			}
 		}
 	}

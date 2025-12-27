@@ -3,6 +3,8 @@ package traefik
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,6 +86,8 @@ tls:
 
 // dockerComposeTemplate is the Traefik docker-compose template.
 // Use DockerComposeTemplate() to get the template with variables substituted.
+// Note: DNS_HTTP_USER and DNS_HTTP_PASS are randomly generated per installation
+// for the dnsmasq HTTP admin interface (not exposed externally, but secured anyway).
 const dockerComposeTemplate = `services:
   traefik:
     image: {{TRAEFIK_IMAGE}}
@@ -109,8 +113,8 @@ const dockerComposeTemplate = `services:
     ports:
       - "127.0.0.1:53:53/udp"
     environment:
-      - HTTP_USER=admin
-      - HTTP_PASS=admin
+      - HTTP_USER={{DNS_HTTP_USER}}
+      - HTTP_PASS={{DNS_HTTP_PASS}}
     volumes:
       - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
     logging:
@@ -122,6 +126,16 @@ networks:
     external: true
 `
 
+// generateRandomString generates a random hex string of specified length.
+func generateRandomString(length int) string {
+	bytes := make([]byte, length/2+1)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to a fixed string if crypto/rand fails (shouldn't happen)
+		return "srv_" + fmt.Sprintf("%d", os.Getpid())
+	}
+	return hex.EncodeToString(bytes)[:length]
+}
+
 // DockerComposeTemplate returns the docker-compose template with variables substituted.
 func DockerComposeTemplate() string {
 	r := strings.NewReplacer(
@@ -129,6 +143,8 @@ func DockerComposeTemplate() string {
 		"{{DNS_IMAGE}}", docker.ImageDNS,
 		"{{TRAEFIK_CONTAINER}}", docker.ContainerTraefik,
 		"{{DNS_CONTAINER}}", docker.ContainerDNS,
+		"{{DNS_HTTP_USER}}", generateRandomString(16),
+		"{{DNS_HTTP_PASS}}", generateRandomString(32),
 	)
 	return r.Replace(dockerComposeTemplate)
 }
@@ -330,9 +346,11 @@ func Reset() error {
 		return err
 	}
 
-	// Stop Traefik containers first if running
+	// Stop Traefik containers first if running (ignore errors - best effort cleanup)
 	if IsRunning() || IsDNSRunning() {
-		_ = docker.Compose(cfg.TraefikDir, "down")
+		// Intentionally ignoring error: we're resetting anyway, compose down may fail
+		// if containers are in an inconsistent state
+		_ = docker.Compose(cfg.TraefikDir, "down") //nolint:errcheck
 	}
 
 	// Remove the config directory

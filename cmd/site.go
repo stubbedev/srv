@@ -265,7 +265,9 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 
 	// Remove existing symlink if force
 	if addFlags.force && site.Exists(setup.siteName) {
-		_ = site.Unregister(setup.siteName)
+		if err := site.Unregister(setup.siteName); err != nil {
+			return fmt.Errorf("failed to remove existing site: %w", err)
+		}
 	}
 
 	// Register site
@@ -950,9 +952,9 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 		go func() {
 			defer wg.Done()
 			for s := range siteChan {
-				ui.IndentedDim(1, "%s %s...", opName, s.Name)
+				ui.SafeIndentedDim(1, "%s %s...", opName, s.Name)
 				if err := op(&s); err != nil {
-					ui.Error("Failed to %s %s: %v", opName, s.Name, err)
+					ui.SafeError("Failed to %s %s: %v", opName, s.Name, err)
 				}
 			}
 		}()

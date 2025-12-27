@@ -185,11 +185,17 @@ func RemoveDNS() error {
 		return shell.SudoSystemctl("restart", "systemd-resolved")
 
 	case ResolverMacOS:
+		var lastErr error
 		for _, domain := range LocalDomains {
 			resolverFile := filepath.Join(macOSResolverDir, domain)
-			_ = shell.SudoRemove(resolverFile) // Ignore errors for non-existent files
+			if err := shell.SudoRemove(resolverFile); err != nil {
+				// Only track errors for files that exist
+				if _, statErr := os.Stat(resolverFile); statErr == nil {
+					lastErr = err
+				}
+			}
 		}
-		return nil
+		return lastErr
 
 	case ResolverNetworkManager:
 		if _, err := os.Stat(networkManagerConfig); os.IsNotExist(err) {

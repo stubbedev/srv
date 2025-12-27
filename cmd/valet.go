@@ -110,7 +110,9 @@ func runLink(cmd *cobra.Command, args []string) error {
 		if err := traefik.EnsureLocalCert(domain); err != nil {
 			ui.Warn("Warning: Failed to generate certificate: %v", err)
 		} else {
-			_ = traefik.UpdateDynamicConfig()
+			if err := traefik.UpdateDynamicConfig(); err != nil {
+				ui.Warn("Warning: Failed to update Traefik config: %v", err)
+			}
 		}
 	}
 
@@ -358,7 +360,9 @@ func runSecure(cmd *cobra.Command, args []string) error {
 	// Restart site if running
 	if s.Status == "running" {
 		ui.Info("Restarting site...")
-		_ = docker.ComposeRestart(s.Dir)
+		if err := docker.ComposeRestart(s.Dir); err != nil {
+			ui.Warn("Warning: Failed to restart site: %v", err)
+		}
 	}
 
 	ui.Success("Site '%s' is now secured with local SSL", s.Name)
@@ -432,7 +436,9 @@ func runUnsecure(cmd *cobra.Command, args []string) error {
 	// Restart site if running
 	if s.Status == "running" {
 		ui.Info("Restarting site...")
-		_ = docker.ComposeRestart(s.Dir)
+		if err := docker.ComposeRestart(s.Dir); err != nil {
+			ui.Warn("Warning: Failed to restart site: %v", err)
+		}
 	}
 
 	ui.Success("Site '%s' is now using Let's Encrypt SSL", s.Name)

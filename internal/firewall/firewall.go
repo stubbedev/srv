@@ -206,21 +206,25 @@ func openIPTablesPorts() error {
 }
 
 // persistIPTablesRules attempts to persist iptables rules.
+// This is a best-effort operation - failure is not critical as rules are already applied.
 func persistIPTablesRules() {
 	// Try iptables-save (Debian/Ubuntu with iptables-persistent)
 	if shell.Exists("netfilter-persistent") {
-		_ = shell.Sudo("netfilter-persistent", "save")
+		// Best effort - rules are already applied, persistence is optional
+		_ = shell.Sudo("netfilter-persistent", "save") //nolint:errcheck
 		return
 	}
 
 	// Try saving to /etc/iptables/rules.v4 (Debian/Ubuntu)
 	if shell.Exists("iptables-save") {
-		_ = exec.Command("sh", "-c", "sudo iptables-save > /etc/iptables/rules.v4").Run()
+		// Best effort - rules are already applied, persistence is optional
+		_ = exec.Command("sh", "-c", "sudo iptables-save > /etc/iptables/rules.v4").Run() //nolint:errcheck
 		return
 	}
 
 	// Try service iptables save (RHEL/CentOS without firewalld)
-	_ = shell.Sudo("service", "iptables", "save")
+	// Best effort - rules are already applied, persistence is optional
+	_ = shell.Sudo("service", "iptables", "save") //nolint:errcheck
 }
 
 // IsActive returns true if any firewall is detected and active.

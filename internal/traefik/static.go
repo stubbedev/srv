@@ -201,7 +201,8 @@ func UpdateStaticServer(parkedPaths []string) error {
 
 			if err := shell.Mkcert("-cert-file", certFile, "-key-file", keyFile, "*.test"); err == nil {
 				// Update dynamic config to include the wildcard cert
-				_ = UpdateDynamicConfig()
+				// Ignore error: non-critical, config will be updated on next operation
+				_ = UpdateDynamicConfig() //nolint:errcheck
 			}
 		}
 	}

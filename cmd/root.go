@@ -110,7 +110,9 @@ func getSiteFromArgsOrCwd(args []string, required bool) (*site.Site, error) {
 
 	for _, s := range sites {
 		if s.Dir == cwd {
-			return &s, nil
+			// Return a copy to avoid loop variable pointer issue
+			siteCopy := s
+			return &siteCopy, nil
 		}
 	}
 

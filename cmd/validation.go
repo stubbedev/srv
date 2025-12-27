@@ -8,10 +8,17 @@ import (
 	"strings"
 )
 
-// Domain validation regex
-// Matches valid hostnames: alphanumeric, hyphens, dots
-// Examples: example.com, my-app.test, sub.domain.local
-var domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+// Pre-compiled validation regexes
+var (
+	// Domain validation regex
+	// Matches valid hostnames: alphanumeric, hyphens, dots
+	// Examples: example.com, my-app.test, sub.domain.local
+	domainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+
+	// Site name validation regex
+	// Site names should be alphanumeric with hyphens and underscores
+	siteNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+)
 
 // ValidateDomain validates a domain/hostname format.
 // Returns an error if the domain is invalid.
@@ -99,8 +106,6 @@ func ValidateSiteName(name string) error {
 		return fmt.Errorf("site name cannot be empty")
 	}
 
-	// Site names should be alphanumeric with hyphens and underscores
-	siteNameRegex := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	if !siteNameRegex.MatchString(name) {
 		return fmt.Errorf("invalid site name: %s (use alphanumeric characters, hyphens, and underscores)", name)
 	}
