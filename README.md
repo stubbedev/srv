@@ -1,6 +1,6 @@
 # srv
 
-A CLI tool for managing sites with Traefik reverse proxy. Works for both local development (`*.test` with mkcert) and production (automatic Let's Encrypt SSL).
+A CLI tool for managing sites with Traefik reverse proxy. Works for both local development (mkcert) and production (automatic Let's Encrypt SSL).
 
 ## Install
 
@@ -12,9 +12,11 @@ Or download from [releases](https://github.com/stubbedev/srv/releases/latest).
 
 **Requirements:** Docker
 
-## Local Development
+## Quick Start
 
-Serve any directory at `https://mysite.test` with trusted local SSL.
+### Local Development
+
+Serve any directory with trusted local SSL.
 
 ```bash
 # One-time setup
@@ -22,15 +24,14 @@ srv init
 srv dns setup    # Configure local DNS (requires sudo)
 srv trust        # Install local CA
 
-# Serve a directory
-cd ~/my-project
-srv link
-srv start my-project
+# Add a site (static files or docker-compose)
+srv add ~/my-project --domain mysite.test --local
+srv start mysite
 
-# Visit https://my-project.test
+# Visit https://mysite.test
 ```
 
-## Production
+### Production
 
 Serve sites with automatic Let's Encrypt SSL certificates.
 
@@ -48,22 +49,88 @@ srv add /var/www/myapp --domain example.com --start
 - Domain DNS pointing to your server
 - Ports 80 and 443 open
 
+## Adding Sites
+
+The `srv add` command handles both static sites and docker-compose projects:
+
+```bash
+# Static site (no docker-compose.yml) - serves files with nginx
+srv add /var/www/html --domain example.com
+
+# Docker-compose site - adds Traefik labels to your service
+srv add /var/www/app --domain example.com
+
+# Local development with mkcert SSL
+srv add ./mysite --domain mysite.test --local
+
+# Start immediately after adding
+srv add ./mysite --domain mysite.test --local --start
+```
+
+### Static Sites
+
+For directories without a `docker-compose.yml`, srv generates an nginx container that:
+
+- Serves your HTML, CSS, JS, and other static files
+- Blocks sensitive files (`.env`, `.git`, `.htaccess`, etc.)
+- Adds security headers and gzip compression
+- Supports custom `404.html` pages
+- Caches static assets (configurable)
+- Supports SPA routing (configurable)
+- Optional CORS headers
+
+```bash
+# Basic static site
+srv add ./dist --domain example.com
+
+# Disable SPA mode (return 404 instead of falling back to index.html)
+srv add ./docs --domain docs.example.com --spa=false
+
+# Disable caching (for development)
+srv add ./site --domain dev.test --local --cache=false
+
+# Enable CORS (for API/assets accessed from other domains)
+srv add ./assets --domain cdn.example.com --cors
+```
+
+The generated `nginx.conf` can be customized if needed.
+
+### Docker-Compose Sites
+
+For directories with a `docker-compose.yml`, srv:
+
+- Creates a `docker-compose.site.yml` with Traefik labels
+- Adds it as an include to your main compose file
+- If multiple services exist, prompts you to select which one to route traffic to
+
 ## Commands
 
 ```
 srv init              Initialize srv
-srv add PATH          Add a site with docker-compose
-srv link [NAME]       Link directory as static site
+srv add PATH          Add a site (static or docker-compose)
 srv remove SITE       Remove a site
 srv start SITE        Start a site
 srv stop SITE         Stop a site
 srv restart SITE      Restart a site
 srv list              List sites
+srv info [SITE]       Show site details
 srv logs SITE         View site logs
 srv open [SITE]       Open site in browser
 srv status            Show status
 srv doctor            Check for issues
 ```
+
+### Flags for `srv add`
+
+| Flag | Description |
+|------|-------------|
+| `--domain`, `-d` | Domain name (required) |
+| `--local`, `-l` | Use local SSL via mkcert (default: Let's Encrypt) |
+| `--start`, `-s` | Start the site after adding |
+| `--name`, `-n` | Site name (default: directory name) |
+| `--port`, `-p` | Container port (default: 80) |
+| `--service` | Service name for multi-service docker-compose |
+| `--force`, `-f` | Overwrite existing configuration |
 
 ### DNS & SSL
 
@@ -72,8 +139,8 @@ srv dns               Show DNS status
 srv dns setup         Configure system DNS
 srv dns remove        Remove DNS configuration
 srv trust             Install local CA
-srv secure [SITE]     Enable local SSL
-srv unsecure [SITE]   Use Let's Encrypt instead
+srv secure [SITE]     Enable local SSL for a site
+srv unsecure [SITE]   Switch to Let's Encrypt
 ```
 
 ### Proxying
@@ -81,7 +148,8 @@ srv unsecure [SITE]   Use Let's Encrypt instead
 Proxy non-Docker services:
 
 ```bash
-srv proxy add api http://127.0.0.1:3000
+srv proxy add api.test http://127.0.0.1:3000 --local
+srv proxy add api.example.com http://127.0.0.1:3000
 srv proxy list
 srv proxy remove api
 ```
@@ -97,11 +165,9 @@ srv share mysite --tool ngrok
 
 ## How It Works
 
-- **Local (`*.test`)** - Uses mkcert for trusted local SSL certificates
+- **Local (`--local`)** - Uses mkcert for trusted local SSL certificates
 - **Production** - Uses Let's Encrypt for automatic SSL certificates
 - **Traefik** - Routes requests to your containers based on domain
-
-For static directories, srv generates an nginx container. For directories with `docker-compose.yml`, srv adds Traefik labels to your existing services.
 
 ## Configuration
 

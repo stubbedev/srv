@@ -30,6 +30,10 @@ var addFlags struct {
 	start          bool
 	force          bool
 	skipValidation bool
+	// Static site options
+	spa   bool
+	cache bool
+	cors  bool
 }
 
 var addCmd = &cobra.Command{
@@ -64,6 +68,10 @@ func init() {
 	addCmd.Flags().BoolVarP(&addFlags.start, "start", "s", false, "Start the site after adding")
 	addCmd.Flags().BoolVarP(&addFlags.force, "force", "f", false, "Overwrite existing configuration")
 	addCmd.Flags().BoolVar(&addFlags.skipValidation, "skip-validation", false, "Skip compose file validation")
+	// Static site options
+	addCmd.Flags().BoolVar(&addFlags.spa, "spa", true, "Enable SPA mode (fallback to index.html)")
+	addCmd.Flags().BoolVar(&addFlags.cache, "cache", true, "Enable caching headers for static assets")
+	addCmd.Flags().BoolVar(&addFlags.cors, "cors", false, "Enable CORS headers (allow all origins)")
 	RootCmd.AddCommand(addCmd)
 }
 
@@ -112,6 +120,10 @@ type siteSetup struct {
 	port        string
 	isLocal     bool
 	isStatic    bool // true if serving static files (no docker-compose.yml)
+	// Static site options
+	spa   bool
+	cache bool
+	cors  bool
 }
 
 // validateSiteSetup validates the path and discovers compose file
@@ -171,6 +183,11 @@ func promptForMissingConfig(setup *siteSetup) error {
 
 	// Determine if local - require --local flag explicitly, don't auto-detect from domain
 	setup.isLocal = addFlags.local
+
+	// Static site options
+	setup.spa = addFlags.spa
+	setup.cache = addFlags.cache
+	setup.cors = addFlags.cors
 
 	return nil
 }
@@ -277,7 +294,12 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 
 	if setup.isStatic {
 		// Static site: generate docker-compose.yml with nginx
-		if err := site.WriteStaticSiteCompose(setup.sitePath, setup.siteName, setup.domain, cfg.NetworkName, setup.isLocal); err != nil {
+		opts := site.StaticSiteOptions{
+			SPA:   setup.spa,
+			Cache: setup.cache,
+			CORS:  setup.cors,
+		}
+		if err := site.WriteStaticSiteCompose(setup.sitePath, setup.siteName, setup.domain, cfg.NetworkName, setup.isLocal, opts); err != nil {
 			return fmt.Errorf("failed to write docker-compose.yml for static site: %w", err)
 		}
 	} else {
