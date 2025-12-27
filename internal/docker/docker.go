@@ -26,8 +26,8 @@ const (
 
 // Container name constants.
 const (
-	ContainerTraefik = "traefik"
-	ContainerDNS     = "srv-dns"
+	ContainerTraefik = "srv_proxy"
+	ContainerDNS     = "srv_dns"
 )
 
 // EnsureRunning checks that Docker is available and running.
