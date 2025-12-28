@@ -1,0 +1,16 @@
+# Build artifacts
+srv
+main
+deploy
+*.exe
+
+# Editor files
+*.swp
+*~
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+
+result/

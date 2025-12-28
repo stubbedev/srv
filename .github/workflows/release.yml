@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}"
+
+          # Create output directory
+          mkdir -p dist
+
+          # Build matrix: OS/ARCH combinations
+          platforms=(
+            "linux/amd64"
+            "linux/arm64"
+            "linux/arm/7"
+            "linux/386"
+            "darwin/amd64"
+            "darwin/arm64"
+            "freebsd/amd64"
+            "freebsd/arm64"
+          )
+
+          for platform in "${platforms[@]}"; do
+            IFS='/' read -r GOOS GOARCH GOARM <<< "$platform"
+
+            output_name="srv-${GOOS}-${GOARCH}"
+            if [ -n "$GOARM" ]; then
+              output_name="srv-${GOOS}-${GOARCH}v${GOARM}"
+            fi
+            if [ "$GOOS" = "windows" ]; then
+              output_name="${output_name}.exe"
+            fi
+
+            echo "Building ${output_name}..."
+
+            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOARM="$GOARM" \
+              go build -ldflags "$LDFLAGS" -trimpath -o "dist/${output_name}" .
+          done
+
+          # Create checksums
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
