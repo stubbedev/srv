@@ -62,7 +62,6 @@ srv add /var/www/myapp --domain example.com
 | `srv list` | List all registered sites |
 | `srv info SITE` | Show detailed site information |
 | `srv logs SITE` | View site container logs |
-| `srv open SITE` | Open site in browser |
 | `srv share SITE` | Share site via tunnel (cloudflared/ngrok) |
 
 ### Proxy Management
@@ -74,6 +73,18 @@ srv add /var/www/myapp --domain example.com
 | `srv proxy list` | List all proxies |
 | `srv proxy share NAME` | Share a proxy via tunnel |
 
+### Daemon Management
+
+| Command | Description |
+|---------|-------------|
+| `srv daemon start` | Start the srv daemon |
+| `srv daemon stop` | Stop the srv daemon |
+| `srv daemon restart` | Restart the srv daemon |
+| `srv daemon status` | Show daemon status |
+| `srv daemon logs` | Show daemon logs |
+| `srv daemon install` | Install daemon as a system service |
+| `srv daemon uninstall` | Uninstall daemon system service |
+
 ### System Commands
 
 | Command | Description |
@@ -83,6 +94,8 @@ srv add /var/www/myapp --domain example.com
 | `srv update` | Update Traefik and DNS images |
 | `srv paths` | Show configuration paths |
 | `srv version` | Show version information |
+| `srv uninstall` | Completely remove srv from the system |
+| `srv completion` | Generate shell autocompletion script |
 
 ## Command Reference
 
@@ -243,6 +256,60 @@ Run diagnostic checks to identify common issues.
 - Traefik container status
 - DNS server status
 - Local SSL certificates (mkcert)
+
+### `srv daemon`
+
+The srv daemon watches for Docker container start events and automatically connects registered site containers to the srv network. This ensures containers are properly connected even when started outside of srv (e.g., via `docker compose up` directly).
+
+```bash
+srv daemon start      # Start the daemon
+srv daemon stop       # Stop the daemon
+srv daemon status     # Check daemon status
+srv daemon logs       # View daemon logs
+srv daemon install    # Install as system service (starts on boot)
+srv daemon uninstall  # Remove system service
+```
+
+### `srv uninstall`
+
+Completely remove srv and all its components from the system.
+
+```bash
+srv uninstall [flags]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--force` | `-f` | Skip confirmation prompt |
+
+**This will:**
+1. Stop and remove the Traefik container
+2. Stop and remove the DNS container
+3. Remove system DNS configuration
+4. Remove the daemon service
+5. Remove the Docker network
+6. Remove the config directory (`~/.config/srv`)
+7. Remove the srv binary
+
+**Note:** Site directories and their contents are NOT removed.
+
+### `srv completion`
+
+Generate shell autocompletion scripts.
+
+```bash
+# Bash
+source <(srv completion bash)
+
+# Zsh
+source <(srv completion zsh)
+
+# Fish
+srv completion fish | source
+
+# PowerShell
+srv completion powershell | Out-String | Invoke-Expression
+```
 
 ## Site Types
 
