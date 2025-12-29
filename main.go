@@ -27,17 +27,22 @@ func restoreCursor() {
 }
 
 func main() {
-	// Ensure cursor is always restored on exit
-	defer restoreCursor()
+	// Skip cursor handling during shell completion to avoid polluting output
+	isCompletion := len(os.Args) > 1 && os.Args[1] == "__complete"
 
-	// Also restore cursor on signals (Ctrl+C, termination, etc.)
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		<-sigChan
-		restoreCursor()
-		os.Exit(constants.ExitCodeError)
-	}()
+	if !isCompletion {
+		// Ensure cursor is always restored on exit
+		defer restoreCursor()
+
+		// Also restore cursor on signals (Ctrl+C, termination, etc.)
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+		go func() {
+			<-sigChan
+			restoreCursor()
+			os.Exit(constants.ExitCodeError)
+		}()
+	}
 
 	// Pass version info to cmd package
 	cmd.SetVersion(Version, Commit, BuildDate)
