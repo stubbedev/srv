@@ -299,7 +299,7 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 
 	// Register domain for local DNS
 	if err := traefik.RegisterLocalDomain(input.domain); err != nil {
-		ui.Warn("Warning: Failed to register DNS for %s: %v", input.domain, err)
+		ui.Warn("Failed to register DNS for %s: %v", input.domain, err)
 	}
 
 	// Connect container if needed and get target URL
@@ -315,7 +315,7 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 
 	// Update Traefik dynamic config
 	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Warning: Failed to update Traefik config: %v", err)
+		ui.Warn("Failed to update Traefik config: %v", err)
 	}
 
 	ui.Success("Proxy '%s' created", input.name)
@@ -352,16 +352,16 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 		// Use "_proxy-{name}" as the site name for cert storage
 		proxySiteName := "_proxy-" + name
 		if err := traefik.RemoveLocalCerts(proxySiteName, proxyInfo.Domain); err != nil {
-			ui.Warn("Warning: Failed to remove certificate: %v", err)
+			ui.Warn("Failed to remove certificate: %v", err)
 		}
 		if err := traefik.UnregisterLocalDomain(proxyInfo.Domain); err != nil {
-			ui.Warn("Warning: Failed to unregister DNS for %s: %v", proxyInfo.Domain, err)
+			ui.Warn("Failed to unregister DNS for %s: %v", proxyInfo.Domain, err)
 		}
 	}
 
 	// Update Traefik dynamic config
 	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Warning: Failed to update Traefik config: %v", err)
+		ui.Warn("Failed to update Traefik config: %v", err)
 	}
 
 	ui.Success("Proxy '%s' removed", name)

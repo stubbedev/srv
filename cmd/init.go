@@ -8,6 +8,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/firewall"
 	"github.com/stubbedev/srv/internal/site"
@@ -26,7 +27,8 @@ var initCmd = &cobra.Command{
   1. Creates the Docker network
   2. Generates Traefik configuration
   3. Starts Traefik container
-  4. Starts all registered sites
+  4. Installs the daemon service
+  5. Starts all registered sites
 
 Use --fresh to remove all existing configuration and start fresh.`,
 	RunE: runInit,
@@ -76,6 +78,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if len(sites) > 0 {
 		totalSteps++
 	}
+	// Add step for daemon installation
+	needDaemon := !daemon.IsInstalled()
+	if needDaemon {
+		totalSteps++
+	}
 	steps := ui.NewSteps(totalSteps)
 
 	// Step: Configure firewall if needed
@@ -98,7 +105,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 		if openPorts {
 			if err := firewall.OpenPorts(); err != nil {
-				ui.Warn("Warning: Failed to configure firewall: %v", err)
+				ui.Warn("Failed to configure firewall: %v", err)
 				ui.Dim("You may need to manually open ports 80 and 443")
 			} else {
 				steps.Done("Firewall configured")
@@ -140,7 +147,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	steps.Done("Traefik started")
 
-	// Step 4: Start all sites (if any)
+	// Step 4: Install daemon service
+	if needDaemon {
+		steps.Next("Installing daemon service")
+		if err := daemon.Install(); err != nil {
+			ui.Warn("Failed to install daemon service: %v", err)
+			ui.Dim("Run 'srv daemon install' to try again later")
+			steps.Skip("Daemon installation skipped")
+		} else {
+			steps.Done("Daemon service installed")
+		}
+	}
+
+	// Step 5: Start all sites (if any)
 	if len(sites) > 0 {
 		steps.Next("Starting %d site(s)", len(sites))
 		startSites(sites)

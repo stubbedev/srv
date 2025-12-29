@@ -459,7 +459,7 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 // generateLocalCert generates SSL certificate for local domains and registers DNS
 func generateLocalCert(siteName, domain string) {
 	if err := traefik.CheckMkcert(); err != nil {
-		ui.Warn("Warning: %v", err)
+		ui.Warn("%v", err)
 		ui.Dim("Local HTTPS will not work without mkcert")
 		return
 	}
@@ -468,7 +468,7 @@ func generateLocalCert(siteName, domain string) {
 	if !traefik.IsCAInstalled() {
 		ui.Dim("Installing mkcert CA...")
 		if err := traefik.InstallCA(); err != nil {
-			ui.Warn("Warning: Failed to install mkcert CA: %v", err)
+			ui.Warn("Failed to install mkcert CA: %v", err)
 			ui.Dim("Local HTTPS may not work in browsers")
 		} else {
 			ui.Success("mkcert CA installed")
@@ -478,20 +478,20 @@ func generateLocalCert(siteName, domain string) {
 
 	renewed, err := traefik.EnsureLocalCert(siteName, domain)
 	if err != nil {
-		ui.Warn("Warning: Failed to generate certificate: %v", err)
+		ui.Warn("Failed to generate certificate: %v", err)
 		return
 	}
 
 	if renewed {
 		ui.Dim("Generated SSL certificate for %s", domain)
 		if err := traefik.UpdateDynamicConfig(); err != nil {
-			ui.Warn("Warning: Failed to update Traefik config: %v", err)
+			ui.Warn("Failed to update Traefik config: %v", err)
 		}
 	}
 
 	// Register domain for local DNS
 	if err := traefik.RegisterLocalDomain(domain); err != nil {
-		ui.Warn("Warning: Failed to register DNS for %s: %v", domain, err)
+		ui.Warn("Failed to register DNS for %s: %v", domain, err)
 	}
 }
 
@@ -506,12 +506,12 @@ func renewLocalCertIfNeeded(siteName, domain string) {
 		}
 
 		if err := traefik.GenerateLocalCert(siteName, domain); err != nil {
-			ui.Warn("Warning: Failed to renew certificate: %v", err)
+			ui.Warn("Failed to renew certificate: %v", err)
 			return
 		}
 
 		if err := traefik.UpdateDynamicConfig(); err != nil {
-			ui.Warn("Warning: Failed to update Traefik config: %v", err)
+			ui.Warn("Failed to update Traefik config: %v", err)
 		}
 	}
 }
@@ -546,7 +546,7 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", setup.composeServiceName)
 				ui.Dim("Network connection will happen when you start with your profile")
 			} else {
-				ui.Warn("Warning: Could not connect to traefik network: %v", err)
+				ui.Warn("Could not connect to traefik network: %v", err)
 				ui.Dim("Run manually: docker network connect %s <container_name>", cfg.NetworkName)
 			}
 		}
@@ -601,13 +601,13 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		ui.Info("Stopping containers...")
 		// Use ComposeDir for docker operations
 		if err := docker.ComposeDown(s.ComposeDir); err != nil {
-			ui.Warn("Warning: Failed to stop containers: %v", err)
+			ui.Warn("Failed to stop containers: %v", err)
 		}
 
 		// Remove Traefik file provider config for compose sites
 		if s.Type == site.SiteTypeCompose {
 			if err := traefik.RemoveSiteRouteConfig(cfg, siteName); err != nil {
-				ui.Warn("Warning: Could not remove traefik config: %v", err)
+				ui.Warn("Could not remove traefik config: %v", err)
 			} else {
 				ui.Dim("Removed traefik config for %s", siteName)
 			}
@@ -617,15 +617,15 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	// Remove SSL certificate and DNS for local domains
 	if s.IsLocal && s.Domain != "" {
 		if err := traefik.RemoveLocalCerts(siteName, s.Domain); err != nil {
-			ui.Warn("Warning: Failed to remove certificate: %v", err)
+			ui.Warn("Failed to remove certificate: %v", err)
 		}
 		// Update Traefik dynamic config
 		if err := traefik.UpdateDynamicConfig(); err != nil {
-			ui.Warn("Warning: Failed to update Traefik config: %v", err)
+			ui.Warn("Failed to update Traefik config: %v", err)
 		}
 		// Unregister domain from local DNS
 		if err := traefik.UnregisterLocalDomain(s.Domain); err != nil {
-			ui.Warn("Warning: Failed to unregister DNS for %s: %v", s.Domain, err)
+			ui.Warn("Failed to unregister DNS for %s: %v", s.Domain, err)
 		}
 	}
 
@@ -931,7 +931,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			if errors.Is(err, docker.ErrServiceNotRunning) {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", s.ComposeServiceName)
 			} else {
-				ui.Warn("Warning: Could not connect to traefik network: %v", err)
+				ui.Warn("Could not connect to traefik network: %v", err)
 				ui.Dim("Run manually: docker network connect %s <container_name>", cfg.NetworkName)
 			}
 		}
