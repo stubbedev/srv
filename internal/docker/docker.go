@@ -238,13 +238,14 @@ func ConnectServiceToNetwork(dir, serviceName, networkName string) error {
 	// Connect to network with an alias matching the service name
 	// This allows routing via http://{serviceName}:{port}
 	connectCmd := exec.CommandContext(ctx, "docker", "network", "connect", "--alias", serviceName, networkName, containerID)
-	if err := connectCmd.Run(); err != nil {
-		// Check if already connected - try without alias
-		errStr := err.Error()
+	connectOutput, err := connectCmd.CombinedOutput()
+	if err != nil {
+		errStr := string(connectOutput)
+		// Already connected is not an error
 		if strings.Contains(errStr, constants.ErrAlreadyExists) || strings.Contains(errStr, constants.ErrEndpointExists) {
 			return nil
 		}
-		return fmt.Errorf("failed to connect to network: %w", err)
+		return fmt.Errorf("failed to connect to network: %s", strings.TrimSpace(errStr))
 	}
 
 	return nil
