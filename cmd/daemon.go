@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -43,7 +42,7 @@ var daemonStartFlags struct {
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the srv daemon",
-	Long: `Start the srv daemon in the background.
+	Long: `Start the srv daemon.
 
 The daemon watches Docker events and automatically connects containers
 from registered sites to the srv network when they start.
@@ -58,13 +57,8 @@ func init() {
 }
 
 func runDaemonStart(cmd *cobra.Command, args []string) error {
-	if daemon.IsRunning() {
-		ui.Warn("Daemon is already running (PID %d)", daemon.GetPid())
-		return nil
-	}
-
 	if daemonStartFlags.foreground {
-		// Run in foreground
+		// Run in foreground (used by systemd/launchd)
 		ui.Info("Starting daemon in foreground...")
 		d, err := daemon.New()
 		if err != nil {
@@ -73,41 +67,24 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return d.Run()
 	}
 
-	// Start as background process
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
+	// For non-foreground, we require the service to be installed
+	if !daemon.IsInstalled() {
+		ui.Warn("Daemon service is not installed")
+		ui.Dim("Run 'srv daemon install' to install the daemon service")
+		return nil
 	}
 
-	// Start a new process with the daemon start --foreground command
-	daemonCmd := exec.Command(executable, "daemon", "start", "--foreground")
-	daemonCmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // Create new session to detach from terminal
+	if daemon.IsRunning() {
+		ui.Warn("Daemon is already running")
+		return nil
 	}
 
-	// Redirect stdout/stderr to log file
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	logFile, err := os.OpenFile(daemon.LogPath(cfg), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
-	}
-
-	daemonCmd.Stdout = logFile
-	daemonCmd.Stderr = logFile
-
-	if err := daemonCmd.Start(); err != nil {
-		logFile.Close()
+	ui.Info("Starting daemon service...")
+	if err := daemon.Restart(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	logFile.Close()
-
-	ui.Success("Daemon started (PID %d)", daemonCmd.Process.Pid)
-	ui.Dim("Log file: %s", daemon.LogPath(cfg))
+	ui.Success("Daemon started")
 	return nil
 }
 
@@ -126,17 +103,22 @@ func init() {
 }
 
 func runDaemonStop(cmd *cobra.Command, args []string) error {
+	if !daemon.IsInstalled() {
+		ui.Dim("Daemon service is not installed")
+		return nil
+	}
+
 	if !daemon.IsRunning() {
 		ui.Dim("Daemon is not running")
 		return nil
 	}
 
-	pid := daemon.GetPid()
+	ui.Info("Stopping daemon...")
 	if err := daemon.Stop(); err != nil {
 		return err
 	}
 
-	ui.Success("Daemon stopped (was PID %d)", pid)
+	ui.Success("Daemon stopped")
 	return nil
 }
 
@@ -171,16 +153,15 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 
 	ui.Blank()
 
-	// Check if running (either via service or manually)
+	// Check if running via service manager
 	if daemon.IsRunning() {
-		ui.Success("Daemon is running (PID %d)", daemon.GetPid())
+		ui.Success("Daemon is running")
 	} else {
 		ui.Dim("Daemon is not running")
 	}
 
 	ui.Blank()
 	ui.Print("Log file: %s", daemon.LogPath(cfg))
-	ui.Print("PID file: %s", daemon.PidPath(cfg))
 
 	return nil
 }
@@ -309,11 +290,8 @@ func runDaemonUninstall(cmd *cobra.Command, args []string) error {
 var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart the daemon",
-	Long: `Restart the srv daemon.
-
-If installed as a system service, restarts the service.
-Otherwise, stops and starts the daemon manually.`,
-	RunE: runDaemonRestart,
+	Long:  `Restart the srv daemon service.`,
+	RunE:  runDaemonRestart,
 }
 
 func init() {
@@ -321,23 +299,16 @@ func init() {
 }
 
 func runDaemonRestart(cmd *cobra.Command, args []string) error {
-	if daemon.IsInstalled() {
-		ui.Info("Restarting daemon service...")
-		if err := daemon.Restart(); err != nil {
-			return fmt.Errorf("failed to restart daemon service: %w", err)
-		}
-		ui.Success("Daemon service restarted")
+	if !daemon.IsInstalled() {
+		ui.Warn("Daemon service is not installed")
+		ui.Dim("Run 'srv daemon install' to install the daemon service")
 		return nil
 	}
 
-	// Manual restart
-	if daemon.IsRunning() {
-		ui.Info("Stopping daemon...")
-		if err := daemon.Stop(); err != nil {
-			return err
-		}
+	ui.Info("Restarting daemon service...")
+	if err := daemon.Restart(); err != nil {
+		return fmt.Errorf("failed to restart daemon service: %w", err)
 	}
-
-	ui.Info("Starting daemon...")
-	return runDaemonStart(cmd, args)
+	ui.Success("Daemon service restarted")
+	return nil
 }

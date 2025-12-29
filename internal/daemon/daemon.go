@@ -21,9 +21,6 @@ import (
 	"github.com/stubbedev/srv/internal/site"
 )
 
-// PidFile is the name of the daemon PID file.
-const PidFile = "daemon.pid"
-
 // LogFile is the name of the daemon log file.
 const LogFile = "daemon.log"
 
@@ -67,89 +64,26 @@ func New() (*Daemon, error) {
 	}, nil
 }
 
-// PidPath returns the path to the PID file.
-func PidPath(cfg *config.Config) string {
-	return filepath.Join(cfg.Root, PidFile)
-}
-
 // LogPath returns the path to the log file.
 func LogPath(cfg *config.Config) string {
 	return filepath.Join(cfg.Root, LogFile)
 }
 
-// IsRunning checks if the daemon is currently running.
+// IsRunning checks if the daemon is currently running via the service manager.
 func IsRunning() bool {
-	cfg, err := config.Load()
+	status, err := ServiceStatus()
 	if err != nil {
 		return false
 	}
-
-	pidPath := PidPath(cfg)
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return false
-	}
-
-	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
-		return false
-	}
-
-	// Check if process exists
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix, FindProcess always succeeds. Send signal 0 to check if process exists.
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
+	return status == "active" || status == "running"
 }
 
-// GetPid returns the PID of the running daemon, or 0 if not running.
-func GetPid() int {
-	cfg, err := config.Load()
-	if err != nil {
-		return 0
-	}
-
-	pidPath := PidPath(cfg)
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return 0
-	}
-
-	var pid int
-	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
-		return 0
-	}
-
-	return pid
-}
-
-// Stop stops the running daemon.
+// Stop stops the running daemon via the service manager.
 func Stop() error {
-	pid := GetPid()
-	if pid == 0 {
-		return fmt.Errorf("daemon is not running")
+	if !IsInstalled() {
+		return fmt.Errorf("daemon service is not installed")
 	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("failed to find process: %w", err)
-	}
-
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("failed to stop daemon: %w", err)
-	}
-
-	// Clean up PID file
-	cfg, _ := config.Load()
-	if cfg != nil {
-		os.Remove(PidPath(cfg))
-	}
-
-	return nil
+	return stopService()
 }
 
 // Run starts the daemon and blocks until stopped.
@@ -162,13 +96,6 @@ func (d *Daemon) Run() error {
 		}
 		return fmt.Errorf("docker is not installed, daemon service uninstalled")
 	}
-
-	// Write PID file
-	pidPath := PidPath(d.cfg)
-	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), constants.FilePermDefault); err != nil {
-		return fmt.Errorf("failed to write PID file: %w", err)
-	}
-	defer os.Remove(pidPath)
 
 	// Open log file
 	logPath := LogPath(d.cfg)

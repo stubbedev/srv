@@ -73,6 +73,22 @@ func Restart() error {
 	}
 }
 
+// stopService stops the daemon service without uninstalling it.
+func stopService() error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("systemctl", "--user", "stop", SystemdServiceName).Run()
+	case "darwin":
+		plistPath, err := launchdPlistPath()
+		if err != nil {
+			return err
+		}
+		return exec.Command("launchctl", "unload", plistPath).Run()
+	default:
+		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+}
+
 // =============================================================================
 // Systemd (Linux)
 // =============================================================================
