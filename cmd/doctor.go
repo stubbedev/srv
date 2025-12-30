@@ -195,16 +195,17 @@ func checkDNS() int {
 	if traefik.IsDNSRunning() {
 		ui.IndentedSuccess(1, "Container is running")
 
-		if traefik.CheckDNS() {
-			ui.IndentedSuccess(1, "Responding to queries")
-		} else {
-			ui.IndentedWarn(1, "Not responding to queries")
-			issues++
-		}
-
-		// Only check system DNS if there are local domains that need it
+		// Only check DNS resolution if there are local domains to test against
 		if hasLocalDomains {
-			if traefik.CheckSystemDNS() {
+			testDomain := localDomains[0]
+			if traefik.CheckDNS(testDomain) {
+				ui.IndentedSuccess(1, "Responding to queries")
+			} else {
+				ui.IndentedWarn(1, "Not responding to queries")
+				issues++
+			}
+
+			if traefik.CheckSystemDNS(testDomain) {
 				ui.IndentedSuccess(1, "System DNS configured")
 			} else {
 				ui.IndentedWarn(1, "System DNS not configured")

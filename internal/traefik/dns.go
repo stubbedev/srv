@@ -48,18 +48,18 @@ func DetectResolver() DNSResolverType {
 	return ResolverUnknown
 }
 
-// CheckDNS tests if local DNS resolution is working for .test domains.
-func CheckDNS() bool {
-	output, err := shell.Dig("+short", "@"+constants.LocalhostIP, constants.DNSTestDomain)
+// CheckDNS tests if the local DNS server resolves the given domain to localhost.
+func CheckDNS(domain string) bool {
+	output, err := shell.Dig("+short", "@"+constants.LocalhostIP, domain)
 	if err != nil {
 		return false
 	}
 	return output == constants.LocalhostIP
 }
 
-// CheckSystemDNS tests if the system resolves .test domains correctly.
-func CheckSystemDNS() bool {
-	output, err := shell.Dig("+short", constants.DNSTestDomain)
+// CheckSystemDNS tests if the system resolves the given domain to localhost.
+func CheckSystemDNS(domain string) bool {
+	output, err := shell.Dig("+short", domain)
 	if err != nil {
 		return false
 	}
@@ -318,7 +318,7 @@ func RegisterLocalDomain(domain string) error {
 	}
 
 	// Automatically set up system DNS when adding the first local domain
-	if isFirstDomain && !CheckSystemDNS() {
+	if isFirstDomain && !CheckSystemDNS(domain) {
 		if err := SetupDNS(); err != nil {
 			// Non-fatal: log warning but don't fail the operation
 			return fmt.Errorf("DNS registered but system DNS setup failed: %w", err)
