@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/stubbedev/srv/master/install.sh | s
 
 Download the binary for your platform from [releases](https://github.com/stubbedev/srv/releases/latest).
 
-**Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (amd64, arm64), FreeBSD
+**Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (amd64, arm64)
 
 **Requirements:** Docker
 

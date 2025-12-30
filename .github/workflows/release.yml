@@ -45,8 +45,6 @@ jobs:
             "linux/386"
             "darwin/amd64"
             "darwin/arm64"
-            "freebsd/amd64"
-            "freebsd/arm64"
           )
 
           for platform in "${platforms[@]}"; do
