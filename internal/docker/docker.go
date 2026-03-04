@@ -4,23 +4,27 @@ package docker
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
+	dockerclient "github.com/docker/docker/client"
+
 	"github.com/stubbedev/srv/internal/constants"
 )
 
-// Timeout constants for Docker commands.
-// These values balance responsiveness with allowing time for slower operations.
+// Timeout constants for Docker operations.
 const (
-	// InfoTimeout is for quick checks like "docker info" to verify Docker is running.
+	// InfoTimeout is for quick daemon-availability checks.
 	InfoTimeout = 10 * time.Second
-	// StatusTimeout is for status checks like inspecting containers or networks.
+	// StatusTimeout is for status/inspect operations.
 	StatusTimeout = 30 * time.Second
-	// ComposeTimeout is for compose operations which can take several minutes
-	// especially when pulling images or building containers.
+	// ComposeTimeout is for compose operations (image pulls, builds, etc.).
 	ComposeTimeout = 5 * time.Minute
 )
 
@@ -40,13 +44,24 @@ const (
 	ContainerDNS = "srv_dns"
 )
 
+// newClient returns a Docker client using the environment-configured socket.
+// The caller is responsible for closing it.
+func newClient() (*dockerclient.Client, error) {
+	return dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+}
+
 // EnsureRunning checks that Docker is available and running.
 func EnsureRunning() error {
 	ctx, cancel := context.WithTimeout(context.Background(), InfoTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "info")
-	if err := cmd.Run(); err != nil {
+	cli, err := newClient()
+	if err != nil {
+		return fmt.Errorf("Docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
+	}
+	defer cli.Close()
+
+	if _, err := cli.Ping(ctx); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("Docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
 		}
@@ -55,22 +70,44 @@ func EnsureRunning() error {
 	return nil
 }
 
-// NetworkExists checks if a docker network exists.
+// NetworkExists checks if a Docker network with the given name exists.
 func NetworkExists(name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "network", "inspect", name)
-	return cmd.Run() == nil
+	cli, err := newClient()
+	if err != nil {
+		return false
+	}
+	defer cli.Close()
+
+	f := filters.NewArgs(filters.Arg("name", name))
+	networks, err := cli.NetworkList(ctx, network.ListOptions{Filters: f})
+	if err != nil {
+		return false
+	}
+	// NetworkList with a name filter does prefix matching; check for exact match.
+	for _, n := range networks {
+		if n.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
-// CreateNetwork creates a docker network.
+// CreateNetwork creates a Docker bridge network with the given name.
 func CreateNetwork(name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "network", "create", name)
-	if err := cmd.Run(); err != nil {
+	cli, err := newClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer cli.Close()
+
+	_, err = cli.NetworkCreate(ctx, name, network.CreateOptions{Driver: "bridge"})
+	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("docker network create timed out")
 		}
@@ -80,13 +117,12 @@ func CreateNetwork(name string) error {
 }
 
 // ComposeUp runs docker compose up -d in the specified directory.
-// Uses --remove-orphans to clean up stale containers that may reference non-existent networks.
+// Uses --remove-orphans to clean up stale containers.
 func ComposeUp(dir string) error {
 	return Compose(dir, "up", "-d", "--remove-orphans")
 }
 
 // ComposeUpWithProfile runs docker compose up -d with a specific profile.
-// Uses --remove-orphans to clean up stale containers that may reference non-existent networks.
 func ComposeUpWithProfile(dir, profile string) error {
 	if profile == "" {
 		return ComposeUp(dir)
@@ -109,8 +145,10 @@ func ComposeRestart(dir string) error {
 	return Compose(dir, "restart")
 }
 
-// Compose runs docker compose with given arguments in specified directory.
+// Compose runs docker compose with given arguments in the specified directory.
 // Output is attached to stdout/stderr for interactive use.
+// docker compose is intentionally kept as a shell-out: the Docker SDK has no
+// compose support; compose-go can parse manifests but cannot orchestrate them.
 func Compose(dir string, args ...string) error {
 	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
 	cmd.Dir = dir
@@ -120,14 +158,12 @@ func Compose(dir string, args ...string) error {
 }
 
 // ComposeQuiet runs docker compose without stdout/stderr (for parallel execution).
-// Has a timeout to prevent hanging indefinitely.
 func ComposeQuiet(dir string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ComposeTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, args...)...)
 	cmd.Dir = dir
-	// Explicitly disconnect stdin to prevent any interactive prompts
 	cmd.Stdin = nil
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -141,11 +177,10 @@ func ComposeQuietWithProfile(dir, profile string, args ...string) error {
 	if profile == "" {
 		return ComposeQuiet(dir, args...)
 	}
-	profileArgs := append([]string{"--profile", profile}, args...)
-	return ComposeQuiet(dir, profileArgs...)
+	return ComposeQuiet(dir, append([]string{"--profile", profile}, args...)...)
 }
 
-// ContainerStatus returns the status of containers in a directory.
+// ContainerStatus returns the status of containers in a compose project directory.
 // Returns "running", "stopped", or "partial (n/m)".
 func ContainerStatus(dir string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
@@ -182,47 +217,58 @@ func ContainerStatus(dir string) string {
 	}
 }
 
-// Run executes a docker command with the given arguments.
-// Output is attached to stdout/stderr for interactive use.
-func Run(args ...string) error {
-	cmd := exec.Command("docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// RunQuiet executes a docker command without attaching stdout/stderr.
-// Returns the output and any error.
-func RunQuiet(args ...string) ([]byte, error) {
-	return exec.Command("docker", args...).Output()
-}
-
-// IsContainerRunning checks if a container with the given name is running.
+// IsContainerRunning checks if a container with the given name is currently running.
 func IsContainerRunning(name string) bool {
-	output, err := RunQuiet("inspect", "-f", constants.InspectRunningFormat, name)
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+
+	cli, err := newClient()
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == constants.TrueString
+	defer cli.Close()
+
+	info, err := cli.ContainerInspect(ctx, name)
+	if err != nil {
+		return false
+	}
+	return info.State != nil && info.State.Running
 }
 
-// Pull pulls a docker image.
-func Pull(image string) error {
-	return Run("pull", image)
+// Pull pulls a Docker image, streaming progress to stdout.
+func Pull(imageName string) error {
+	cli, err := newClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer cli.Close()
+
+	// ImagePull returns a reader that must be consumed to drive the transfer.
+	// Copy it to stdout so the user sees progress, then discard cleanly.
+	// Use ComposeTimeout so a stalled daemon or network issue doesn't hang forever.
+	ctx, cancel := context.WithTimeout(context.Background(), ComposeTimeout)
+	defer cancel()
+	reader, err := cli.ImagePull(ctx, imageName, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
+	}
+	defer reader.Close()
+
+	_, err = io.Copy(os.Stdout, reader)
+	return err
 }
 
 // ErrServiceNotRunning indicates a compose service is not currently running.
 var ErrServiceNotRunning = fmt.Errorf("service not running")
 
-// ConnectServiceToNetwork connects a docker compose service's containers to a network.
-// It gets the container name(s) for the service and connects them to the specified network.
-// An alias is added so the service can be reached by a predictable name.
-// Returns ErrServiceNotRunning if the service container doesn't exist (e.g., uses profiles).
+// ConnectServiceToNetwork connects a docker compose service's container(s) to a
+// network with a named alias so Traefik can route to the service by name.
+// Returns ErrServiceNotRunning if the service container is not found.
 func ConnectServiceToNetwork(dir, serviceName, networkName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
-	// Get container ID for the service
+	// Resolve the container ID via compose ps — no SDK equivalent for compose.
 	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "-q", serviceName)
 	cmd.Dir = dir
 	output, err := cmd.Output()
@@ -235,20 +281,7 @@ func ConnectServiceToNetwork(dir, serviceName, networkName string) error {
 		return ErrServiceNotRunning
 	}
 
-	// Connect to network with an alias matching the service name
-	// This allows routing via http://{serviceName}:{port}
-	connectCmd := exec.CommandContext(ctx, "docker", "network", "connect", "--alias", serviceName, networkName, containerID)
-	connectOutput, err := connectCmd.CombinedOutput()
-	if err != nil {
-		errStr := string(connectOutput)
-		// Already connected is not an error
-		if strings.Contains(errStr, constants.ErrAlreadyExists) || strings.Contains(errStr, constants.ErrEndpointExists) {
-			return nil
-		}
-		return fmt.Errorf("failed to connect to network: %s", strings.TrimSpace(errStr))
-	}
-
-	return nil
+	return connectContainerByID(ctx, containerID, networkName, serviceName)
 }
 
 // ContainerExists checks if a container with the given name exists (running or stopped).
@@ -256,50 +289,83 @@ func ContainerExists(name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "inspect", name)
-	return cmd.Run() == nil
+	cli, err := newClient()
+	if err != nil {
+		return false
+	}
+	defer cli.Close()
+
+	_, err = cli.ContainerInspect(ctx, name)
+	return err == nil
 }
 
-// GetContainerImageVersion returns the image version/tag for a running container.
-// Returns an empty string if the container is not running or image info cannot be retrieved.
+// GetContainerImageVersion returns the image tag for a running container.
+// Returns an empty string if the container is not found or the image has no tag.
 func GetContainerImageVersion(containerName string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.Config.Image}}", containerName)
-	output, err := cmd.Output()
+	cli, err := newClient()
+	if err != nil {
+		return ""
+	}
+	defer cli.Close()
+
+	info, err := cli.ContainerInspect(ctx, containerName)
 	if err != nil {
 		return ""
 	}
 
-	image := strings.TrimSpace(string(output))
-	// Extract version from image name (e.g., "traefik:v3.0" -> "v3.0", "traefik:latest" -> "latest")
+	image := info.Config.Image
 	if idx := strings.LastIndex(image, ":"); idx != -1 {
 		return image[idx+1:]
 	}
-	return "latest" // Default if no tag specified
+	return "latest"
 }
 
-// ConnectContainerToNetwork connects an existing container to a network with an optional alias.
+// RemoveNetwork removes a Docker network by name.
+func RemoveNetwork(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+
+	cli, err := newClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer cli.Close()
+
+	return cli.NetworkRemove(ctx, name)
+}
+
+// ConnectContainerToNetwork connects an existing container to a network with an
+// optional alias.
 func ConnectContainerToNetwork(containerName, networkName, alias string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
-	args := []string{"network", "connect"}
-	if alias != "" {
-		args = append(args, "--alias", alias)
-	}
-	args = append(args, networkName, containerName)
+	return connectContainerByID(ctx, containerName, networkName, alias)
+}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.CombinedOutput()
+// connectContainerByID is the shared implementation for network connect calls.
+func connectContainerByID(ctx context.Context, containerID, networkName, alias string) error {
+	cli, err := newClient()
 	if err != nil {
-		errStr := string(output)
-		// Already connected is not an error
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer cli.Close()
+
+	endpointCfg := &network.EndpointSettings{}
+	if alias != "" {
+		endpointCfg.Aliases = []string{alias}
+	}
+
+	err = cli.NetworkConnect(ctx, networkName, containerID, endpointCfg)
+	if err != nil {
+		errStr := err.Error()
 		if strings.Contains(errStr, constants.ErrAlreadyExists) || strings.Contains(errStr, constants.ErrEndpointExists) {
 			return nil
 		}
-		return fmt.Errorf("failed to connect container to network: %s", errStr)
+		return fmt.Errorf("failed to connect container to network: %w", err)
 	}
 	return nil
 }

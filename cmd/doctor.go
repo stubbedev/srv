@@ -9,6 +9,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/firewall"
+	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -113,32 +114,39 @@ func checkPorts() int {
 	ui.Bold("Ports")
 
 	type portInfo struct {
-		port int
-		name string
+		port      int
+		name      string
+		ownedByFn func() bool
+		container string
 	}
 	ports := []portInfo{
-		{constants.PortHTTP, constants.PortNameHTTP},
-		{constants.PortHTTPS, constants.PortNameHTTPS},
-		{constants.PortDashboard, constants.PortNameDashboard},
-		{constants.PortDNS, constants.PortNameDNS},
+		{constants.PortHTTP, constants.PortNameHTTP, traefik.IsRunning, docker.ContainerTraefik},
+		{constants.PortHTTPS, constants.PortNameHTTPS, traefik.IsRunning, docker.ContainerTraefik},
+		{constants.PortDashboard, constants.PortNameDashboard, traefik.IsRunning, docker.ContainerTraefik},
+		{constants.PortDNS, constants.PortNameDNS, traefik.IsDNSRunning, docker.ContainerDNS},
 	}
 
 	for _, p := range ports {
 		if traefik.CheckPortAvailable(p.port) {
 			ui.IndentedDim(1, ":%d (%s) - available", p.port, p.name)
-		} else {
-			// Check if it's our container using it
-			if (p.port == constants.PortHTTP || p.port == constants.PortHTTPS || p.port == constants.PortDashboard) && traefik.IsRunning() {
-				version := docker.GetContainerImageVersion(docker.ContainerTraefik)
-				ui.IndentedSuccess(1, ":%d (%s) - in use by proxy [traefik:%s]", p.port, p.name, version)
-			} else if p.port == constants.PortDNS && traefik.IsDNSRunning() {
-				version := docker.GetContainerImageVersion(docker.ContainerDNS)
-				ui.IndentedSuccess(1, ":%d (%s) - in use by dns [dnsmasq:%s]", p.port, p.name, version)
-			} else {
-				ui.IndentedWarn(1, ":%d (%s) - in use by another process", p.port, p.name)
-				issues++
-			}
+			continue
 		}
+
+		if p.ownedByFn() {
+			version := docker.GetContainerImageVersion(p.container)
+			ui.IndentedSuccess(1, ":%d (%s) - in use by srv [%s:%s]", p.port, p.name, p.container, version)
+			continue
+		}
+
+		// Port is occupied by a foreign process — identify it.
+		conflict := traefik.PortConflict{Port: p.port, Name: p.name, Process: shell.IdentifyPortProcess(fmt.Sprintf("%d", p.port))}
+		if conflict.Process != "" {
+			ui.IndentedWarn(1, ":%d (%s) - in use by %s", p.port, p.name, conflict.Process)
+		} else {
+			ui.IndentedWarn(1, ":%d (%s) - in use by an unknown process", p.port, p.name)
+		}
+		ui.IndentedDim(2, "stop it with: %s", conflict.StopHint())
+		issues++
 	}
 
 	ui.Blank()

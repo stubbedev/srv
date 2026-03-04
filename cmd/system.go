@@ -67,7 +67,7 @@ Supported tools:
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("expected 1 argument, got %d", len(args))
 		}
 		return nil
 	},
@@ -124,6 +124,7 @@ func runShareCloudflared(url string) error {
 	cmd := exec.Command(constants.ToolCloudflared, "tunnel", "--url", url)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
 

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -152,7 +153,7 @@ func TestGenerateNetworkName(t *testing.T) {
 	}
 
 	// Should end with _traefik
-	if !contains(name, "_traefik") {
+	if !strings.Contains(name, "_traefik") {
 		t.Errorf("generateNetworkName() = %v, should contain '_traefik'", name)
 	}
 
@@ -161,19 +162,6 @@ func TestGenerateNetworkName(t *testing.T) {
 	if name != name2 {
 		t.Errorf("generateNetworkName() not consistent: %v != %v", name, name2)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s[len(s)-len(substr):] == substr || s[:len(substr)] == substr || containsMiddle(s, substr))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestLoadCreatesDirectory(t *testing.T) {

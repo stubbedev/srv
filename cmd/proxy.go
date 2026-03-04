@@ -48,7 +48,7 @@ Examples:
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if proxyAddFlags.domain == "" {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("required flag --domain not set")
 		}
 		return nil
 	},
@@ -62,7 +62,7 @@ var proxyRemoveCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("expected 1 argument, got %d", len(args))
 		}
 		return nil
 	},
@@ -90,7 +90,7 @@ Supported tools:
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("expected 1 argument, got %d", len(args))
 		}
 		return nil
 	},
@@ -572,22 +572,9 @@ type proxyConfigInfo struct {
 	Container string
 }
 
-// traefikRouteConfig represents the structure of a Traefik file provider config.
-// Used for parsing proxy and site route configs.
-type traefikRouteConfig struct {
-	HTTP struct {
-		Routers map[string]struct {
-			Rule string `yaml:"rule"`
-		} `yaml:"routers"`
-		Services map[string]struct {
-			LoadBalancer struct {
-				Servers []struct {
-					URL string `yaml:"url"`
-				} `yaml:"servers"`
-			} `yaml:"loadBalancer"`
-		} `yaml:"services"`
-	} `yaml:"http"`
-}
+// traefikRouteConfig is an alias for the shared type in the traefik package.
+// It exists here for backward compatibility within this file.
+type traefikRouteConfig = traefik.RouteConfig
 
 // extractContainerFromURL extracts the container name from a target URL.
 // Uses proper URL parsing instead of manual string manipulation.

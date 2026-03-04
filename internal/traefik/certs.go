@@ -185,9 +185,16 @@ func UpdateDynamicConfig() error {
 		}
 	}
 
+	// Write atomically so Traefik (which watches this file) never reads a
+	// partial/truncated config between the truncate and the final write.
 	dynamicPath := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
-	if err := os.WriteFile(dynamicPath, []byte(content.String()), constants.FilePermDefault); err != nil {
+	tmp := dynamicPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content.String()), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dynamic config: %w", err)
+	}
+	if err := os.Rename(tmp, dynamicPath); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("failed to replace dynamic config: %w", err)
 	}
 
 	return nil

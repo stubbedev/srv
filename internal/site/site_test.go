@@ -2,6 +2,7 @@
 package site
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,6 +46,11 @@ func TestSanitizeName(t *testing.T) {
 		{"UPPERCASE", "uppercase"},
 		{"already-valid", "already-valid"},
 		{"/home/user/projects/SomeApp", "someapp"},
+		// BUG-06: dots must become hyphens so the name passes ValidateSiteName
+		{"myapp.test", "myapp-test"},
+		{"v1.2.3", "v1-2-3"},
+		{"/home/user/myapp.test", "myapp-test"},
+		{"My App.Test", "my-app-test"},
 	}
 
 	for _, tt := range tests {
@@ -158,6 +164,33 @@ func TestFindComposeFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsNotFoundError(t *testing.T) {
+	t.Run("empty dir returns not-found error", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := FindComposeFile(dir)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !IsNotFoundError(err) {
+			t.Errorf("IsNotFoundError(%v) = false, want true", err)
+		}
+	})
+
+	t.Run("wrapped not-found error is detected", func(t *testing.T) {
+		wrapped := fmt.Errorf("outer: %w", &composeNotFoundError{dir: "/fake"})
+		if !IsNotFoundError(wrapped) {
+			t.Errorf("IsNotFoundError on wrapped error = false, want true")
+		}
+	})
+
+	t.Run("unrelated error is not a not-found error", func(t *testing.T) {
+		err := fmt.Errorf("some other error")
+		if IsNotFoundError(err) {
+			t.Errorf("IsNotFoundError on generic error = true, want false")
+		}
+	})
 }
 
 func TestParseComposeFile(t *testing.T) {

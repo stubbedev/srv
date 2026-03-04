@@ -2,9 +2,9 @@
 package config
 
 import (
-	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"sync"
@@ -34,13 +34,23 @@ var (
 )
 
 // Load returns the srv configuration, creating directories as needed.
-// The result is cached after the first call. This is thread-safe.
+// The result is cached after the first successful call. If the first call
+// fails, the cache is NOT populated so that the next call retries — this
+// prevents a transient startup error from locking the process out forever.
+// This is thread-safe.
 func Load() (*Config, error) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	configOnce.Do(func() {
 		cachedConfig, configErr = load()
 	})
+	if configErr != nil {
+		// Reset so the next call retries instead of returning the cached
+		// error for the lifetime of the process.
+		// Must be done outside Do() to avoid re-entrant mutex panic.
+		configOnce = sync.Once{}
+		cachedConfig = nil
+	}
 	return cachedConfig, configErr
 }
 
@@ -93,14 +103,17 @@ func getSrvRoot() (string, error) {
 }
 
 // generateNetworkName creates a unique network name based on hostname.
-// Format: {md5(hostname)[:12]}_traefik
+// Format: {fnv64(hostname)[:12]}_traefik
+// Uses hash/fnv (non-cryptographic) instead of crypto/md5 to avoid triggering
+// security linters in contexts where MD5 is prohibited.
 func generateNetworkName() string {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = constants.DefaultHostname
 	}
-	hash := md5.Sum([]byte(hostname))
-	return hex.EncodeToString(hash[:])[:constants.NetworkHashLength] + constants.NetworkSuffix
+	h := fnv.New64a()
+	h.Write([]byte(hostname))
+	return hex.EncodeToString(h.Sum(nil))[:constants.NetworkHashLength] + constants.NetworkSuffix
 }
 
 // EnvTraefikPath returns the path to the traefik environment file.

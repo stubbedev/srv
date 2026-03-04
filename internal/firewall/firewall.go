@@ -3,7 +3,6 @@ package firewall
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -63,7 +62,7 @@ func Name(fw FirewallType) string {
 
 // isUFWActive checks if UFW is active.
 func isUFWActive() bool {
-	output, err := exec.Command("ufw", "status").Output()
+	output, err := shell.RunQuiet("ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -72,7 +71,7 @@ func isUFWActive() bool {
 
 // isFirewalldActive checks if firewalld is running.
 func isFirewalldActive() bool {
-	output, err := exec.Command("firewall-cmd", "--state").Output()
+	output, err := shell.RunQuiet("firewall-cmd", "--state")
 	if err != nil {
 		return false
 	}
@@ -105,7 +104,7 @@ func CheckPorts() Status {
 
 // checkUFWPort checks if a port is allowed in UFW.
 func checkUFWPort(port string) bool {
-	output, err := exec.Command("ufw", "status").Output()
+	output, err := shell.RunQuiet("ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -141,7 +140,7 @@ func checkUFWPort(port string) bool {
 
 // checkFirewalldService checks if a service is allowed in firewalld.
 func checkFirewalldService(service string) bool {
-	output, err := exec.Command("firewall-cmd", "--list-services").Output()
+	output, err := shell.RunQuiet("firewall-cmd", "--list-services")
 	if err != nil {
 		return false
 	}
@@ -150,7 +149,7 @@ func checkFirewalldService(service string) bool {
 
 // checkIPTablesPort checks if a port is allowed in iptables.
 func checkIPTablesPort(port string) bool {
-	output, err := exec.Command("iptables", "-L", "INPUT", "-n").Output()
+	output, err := shell.RunQuiet("iptables", "-L", "INPUT", "-n")
 	if err != nil {
 		return false
 	}
@@ -239,10 +238,16 @@ func persistIPTablesRules() {
 		return
 	}
 
-	// Try saving to /etc/iptables/rules.v4 (Debian/Ubuntu)
+	// Try saving to /etc/iptables/rules.v4 (Debian/Ubuntu).
+	// Run iptables-save as root and pipe its output through sudo tee so both
+	// the read and the write are privileged. The previous sh -c redirect ran
+	// the > as the unprivileged user and silently failed.
 	if shell.Exists("iptables-save") {
 		// Best effort - rules are already applied, persistence is optional
-		_ = exec.Command("sh", "-c", "sudo iptables-save > /etc/iptables/rules.v4").Run() //nolint:errcheck
+		out, err := shell.RunQuiet("sudo", "iptables-save")
+		if err == nil {
+			_ = shell.RunWithStdin(string(out), "sudo", "tee", "/etc/iptables/rules.v4") //nolint:errcheck
+		}
 		return
 	}
 

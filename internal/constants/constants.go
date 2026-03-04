@@ -159,6 +159,10 @@ const (
 	EnvXDGConfigHome = "XDG_CONFIG_HOME"
 	// EnvACMEEmail is the environment variable prefix for ACME email.
 	EnvACMEEmail = "ACME_EMAIL"
+	// EnvDNSHTTPUser is the environment variable for the dnsmasq HTTP user.
+	EnvDNSHTTPUser = "DNS_HTTP_USER"
+	// EnvDNSHTTPPass is the environment variable for the dnsmasq HTTP password.
+	EnvDNSHTTPPass = "DNS_HTTP_PASS"
 )
 
 // =============================================================================

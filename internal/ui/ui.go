@@ -457,7 +457,10 @@ func PrintTable(headers []string, rows [][]string) {
 	}
 }
 
-// stripAnsi removes ANSI escape codes from a string for width calculation.
+// stripAnsi removes ANSI/VT100 escape sequences from a string so that
+// PrintTable can calculate accurate display widths.
+// It handles all CSI sequences (ESC [ ... <letter>) including SGR colour
+// codes (ESC[...m), cursor movement, and line-erase sequences.
 func stripAnsi(s string) string {
 	var result strings.Builder
 	inEscape := false
@@ -467,7 +470,8 @@ func stripAnsi(s string) string {
 			continue
 		}
 		if inEscape {
-			if r == 'm' {
+			// A CSI/OSC sequence ends on the first ASCII letter.
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
 				inEscape = false
 			}
 			continue

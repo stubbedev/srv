@@ -62,7 +62,7 @@ Examples:
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if addFlags.domain == "" {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("required flag --domain not set")
 		}
 		return nil
 	},
@@ -111,6 +111,14 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Remove existing metadata before writing new files so --force never
+	// clobbers the freshly-written config (the old code removed it after).
+	if addFlags.force && site.Exists(setup.siteName) {
+		if err := site.RemoveSiteMetadata(setup.siteName); err != nil {
+			return fmt.Errorf("failed to remove existing site: %w", err)
+		}
+	}
+
 	// Write site configuration files
 	if err := setupSiteFiles(cfg, setup); err != nil {
 		return err
@@ -154,13 +162,15 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		port:     addFlags.port,
 	}
 
-	// Try to find a compose file - if not found, treat as static site
+	// Try to find a compose file. A genuine "not found" means static site;
+	// any other I/O error (permission denied, etc.) is surfaced to the caller.
 	composePath, err := site.FindComposeFile(sitePath)
 	if err != nil {
-		// No docker-compose file found - treat as static site
-		if !addFlags.skipValidation {
-			setup.isStatic = true
+		if !site.IsNotFoundError(err) {
+			return nil, fmt.Errorf("could not check for docker-compose file: %w", err)
 		}
+		// No compose file present — serve as a static site.
+		setup.isStatic = true
 	} else {
 		setup.composePath = composePath
 	}
@@ -433,13 +443,6 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 		generateLocalCert(setup.siteName, setup.domain)
 	}
 
-	// Remove existing metadata if force
-	if addFlags.force && site.Exists(setup.siteName) {
-		if err := site.RemoveSiteMetadata(setup.siteName); err != nil {
-			return fmt.Errorf("failed to remove existing site: %w", err)
-		}
-	}
-
 	// Determine site type label
 	var siteType string
 	if setup.isStatic {
@@ -568,7 +571,7 @@ var removeCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("expected 1 argument, got %d", len(args))
 		}
 		return nil
 	},
@@ -586,7 +589,7 @@ func init() {
 func runRemove(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
 
-	s, err := site.Get(siteName)
+	s, err := site.GetByName(siteName)
 	if err != nil {
 		return err
 	}
@@ -763,7 +766,7 @@ var infoCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("expected 1 argument, got %d", len(args))
 		}
 		return nil
 	},
@@ -779,7 +782,7 @@ func init() {
 }
 
 func runInfo(cmd *cobra.Command, args []string) error {
-	s, err := site.Get(args[0])
+	s, err := site.GetByName(args[0])
 	if err != nil {
 		return err
 	}
@@ -876,7 +879,7 @@ Use --all to start all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 && !startFlags.all {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("provide a site name or use --all")
 		}
 		return nil
 	},
@@ -901,7 +904,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return startAllSites()
 	}
 
-	s, err := site.Get(args[0])
+	s, err := site.GetByName(args[0])
 	if err != nil {
 		return err
 	}
@@ -1007,7 +1010,7 @@ Use --all to stop all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 && !stopFlags.all {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("provide a site name or use --all")
 		}
 		return nil
 	},
@@ -1032,7 +1035,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 		return stopAllSites()
 	}
 
-	s, err := site.Get(args[0])
+	s, err := site.GetByName(args[0])
 	if err != nil {
 		return err
 	}
@@ -1087,7 +1090,7 @@ Use --all to restart all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 && !restartFlags.all {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("provide a site name or use --all")
 		}
 		return nil
 	},
@@ -1112,7 +1115,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		return restartAllSites()
 	}
 
-	s, err := site.Get(args[0])
+	s, err := site.GetByName(args[0])
 	if err != nil {
 		return err
 	}
@@ -1216,7 +1219,7 @@ var logsCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			cmd.Help()
-			os.Exit(1)
+			return fmt.Errorf("expected 1 argument, got %d", len(args))
 		}
 		return nil
 	},
@@ -1239,7 +1242,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	s, err := site.Get(args[0])
+	s, err := site.GetByName(args[0])
 	if err != nil {
 		return err
 	}

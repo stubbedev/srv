@@ -97,17 +97,6 @@ func MkcertQuiet(args ...string) ([]byte, error) {
 	return RunQuietWithContext(ctx, "mkcert", args...)
 }
 
-// Dig runs dig and returns the output.
-func Dig(args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-	defer cancel()
-	output, err := RunQuietWithContext(ctx, "dig", args...)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 // CheckPort checks if a port is in use.
 // Uses net.Listen for reliable cross-platform port checking.
 // Falls back to ss/netstat if net.Listen fails due to permissions.
@@ -170,4 +159,75 @@ func isPortInUseError(err error) bool {
 	errStr := err.Error()
 	return strings.Contains(errStr, "address already in use") ||
 		strings.Contains(errStr, "bind: address already in use")
+}
+
+// IdentifyPortProcess returns the name of the process listening on the given
+// port, or an empty string if it cannot be determined.
+// It tries ss(8) first (Linux), then lsof(8) (macOS/Linux fallback).
+func IdentifyPortProcess(port string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// ss -tlnp gives lines like:
+	//   LISTEN 0 128 0.0.0.0:80 ... users:(("nginx",pid=1234,fd=6))
+	if Exists("ss") {
+		out, err := RunQuietWithContext(ctx, "ss", "-tlnp")
+		if err == nil {
+			portSuffix := ":" + port
+			for _, line := range strings.Split(string(out), "\n") {
+				fields := strings.Fields(line)
+				// Check if this line is for our port (field index 3 is local address)
+				if len(fields) < 5 {
+					continue
+				}
+				if !strings.HasSuffix(fields[3], portSuffix) {
+					continue
+				}
+				// Extract process name from users:(("name",...))
+				for _, f := range fields {
+					if strings.HasPrefix(f, "users:") {
+						name := extractProcessName(f)
+						if name != "" {
+							return name
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// lsof -i :<port> -sTCP:LISTEN -n -P -F p c
+	// Produces lines like: cnginx\n or capache2\n
+	if Exists("lsof") {
+		out, err := RunQuietWithContext(ctx, "lsof", "-i", ":"+port, "-sTCP:LISTEN", "-n", "-P", "-F", "c")
+		if err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				// lsof -F c lines are prefixed with 'c'
+				if strings.HasPrefix(line, "c") {
+					name := strings.TrimPrefix(line, "c")
+					if name != "" {
+						return name
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+// extractProcessName parses the process name out of an ss users field.
+// Input looks like: users:(("nginx",pid=1234,fd=6))
+func extractProcessName(field string) string {
+	// Find the opening quote after users:((\"
+	start := strings.Index(field, `"`)
+	if start < 0 {
+		return ""
+	}
+	rest := field[start+1:]
+	end := strings.Index(rest, `"`)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
 }

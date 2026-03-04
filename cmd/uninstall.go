@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/charmbracelet/huh"
@@ -182,8 +181,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// removeDockerNetwork removes a docker network.
+// removeDockerNetwork removes the named Docker network via the SDK.
 func removeDockerNetwork(name string) error {
-	cmd := exec.Command("docker", "network", "rm", name)
-	return cmd.Run()
+	return docker.RemoveNetwork(name)
 }

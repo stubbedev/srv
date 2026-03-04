@@ -116,13 +116,21 @@ func RemoveSiteRouteConfig(cfg *config.Config, name string) error {
 	return nil
 }
 
-// traefikRouteConfig represents the structure of a Traefik file provider config.
-// Used for parsing site and proxy route configs.
-type traefikRouteConfig struct {
+// RouteConfig represents the structure of a Traefik file provider config.
+// It is used for parsing both site and proxy route YAML files and is shared
+// with cmd/proxy.go to avoid the struct being defined twice.
+type RouteConfig struct {
 	HTTP struct {
 		Routers map[string]struct {
 			Rule string `yaml:"rule"`
 		} `yaml:"routers"`
+		Services map[string]struct {
+			LoadBalancer struct {
+				Servers []struct {
+					URL string `yaml:"url"`
+				} `yaml:"servers"`
+			} `yaml:"loadBalancer"`
+		} `yaml:"services"`
 	} `yaml:"http"`
 }
 
@@ -152,7 +160,7 @@ func ReadSiteRouteDomain(cfg *config.Config, name string) string {
 	}
 
 	// Parse the YAML structure
-	var config traefikRouteConfig
+	var config RouteConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return ""
 	}

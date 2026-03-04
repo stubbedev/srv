@@ -99,17 +99,44 @@ get_latest_version() {
   fi
 }
 
-# Download binary
+# Download a URL to a temp file, print the temp file path
+fetch_url() {
+  url="$1"
+  tmpfile=$(mktemp)
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmpfile" || { rm -f "$tmpfile"; return 1; }
+  else
+    wget -q "$url" -O "$tmpfile" || { rm -f "$tmpfile"; return 1; }
+  fi
+  echo "$tmpfile"
+}
+
+# Download binary and verify checksum
 download() {
   URL="https://github.com/${REPO}/releases/download/${VERSION}/srv-${PLATFORM}"
-  TMPFILE=$(mktemp)
+  CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
   info "Downloading srv ${VERSION} for ${PLATFORM}..." >&2
 
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$URL" -o "$TMPFILE" || error "Download failed"
-  else
-    wget -q "$URL" -O "$TMPFILE" || error "Download failed"
+  TMPFILE=$(fetch_url "$URL") || error "Download failed"
+
+  # Verify checksum before making the file executable so a corrupt or
+  # malicious binary is never left as an executable on disk.
+  if command -v sha256sum >/dev/null 2>&1; then
+    info "Verifying checksum..."
+    CHECKSUMS_FILE=$(fetch_url "$CHECKSUMS_URL") || { rm -f "$TMPFILE"; error "Failed to download checksums"; }
+    EXPECTED=$(grep "srv-${PLATFORM}$" "$CHECKSUMS_FILE" | awk '{print $1}')
+    rm -f "$CHECKSUMS_FILE"
+    if [ -z "$EXPECTED" ]; then
+      rm -f "$TMPFILE"
+      error "No checksum found for srv-${PLATFORM} in checksums.txt"
+    fi
+    ACTUAL=$(sha256sum "$TMPFILE" | awk '{print $1}')
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      rm -f "$TMPFILE"
+      error "Checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+    fi
+    info "Checksum verified"
   fi
 
   chmod +x "$TMPFILE"

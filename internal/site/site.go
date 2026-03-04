@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -208,6 +209,13 @@ func fetchSiteStatuses(sites []Site, indices []int) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			// Recover from any panic so wg.Done() is always called and
+			// the collector goroutine is never left blocking forever.
+			defer func() {
+				if r := recover(); r != nil {
+					statusChan <- siteStatusResult{i, "unknown"}
+				}
+			}()
 			sem <- struct{}{}        // Acquire
 			defer func() { <-sem }() // Release
 
@@ -269,6 +277,8 @@ func List() ([]Site, error) {
 }
 
 // Get returns a specific site by name.
+// It loads all registered sites and therefore performs a parallel status check
+// for every site. Prefer GetByName when you only need a single site.
 func Get(name string) (*Site, error) {
 	sites, err := List()
 	if err != nil {
@@ -284,7 +294,63 @@ func Get(name string) (*Site, error) {
 	return nil, fmt.Errorf("site not found: %s", name)
 }
 
+// GetByName returns a single site by name without loading all registered sites.
+// It reads only that site's metadata and fetches its container status directly,
+// making it significantly faster than Get when the full list is not needed.
+func GetByName(name string) (*Site, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify the site config directory exists.
+	siteDir := SiteConfigDir(cfg, name)
+	if _, err := os.Stat(siteDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("site not found: %s", name)
+		}
+		return nil, err
+	}
+
+	// Synthesise a DirEntry-like object using the site name.
+	entries, err := os.ReadDir(filepath.Dir(siteDir))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if entry.Name() == name && entry.IsDir() {
+			s, needsStatus := loadSiteFromDir(cfg, entry)
+			if needsStatus {
+				s.Status = docker.ContainerStatus(s.ComposeDir)
+			}
+			return &s, nil
+		}
+	}
+
+	return nil, fmt.Errorf("site not found: %s", name)
+}
+
+// composeNotFoundError is returned by FindComposeFile when no compose file exists.
+type composeNotFoundError struct {
+	dir string
+}
+
+func (e *composeNotFoundError) Error() string {
+	return fmt.Sprintf("no docker-compose file found in %s", e.dir)
+}
+
+// IsNotFoundError reports whether err is a "compose file not found" error as
+// returned by FindComposeFile. It returns false for real I/O errors such as
+// permission denied.
+func IsNotFoundError(err error) bool {
+	var nfe *composeNotFoundError
+	return errors.As(err, &nfe)
+}
+
 // FindComposeFile finds the docker-compose file in a directory.
+// If no compose file exists it returns an *composeNotFoundError; use
+// IsNotFoundError to distinguish this from other I/O errors.
 func FindComposeFile(dir string) (string, error) {
 	candidates := []string{
 		"docker-compose.yml",
@@ -297,10 +363,13 @@ func FindComposeFile(dir string) (string, error) {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
+		} else if !os.IsNotExist(err) {
+			// Real I/O error (e.g. permission denied) — surface it immediately.
+			return "", fmt.Errorf("checking for compose file %s: %w", path, err)
 		}
 	}
 
-	return "", fmt.Errorf("no docker-compose file found in %s", dir)
+	return "", &composeNotFoundError{dir: dir}
 }
 
 // ParseComposeFile parses a docker-compose.yml file.
@@ -334,11 +403,12 @@ func GetServiceInfos(composePath string) ([]ServiceInfo, error) {
 		return nil, err
 	}
 
-	// Get the project name (directory name) for deriving container names
+	// Get the project name (directory name) for deriving container names.
+	// Docker Compose v2 uses the directory name lowercased with hyphens kept
+	// as-is: e.g. "my-app" → container "my-app-web-1".
+	// (Docker Compose v1 used underscores but v1 is EOL.)
 	projectDir := filepath.Dir(composePath)
 	projectName := strings.ToLower(filepath.Base(projectDir))
-	// Docker Compose uses underscores in derived names
-	projectName = strings.ReplaceAll(projectName, "-", "_")
 
 	// Load environment variables from env files and environment
 	envVars := loadEnvVarsForCompose(composePath, compose)
@@ -347,9 +417,7 @@ func GetServiceInfos(composePath string) ([]ServiceInfo, error) {
 	for serviceName, service := range compose.Services {
 		containerName := service.ContainerName
 		if containerName == "" {
-			// Docker Compose derives container name as: {project}_{service}_{instance}
-			// For single instances, it's typically: {project}-{service}-1
-			// But the DNS name is just: {project}-{service} or {project}_{service}
+			// Docker Compose v2 derives: {project}-{service}-{instance}
 			containerName = projectName + "-" + serviceName + "-1"
 		}
 
@@ -402,6 +470,8 @@ func loadEnvVarsForCompose(composePath string, compose *ComposeFile) map[string]
 }
 
 // loadEnvFile loads environment variables from a .env file into the provided map.
+// Silently skips files that do not exist or cannot be opened. A mid-file read
+// error is also silently skipped (best-effort env loading for port detection).
 func loadEnvFile(path string, envVars map[string]string) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -430,6 +500,9 @@ func loadEnvFile(path string, envVars map[string]string) {
 			envVars[key] = value
 		}
 	}
+	// scanner.Err() is intentionally not propagated: loadEnvFile is best-effort
+	// (used for port auto-detection). A partial read still yields useful data.
+	_ = scanner.Err()
 }
 
 // discoverServicePort attempts to find the container port from compose configuration.
@@ -580,11 +653,14 @@ func IsLocalDomain(domain string) bool {
 }
 
 // SanitizeName creates a valid site name from a path or string.
+// Dots are replaced with hyphens so that a path like "myapp.test" becomes
+// "myapp-test", which is a valid site name.
 func SanitizeName(s string) string {
 	// Use base name if path
 	s = filepath.Base(s)
 	// Replace invalid characters
 	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.ReplaceAll(s, ".", "-")
 	s = strings.ToLower(s)
 	return s
 }

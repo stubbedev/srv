@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -144,7 +146,10 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 
 	// Check if installed as service
 	if daemon.IsInstalled() {
-		status, _ := daemon.ServiceStatus()
+		status, err := daemon.ServiceStatus()
+		if err != nil {
+			status = "unknown"
+		}
 		ui.Print("Service:  installed (%s)", status)
 		ui.Print("Location: %s", daemon.ServicePath())
 	} else {
@@ -194,22 +199,78 @@ func runDaemonLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	logPath := daemon.LogPath(cfg)
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		ui.Dim("No log file found")
+	if _, err := os.Stat(logPath); err != nil {
+		if os.IsNotExist(err) {
+			ui.Dim("No log file found")
+			return nil
+		}
+		return fmt.Errorf("cannot access log file: %w", err)
+	}
+
+	if err := printLastLines(logPath, daemonLogsFlags.tail); err != nil {
+		return err
+	}
+
+	if !daemonLogsFlags.follow {
 		return nil
 	}
 
-	var tailCmd *exec.Cmd
-	if daemonLogsFlags.follow {
-		tailCmd = exec.Command("tail", "-f", "-n", fmt.Sprintf("%d", daemonLogsFlags.tail), logPath)
-	} else {
-		tailCmd = exec.Command("tail", "-n", fmt.Sprintf("%d", daemonLogsFlags.tail), logPath)
+	// Follow mode: open the file, seek to end, and poll for new content.
+	f, err := os.Open(logPath)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return err
 	}
 
-	tailCmd.Stdout = os.Stdout
-	tailCmd.Stderr = os.Stderr
+	reader := bufio.NewReader(f)
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			fmt.Print(line)
+		}
+		if err == io.EOF {
+			// No new data yet; wait a short interval and try again.
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("error reading log file: %w", err)
+		}
+	}
+}
 
-	return tailCmd.Run()
+// printLastLines prints the last n lines of the file at path to stdout.
+func printLastLines(path string, n int) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer f.Close()
+
+	// Collect all lines then print the last n.
+	// For typical daemon log sizes this is fine; a ring-buffer approach
+	// would be needed only for very large files.
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading log file: %w", err)
+	}
+
+	start := len(lines) - n
+	if start < 0 {
+		start = 0
+	}
+	for _, line := range lines[start:] {
+		fmt.Println(line)
+	}
+	return nil
 }
 
 // =============================================================================

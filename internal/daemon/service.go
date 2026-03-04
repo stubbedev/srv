@@ -134,6 +134,13 @@ func installSystemd() error {
 		return fmt.Errorf("failed to create systemd user directory: %w", err)
 	}
 
+	// Get the user's home directory reliably (os.Getenv("HOME") can be empty
+	// in a service context).
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to determine home directory: %w", err)
+	}
+
 	// Generate service file
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=srv daemon - Docker container network connector
@@ -151,7 +158,7 @@ Environment=XDG_CONFIG_HOME=%s/.config
 
 [Install]
 WantedBy=default.target
-`, executable, os.Getenv("HOME"), os.Getenv("HOME"))
+`, executable, homeDir, homeDir)
 
 	if err := os.WriteFile(servicePath, []byte(serviceContent), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
@@ -301,13 +308,13 @@ func installLaunchd() error {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>%s:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
 </plist>
-`, executable, logPath, logPath)
+`, executable, logPath, logPath, filepath.Dir(executable))
 
-	if err := os.WriteFile(plistPath, []byte(plistContent), constants.FilePermDefault); err != nil {
+	if err := os.WriteFile(plistPath, []byte(plistContent), constants.FilePermACME); err != nil {
 		return fmt.Errorf("failed to write plist file: %w", err)
 	}
 

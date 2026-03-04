@@ -142,6 +142,22 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Step 3: Start Traefik
 	steps.Next("Starting Traefik")
+
+	// Pre-flight: check for port conflicts before attempting to bind.
+	if conflicts := traefik.CheckPortConflicts(); len(conflicts) > 0 {
+		msg := "cannot start: the following ports are already in use\n"
+		for _, c := range conflicts {
+			if c.Process != "" {
+				msg += fmt.Sprintf("\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
+			} else {
+				msg += fmt.Sprintf("\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
+			}
+			msg += fmt.Sprintf("\n    stop it with: %s\n", c.StopHint())
+		}
+		msg += "\nThen run 'srv init' again."
+		return fmt.Errorf("%s", msg)
+	}
+
 	if err := docker.ComposeUp(cfg.TraefikDir); err != nil {
 		return fmt.Errorf("failed to start Traefik: %w", err)
 	}
@@ -175,6 +191,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 func startSites(sites []site.Site) {
 	runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
-		return docker.ComposeUp(s.Dir)
+		return docker.ComposeUp(s.ComposeDir)
 	})
 }

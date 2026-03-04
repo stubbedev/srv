@@ -27,6 +27,9 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Test
+        run: go test ./...
+
       - name: Build binaries
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}

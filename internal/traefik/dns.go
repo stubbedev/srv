@@ -2,12 +2,15 @@ package traefik
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
@@ -49,21 +52,47 @@ func DetectResolver() DNSResolverType {
 }
 
 // CheckDNS tests if the local DNS server resolves the given domain to localhost.
+// It queries 127.0.0.1:53 directly using a custom resolver so the result is
+// independent of the system-wide DNS configuration.
 func CheckDNS(domain string) bool {
-	output, err := shell.Dig("+short", "@"+constants.LocalhostIP, domain)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "udp", constants.LocalhostIP+":53")
+		},
+	}
+
+	addrs, err := resolver.LookupHost(ctx, domain)
 	if err != nil {
 		return false
 	}
-	return output == constants.LocalhostIP
+	for _, addr := range addrs {
+		if addr == constants.LocalhostIP {
+			return true
+		}
+	}
+	return false
 }
 
-// CheckSystemDNS tests if the system resolves the given domain to localhost.
+// CheckSystemDNS tests if the system's default resolver resolves the given
+// domain to localhost.
 func CheckSystemDNS(domain string) bool {
-	output, err := shell.Dig("+short", domain)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	addrs, err := net.DefaultResolver.LookupHost(ctx, domain)
 	if err != nil {
 		return false
 	}
-	return output == constants.LocalhostIP
+	for _, addr := range addrs {
+		if addr == constants.LocalhostIP {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupDNS configures the system to use the local DNS server for .test domains.
@@ -261,7 +290,10 @@ func LoadLocalDomains() ([]string, error) {
 		}
 	}
 
-	return domains, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading local-domains file: %w", err)
+	}
+	return domains, nil
 }
 
 // SaveLocalDomains saves the list of local domains to the registry.
@@ -317,11 +349,13 @@ func RegisterLocalDomain(domain string) error {
 		return err
 	}
 
-	// Automatically set up system DNS when adding the first local domain
+	// Automatically set up system DNS when adding the first local domain.
+	// Failure here is non-fatal: the domain is registered in dnsmasq and the
+	// caller can still proceed; the user can run `srv dns setup` manually.
 	if isFirstDomain && !CheckSystemDNS(domain) {
 		if err := SetupDNS(); err != nil {
-			// Non-fatal: log warning but don't fail the operation
-			return fmt.Errorf("DNS registered but system DNS setup failed: %w", err)
+			// Log but do not propagate — DNS registration succeeded above.
+			fmt.Fprintf(os.Stderr, "warning: system DNS setup failed (run 'srv dns setup' manually): %v\n", err)
 		}
 	}
 
@@ -359,11 +393,12 @@ func UnregisterLocalDomain(domain string) error {
 		return err
 	}
 
-	// Automatically remove system DNS when removing the last local domain
+	// Automatically remove system DNS when removing the last local domain.
+	// Failure here is non-fatal: the domain was already removed from the
+	// registry. The user can run `srv dns remove` manually if needed.
 	if len(filtered) == 0 {
 		if err := RemoveDNS(); err != nil {
-			// Non-fatal: log warning but don't fail the operation
-			return fmt.Errorf("DNS unregistered but system DNS removal failed: %w", err)
+			fmt.Fprintf(os.Stderr, "warning: system DNS removal failed (run 'srv dns remove' manually): %v\n", err)
 		}
 	}
 

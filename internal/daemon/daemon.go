@@ -3,17 +3,18 @@
 package daemon
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+
+	dockerevents "github.com/docker/docker/api/types/events"
+	dockerfilters "github.com/docker/docker/api/types/filters"
+	dockerclient "github.com/docker/docker/client"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
@@ -24,26 +25,19 @@ import (
 // LogFile is the name of the daemon log file.
 const LogFile = "daemon.log"
 
-// dockerEvent represents a Docker event from the event stream.
-type dockerEvent struct {
-	Status string `json:"status"`
-	ID     string `json:"id"`
-	Type   string `json:"Type"`
-	Action string `json:"Action"`
-	Actor  struct {
-		ID         string            `json:"ID"`
-		Attributes map[string]string `json:"Attributes"`
-	} `json:"Actor"`
-}
+// refreshCooldown is the minimum interval between automatic container-mapping
+// refreshes triggered by untracked container start events.
+const refreshCooldown = 5 * time.Second
 
 // Daemon watches Docker events and auto-connects containers to the srv network.
 type Daemon struct {
-	cfg         *config.Config
-	networkName string
-	containers  map[string]string // container name -> site name mapping
-	ctx         context.Context
-	cancel      context.CancelFunc
-	logFile     *os.File
+	cfg             *config.Config
+	networkName     string
+	containers      map[string]string // container name -> site name mapping
+	ctx             context.Context
+	cancel          context.CancelFunc
+	logFile         *os.File
+	lastRefreshTime time.Time // guards against refresh storms
 }
 
 // New creates a new daemon instance.
@@ -88,15 +82,6 @@ func Stop() error {
 
 // Run starts the daemon and blocks until stopped.
 func (d *Daemon) Run() error {
-	// Check if Docker is installed before doing anything
-	if !isDockerInstalled() {
-		// Uninstall the service since Docker isn't available
-		if IsInstalled() {
-			Uninstall()
-		}
-		return fmt.Errorf("docker is not installed, daemon service uninstalled")
-	}
-
 	// Open log file
 	logPath := LogPath(d.cfg)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, constants.FilePermDefault)
@@ -154,9 +139,18 @@ func (d *Daemon) refreshContainerMapping() error {
 	return nil
 }
 
-// isDockerInstalled checks if the docker binary exists on the system.
-func isDockerInstalled() bool {
-	_, err := exec.LookPath("docker")
+// isDockerAvailable checks if the Docker daemon is reachable via the SDK.
+func isDockerAvailable() bool {
+	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if err != nil {
+		return false
+	}
+	defer cli.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = cli.Ping(ctx)
 	return err == nil
 }
 
@@ -172,9 +166,7 @@ func (d *Daemon) waitForDocker() error {
 		default:
 		}
 
-		// Check if Docker daemon is running
-		cmd := exec.CommandContext(d.ctx, "docker", "info")
-		if err := cmd.Run(); err == nil {
+		if isDockerAvailable() {
 			return nil
 		}
 
@@ -186,7 +178,6 @@ func (d *Daemon) waitForDocker() error {
 		case <-time.After(backoff):
 		}
 
-		// Exponential backoff with max
 		backoff *= 2
 		if backoff > maxBackoff {
 			backoff = maxBackoff
@@ -222,72 +213,35 @@ func (d *Daemon) watchEvents() error {
 	}
 }
 
-// runEventLoop runs a single event watching session.
+// runEventLoop runs a single event watching session using the Docker SDK.
 func (d *Daemon) runEventLoop() error {
-	// Use docker events with JSON format, filtering for container start events
-	cmd := exec.CommandContext(d.ctx, "docker", "events",
-		"--format", "{{json .}}",
-		"--filter", "type=container",
-		"--filter", "event=start",
+	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
+	defer cli.Close()
+
+	f := dockerfilters.NewArgs(
+		dockerfilters.Arg("type", string(dockerevents.ContainerEventType)),
+		dockerfilters.Arg("event", "start"),
 	)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create pipe: %w", err)
-	}
+	eventCh, errCh := cli.Events(d.ctx, dockerevents.ListOptions{Filters: f})
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start docker events: %w", err)
-	}
-
-	// Create a done channel for the scanner goroutine
-	eventChan := make(chan dockerEvent)
-	errChan := make(chan error, 1)
-
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			var event dockerEvent
-			if err := json.Unmarshal([]byte(line), &event); err != nil {
-				d.log("Failed to parse event: %v", err)
-				continue
-			}
-			select {
-			case eventChan <- event:
-			case <-d.ctx.Done():
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			errChan <- err
-		}
-		close(eventChan)
-	}()
-
-	// Process events until context is cancelled or error occurs
 	for {
 		select {
 		case <-d.ctx.Done():
-			cmd.Process.Kill()
-			cmd.Wait()
 			return nil
-		case err := <-errChan:
-			cmd.Process.Kill()
-			cmd.Wait()
-			return fmt.Errorf("error reading events: %w", err)
-		case event, ok := <-eventChan:
-			if !ok {
-				// Channel closed, docker events ended
-				return cmd.Wait()
-			}
+		case err := <-errCh:
+			return fmt.Errorf("error reading Docker events: %w", err)
+		case event := <-eventCh:
 			d.handleContainerStart(event)
 		}
 	}
 }
 
 // handleContainerStart processes a container start event.
-func (d *Daemon) handleContainerStart(event dockerEvent) {
+func (d *Daemon) handleContainerStart(event dockerevents.Message) {
 	containerName := event.Actor.Attributes["name"]
 	if containerName == "" {
 		return
@@ -296,8 +250,12 @@ func (d *Daemon) handleContainerStart(event dockerEvent) {
 	// Check if this container is one we're tracking
 	siteName, tracked := d.containers[containerName]
 	if !tracked {
-		// Refresh mappings in case a new site was added
-		d.refreshContainerMapping()
+		// Refresh mappings in case a new site was added, but throttle to avoid
+		// hammering disk I/O on busy systems with many non-srv containers.
+		if time.Since(d.lastRefreshTime) >= refreshCooldown {
+			d.refreshContainerMapping()
+			d.lastRefreshTime = time.Now()
+		}
 		siteName, tracked = d.containers[containerName]
 		if !tracked {
 			return
