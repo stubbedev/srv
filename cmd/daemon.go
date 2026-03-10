@@ -220,6 +220,7 @@ func runDaemonLogs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
+
 	defer f.Close()
 
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
@@ -263,10 +264,7 @@ func printLastLines(path string, n int) error {
 		return fmt.Errorf("error reading log file: %w", err)
 	}
 
-	start := len(lines) - n
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(lines)-n, 0)
 	for _, line := range lines[start:] {
 		fmt.Println(line)
 	}

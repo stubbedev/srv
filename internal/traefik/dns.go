@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -69,12 +70,7 @@ func CheckDNS(domain string) bool {
 	if err != nil {
 		return false
 	}
-	for _, addr := range addrs {
-		if addr == constants.LocalhostIP {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(addrs, constants.LocalhostIP)
 }
 
 // CheckSystemDNS tests if the system's default resolver resolves the given
@@ -87,12 +83,7 @@ func CheckSystemDNS(domain string) bool {
 	if err != nil {
 		return false
 	}
-	for _, addr := range addrs {
-		if addr == constants.LocalhostIP {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(addrs, constants.LocalhostIP)
 }
 
 // SetupDNS configures the system to use the local DNS server for .test domains.
@@ -331,10 +322,8 @@ func RegisterLocalDomain(domain string) error {
 	}
 
 	// Check if already registered
-	for _, d := range domains {
-		if d == domain {
-			return nil // Already registered
-		}
+	if slices.Contains(domains, domain) {
+		return nil // Already registered
 	}
 
 	// Check if this is the first local domain being added
@@ -426,13 +415,13 @@ func UpdateDnsmasqConfig() error {
 		content.WriteString("# No local domains registered\n")
 	} else {
 		for _, domain := range domains {
-			content.WriteString(fmt.Sprintf("address=/%s/127.0.0.1\n", domain))
+			fmt.Fprintf(&content, "address=/%s/127.0.0.1\n", domain)
 		}
 	}
 
 	content.WriteString("\n# Forward all other queries to upstream DNS\n")
-	content.WriteString(fmt.Sprintf("server=%s\n", constants.GoogleDNS1))
-	content.WriteString(fmt.Sprintf("server=%s\n", constants.GoogleDNS2))
+	fmt.Fprintf(&content, "server=%s\n", constants.GoogleDNS1)
+	fmt.Fprintf(&content, "server=%s\n", constants.GoogleDNS2)
 	content.WriteString("\n# Don't read /etc/resolv.conf\n")
 	content.WriteString("no-resolv\n")
 

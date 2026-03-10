@@ -180,8 +180,8 @@ func UpdateDynamicConfig() error {
 				constants.TraefikContainerCertsSubdir,
 				cert.domain,
 				constants.ExtKey)
-			content.WriteString(fmt.Sprintf("    - certFile: %s\n", certPath))
-			content.WriteString(fmt.Sprintf("      keyFile: %s\n", keyPath))
+			fmt.Fprintf(&content, "    - certFile: %s\n", certPath)
+			fmt.Fprintf(&content, "      keyFile: %s\n", keyPath)
 		}
 	}
 
@@ -237,8 +237,8 @@ func scanSiteCertificates(cfg *config.Config) ([]certEntry, error) {
 				continue
 			}
 			name := certFile.Name()
-			if strings.HasSuffix(name, constants.ExtCert) {
-				domain := strings.TrimSuffix(name, constants.ExtCert)
+			if before, ok := strings.CutSuffix(name, constants.ExtCert); ok {
+				domain := before
 				keyFile := filepath.Join(certDir, domain+constants.ExtKey)
 				if _, err := os.Stat(keyFile); err == nil {
 					certs = append(certs, certEntry{siteName: siteName, domain: domain})

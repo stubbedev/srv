@@ -113,7 +113,7 @@ func (d *Daemon) Run() error {
 }
 
 // log writes a timestamped message to the log file.
-func (d *Daemon) log(format string, args ...interface{}) {
+func (d *Daemon) log(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	if d.logFile != nil {

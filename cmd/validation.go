@@ -40,8 +40,8 @@ func ValidateDomain(domain string) error {
 	}
 
 	// Check individual label lengths (max 63 characters each)
-	labels := strings.Split(domain, ".")
-	for _, label := range labels {
+	labels := strings.SplitSeq(domain, ".")
+	for label := range labels {
 		if len(label) > constants.MaxDomainLabelLength {
 			return fmt.Errorf("domain label '%s' is too long (max %d characters)", label, constants.MaxDomainLabelLength)
 		}

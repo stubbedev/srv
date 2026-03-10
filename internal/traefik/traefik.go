@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -195,7 +196,7 @@ func writeEnvFile(path string, envMap map[string]string) error {
 
 	var content strings.Builder
 	for _, k := range keys {
-		content.WriteString(fmt.Sprintf("%s=%s\n", k, envMap[k]))
+		fmt.Fprintf(&content, "%s=%s\n", k, envMap[k])
 	}
 
 	// Write atomically so a crash mid-write never produces a partial file.
@@ -414,9 +415,7 @@ func mergeEntryPoints(existing, template map[string]any) map[string]any {
 
 	// Start with existing entryPoints (preserves user additions)
 	if existingEP, ok := existing["entryPoints"].(map[string]any); ok {
-		for k, v := range existingEP {
-			result[k] = v
-		}
+		maps.Copy(result, existingEP)
 	}
 
 	// Ensure web and websecure from template (these are required by srv)

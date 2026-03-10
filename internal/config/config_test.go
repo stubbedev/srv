@@ -214,7 +214,7 @@ func TestLoadUserConfigEmpty(t *testing.T) {
 		t.Fatalf("LoadUserConfig() failed: %v", err)
 	}
 
-	if userCfg.ParkedPaths != nil && len(userCfg.ParkedPaths) > 0 {
+	if len(userCfg.ParkedPaths) > 0 {
 		t.Errorf("expected empty ParkedPaths, got %v", userCfg.ParkedPaths)
 	}
 }

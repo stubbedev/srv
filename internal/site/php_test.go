@@ -4,6 +4,7 @@ package site
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -737,13 +738,7 @@ func TestRawPHPDefaults(t *testing.T) {
 		t.Error("expected non-empty extension list for raw PHP defaults")
 	}
 	// mongodb must be in the default set.
-	hasMongo := false
-	for _, e := range d.Extensions {
-		if e == "mongodb" {
-			hasMongo = true
-			break
-		}
-	}
+	hasMongo := slices.Contains(d.Extensions, "mongodb")
 	if !hasMongo {
 		t.Error("expected 'mongodb' in default extension set")
 	}

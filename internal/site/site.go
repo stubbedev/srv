@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -461,9 +462,7 @@ func loadEnvVarsForCompose(composePath string, compose *ComposeFile) map[string]
 			loadEnvFile(envPath, envVars)
 		}
 		// Service-level environment vars have highest priority
-		for k, v := range service.Environment {
-			envVars[k] = v
-		}
+		maps.Copy(envVars, service.Environment)
 	}
 
 	return envVars

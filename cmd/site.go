@@ -1263,7 +1263,7 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 	siteChan := make(chan site.Site, len(validSites))
 
 	// Start workers
-	for i := 0; i < workers; i++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

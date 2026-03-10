@@ -140,8 +140,8 @@ func CheckPort(port string) (bool, error) {
 	for _, line := range lines {
 		// Check for port at end of address (before whitespace)
 		// Handles both IPv4 (0.0.0.0:80) and IPv6 ([::]:80)
-		fields := strings.Fields(line)
-		for _, field := range fields {
+		fields := strings.FieldsSeq(line)
+		for field := range fields {
 			if strings.HasSuffix(field, portSuffix) {
 				return true, nil
 			}
@@ -174,7 +174,7 @@ func IdentifyPortProcess(port string) string {
 		out, err := RunQuietWithContext(ctx, "ss", "-tlnp")
 		if err == nil {
 			portSuffix := ":" + port
-			for _, line := range strings.Split(string(out), "\n") {
+			for line := range strings.SplitSeq(string(out), "\n") {
 				fields := strings.Fields(line)
 				// Check if this line is for our port (field index 3 is local address)
 				if len(fields) < 5 {
@@ -201,10 +201,10 @@ func IdentifyPortProcess(port string) string {
 	if Exists("lsof") {
 		out, err := RunQuietWithContext(ctx, "lsof", "-i", ":"+port, "-sTCP:LISTEN", "-n", "-P", "-F", "c")
 		if err == nil {
-			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 				// lsof -F c lines are prefixed with 'c'
-				if strings.HasPrefix(line, "c") {
-					name := strings.TrimPrefix(line, "c")
+				if after, ok := strings.CutPrefix(line, "c"); ok {
+					name := after
 					if name != "" {
 						return name
 					}
@@ -220,14 +220,14 @@ func IdentifyPortProcess(port string) string {
 // Input looks like: users:(("nginx",pid=1234,fd=6))
 func extractProcessName(field string) string {
 	// Find the opening quote after users:((\"
-	start := strings.Index(field, `"`)
-	if start < 0 {
+	_, after, ok := strings.Cut(field, `"`)
+	if !ok {
 		return ""
 	}
-	rest := field[start+1:]
-	end := strings.Index(rest, `"`)
-	if end < 0 {
+	rest := after
+	before, _, ok := strings.Cut(rest, `"`)
+	if !ok {
 		return ""
 	}
-	return rest[:end]
+	return before
 }

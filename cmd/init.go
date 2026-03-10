@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -145,17 +146,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Pre-flight: check for port conflicts before attempting to bind.
 	if conflicts := traefik.CheckPortConflicts(); len(conflicts) > 0 {
-		msg := "cannot start: the following ports are already in use\n"
+		var msg strings.Builder
+		msg.WriteString("cannot start: the following ports are already in use\n")
 		for _, c := range conflicts {
 			if c.Process != "" {
-				msg += fmt.Sprintf("\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
+				fmt.Fprintf(&msg, "\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
 			} else {
-				msg += fmt.Sprintf("\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
+				fmt.Fprintf(&msg, "\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
 			}
-			msg += fmt.Sprintf("\n    stop it with: %s\n", c.StopHint())
+			fmt.Fprintf(&msg, "\n    stop it with: %s\n", c.StopHint())
 		}
-		msg += "\nThen run 'srv init' again."
-		return fmt.Errorf("%s", msg)
+		msg.WriteString("\nThen run 'srv init' again.")
+		return fmt.Errorf("%s", msg.String())
 	}
 
 	if err := docker.ComposeUp(cfg.TraefikDir); err != nil {
