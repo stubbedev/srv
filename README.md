@@ -26,7 +26,7 @@ Download the binary for your platform from [releases](https://github.com/stubbed
 # One-time setup
 srv init
 
-# Add a site (auto-detects static or docker-compose)
+# Add a site (auto-detects static, PHP, or docker-compose)
 srv add ~/my-project --domain mysite.test --local
 
 # Visit https://mysite.test
@@ -54,7 +54,7 @@ srv add /var/www/myapp --domain example.com
 
 | Command | Description |
 |---------|-------------|
-| `srv add PATH` | Add a new site (static or docker-compose) |
+| `srv add PATH` | Add a new site (static, PHP, or docker-compose) |
 | `srv remove SITE` | Remove a site and stop its containers |
 | `srv start SITE` | Start a site's containers |
 | `srv stop SITE` | Stop a site's containers |
@@ -101,7 +101,13 @@ srv add /var/www/myapp --domain example.com
 
 ### `srv add`
 
-Register a new site with Traefik. Automatically detects whether the path contains a `docker-compose.yml` (compose site) or static files.
+Register a new site with Traefik. Automatically detects the site type:
+
+1. **Docker-Compose** - if the path contains a `docker-compose.yml`
+2. **PHP** - if the path contains a `composer.json` or `.php`/`.phtml` files
+3. **Static** - otherwise, serves the directory as static files via nginx
+
+The site is automatically started after being added.
 
 ```bash
 srv add PATH [flags]
@@ -113,7 +119,7 @@ srv add PATH [flags]
 |------|-------|---------|-------------|
 | `--domain` | `-d` | | Domain name (required) |
 | `--local` | `-l` | `false` | Use local SSL via mkcert (otherwise Let's Encrypt) |
-| `--name` | `-n` | directory name | Custom site name |
+| `--name` | `-n` | domain name | Custom site name |
 | `--port` | `-p` | `80` | Container port to route traffic to |
 | `--service` | | | Service name for multi-service docker-compose |
 | `--force` | `-f` | `false` | Overwrite existing configuration |
@@ -121,6 +127,9 @@ srv add PATH [flags]
 | `--cache` | | `true` | Enable caching headers for static assets |
 | `--cors` | | `false` | Enable CORS headers (allow all origins) |
 | `--skip-validation` | | `false` | Skip compose file validation |
+| `--php-version` | | auto-detected | PHP version (e.g., `8.3`, or `latest`) |
+| `--document-root` | | auto-detected | Document root relative to project |
+| `--php-extensions` | | auto-detected | PHP extensions: full list, or `+ext,-ext` to add/remove from defaults |
 
 #### Examples
 
@@ -139,6 +148,12 @@ srv add ./app --domain api.test --local --service backend --port 3000
 
 # Overwrite existing site configuration
 srv add ./site --domain site.test --local --force
+
+# PHP site (auto-detected from composer.json or .php files)
+srv add ./laravel-app --domain app.test --local
+
+# PHP site with explicit version and extra extensions
+srv add ./myapp --domain myapp.test --local --php-version 8.3 --php-extensions "+redis,-calendar"
 ```
 
 ### `srv start`
@@ -264,11 +279,25 @@ The srv daemon watches for Docker container start events and automatically conne
 ```bash
 srv daemon start      # Start the daemon
 srv daemon stop       # Stop the daemon
+srv daemon restart    # Restart the daemon
 srv daemon status     # Check daemon status
 srv daemon logs       # View daemon logs
 srv daemon install    # Install as system service (starts on boot)
 srv daemon uninstall  # Remove system service
 ```
+
+#### `srv daemon start`
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--foreground` | `-f` | Run in foreground (useful for debugging) |
+
+#### `srv daemon logs`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--follow` | `-f` | `false` | Follow log output |
+| `--tail` | `-n` | `50` | Number of lines to show |
 
 ### `srv uninstall`
 
@@ -315,7 +344,7 @@ srv completion powershell | Out-String | Invoke-Expression
 
 ### Static Sites
 
-For directories without a `docker-compose.yml`, srv generates an nginx container that:
+For directories without a `docker-compose.yml` or PHP files, srv generates an nginx container that:
 
 - Serves HTML, CSS, JS, and other static files
 - Blocks sensitive files (`.env`, `.git`, `.htaccess`, etc.)
@@ -338,6 +367,45 @@ srv add ./site --domain dev.test --local --cache=false
 # Enable CORS (for assets accessed from other domains)
 srv add ./assets --domain cdn.example.com --cors
 ```
+
+### PHP Sites
+
+For directories containing a `composer.json` or `.php`/`.phtml` files (without a `docker-compose.yml`), srv generates an nginx + php-fpm container setup that:
+
+- Auto-detects PHP version from `composer.json` requirements
+- Auto-detects framework (Laravel, Symfony, WordPress, or generic)
+- Auto-detects document root (`public/`, `web/`, etc.)
+- Extracts required PHP extensions from `composer.json`
+- Generates a Dockerfile with all necessary system packages and extensions
+- Generates an nginx config with proper FastCGI routing
+- Blocks access to sensitive files and directories (`.env`, `.git`, `vendor/`, `node_modules/`)
+- Adds security headers and gzip compression
+
+```bash
+# Laravel project (auto-detects framework, PHP version, and extensions)
+srv add ./laravel-app --domain app.test --local
+
+# WordPress site
+srv add ./wordpress --domain blog.test --local
+
+# Override PHP version
+srv add ./myapp --domain myapp.test --local --php-version 8.3
+
+# Override document root
+srv add ./myapp --domain myapp.test --local --document-root public
+
+# Add/remove extensions from auto-detected defaults
+srv add ./myapp --domain myapp.test --local --php-extensions "+redis,-calendar"
+
+# Replace all extensions with an explicit list
+srv add ./myapp --domain myapp.test --local --php-extensions "pdo,pdo_mysql,mbstring,gd"
+```
+
+**Detection order:**
+1. `docker-compose.yml` present - treated as a compose site (not PHP)
+2. `composer.json` present - PHP site with full metadata extraction
+3. `.php` or `.phtml` files present - PHP site with default extensions
+4. Otherwise - static site
 
 ### Docker-Compose Sites
 
@@ -414,14 +482,16 @@ All configuration is stored in `~/.config/srv/` - srv never writes files to your
 
 | Path | Description |
 |------|-------------|
-| `~/.config/srv/config.yml` | Global configuration (email, network name) |
+| `~/.config/srv/config.yml` | Global configuration (parked paths) |
 | `~/.config/srv/traefik/` | Traefik docker-compose and static config |
 | `~/.config/srv/traefik/conf/` | Dynamic Traefik routing configs |
 | `~/.config/srv/traefik/certs/` | Let's Encrypt certificates (acme.json) |
 | `~/.config/srv/sites/` | Site configurations |
 | `~/.config/srv/sites/{name}/metadata.yml` | Site metadata |
 | `~/.config/srv/sites/{name}/certs/` | Local SSL certificates (mkcert) |
-| `~/.config/srv/sites/{name}/docker-compose.yml` | Generated compose for static sites |
+| `~/.config/srv/sites/{name}/docker-compose.yml` | Generated compose for static and PHP sites |
+| `~/.config/srv/sites/{name}/nginx.conf` | Generated nginx config for static and PHP sites |
+| `~/.config/srv/sites/{name}/Dockerfile` | Generated Dockerfile for PHP sites |
 
 ## Global Flags
 

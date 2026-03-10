@@ -180,8 +180,8 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	}
 
 	// Determine compose directory based on site type
-	if meta.Type == SiteTypeStatic {
-		// Static sites have compose file in srv config dir
+	if meta.Type == SiteTypeStatic || meta.Type == SiteTypePHP {
+		// Static and PHP sites have their compose file in the srv config dir
 		s.ComposeDir = SiteConfigDir(cfg, entry.Name())
 	} else {
 		// Compose sites use the project directory
@@ -800,6 +800,7 @@ type SiteType string
 const (
 	SiteTypeCompose SiteType = constants.SiteTypeCompose // Docker compose project
 	SiteTypeStatic  SiteType = constants.SiteTypeStatic  // Static files served via nginx
+	SiteTypePHP     SiteType = constants.SiteTypePHP     // PHP/FPM site (nginx + php-fpm)
 )
 
 // SiteMetadata holds all configuration for a site.
@@ -818,6 +819,11 @@ type SiteMetadata struct {
 	SPA   bool `yaml:"spa,omitempty"`   // Enable SPA mode
 	Cache bool `yaml:"cache,omitempty"` // Enable caching headers
 	CORS  bool `yaml:"cors,omitempty"`  // Enable CORS headers
+	// PHP site options
+	PHPVersion    string   `yaml:"php_version,omitempty"`    // PHP version ("latest" or "8.3")
+	PHPExtensions []string `yaml:"php_extensions,omitempty"` // PHP extensions to install
+	PHPFramework  string   `yaml:"php_framework,omitempty"`  // Detected framework
+	DocumentRoot  string   `yaml:"document_root,omitempty"`  // Document root relative to project
 }
 
 // SiteConfigDir returns the path to a site's configuration directory.

@@ -35,6 +35,10 @@ var addFlags struct {
 	spa   bool
 	cache bool
 	cors  bool
+	// PHP site options
+	phpVersion    string
+	documentRoot  string
+	phpExtensions string
 }
 
 var addCmd = &cobra.Command{
@@ -81,6 +85,10 @@ func init() {
 	addCmd.Flags().BoolVar(&addFlags.spa, "spa", true, "Enable SPA mode (fallback to index.html)")
 	addCmd.Flags().BoolVar(&addFlags.cache, "cache", true, "Enable caching headers for static assets")
 	addCmd.Flags().BoolVar(&addFlags.cors, "cors", false, "Enable CORS headers (allow all origins)")
+	// PHP site options
+	addCmd.Flags().StringVar(&addFlags.phpVersion, "php-version", "", "PHP version (auto-detected; use 'latest' for newest)")
+	addCmd.Flags().StringVar(&addFlags.documentRoot, "document-root", "", "Document root relative to project (auto-detected)")
+	addCmd.Flags().StringVar(&addFlags.phpExtensions, "php-extensions", "", "PHP extensions: full list, or +ext/-ext to add/remove from defaults")
 	addCmd.GroupID = GroupSites
 	RootCmd.AddCommand(addCmd)
 }
@@ -140,13 +148,20 @@ type siteSetup struct {
 	port               int
 	isLocal            bool
 	isStatic           bool // true if serving static files (no docker-compose.yml)
+	isPHP              bool // true if serving a PHP/FPM site
+	phpInfo            *site.PHPSiteInfo
 	// Static site options
 	spa   bool
 	cache bool
 	cors  bool
 }
 
-// validateSiteSetup validates the path and discovers compose file
+// validateSiteSetup validates the path and discovers compose file or PHP project.
+// Detection order:
+//  1. docker-compose.yml present → compose site
+//  2. composer.json present      → PHP site (with full metadata)
+//  3. *.php / *.phtml present    → PHP site (raw, with defaults)
+//  4. otherwise                  → static site
 func validateSiteSetup(pathArg string) (*siteSetup, error) {
 	sitePath, err := site.ResolvePath(pathArg)
 	if err != nil {
@@ -162,26 +177,47 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		port:     addFlags.port,
 	}
 
-	// Try to find a compose file. A genuine "not found" means static site;
-	// any other I/O error (permission denied, etc.) is surfaced to the caller.
+	// 1. Try to find a compose file.
 	composePath, err := site.FindComposeFile(sitePath)
-	if err != nil {
-		if !site.IsNotFoundError(err) {
-			return nil, fmt.Errorf("could not check for docker-compose file: %w", err)
-		}
-		// No compose file present — serve as a static site.
-		setup.isStatic = true
-	} else {
+	if err != nil && !site.IsNotFoundError(err) {
+		return nil, fmt.Errorf("could not check for docker-compose file: %w", err)
+	}
+	if err == nil {
 		setup.composePath = composePath
+		return setup, nil
 	}
 
+	// 2. Try composer.json-based PHP detection.
+	phpInfo, err := site.DetectPHPSite(sitePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for PHP project: %w", err)
+	}
+	if phpInfo != nil {
+		setup.isPHP = true
+		setup.phpInfo = phpInfo
+		return setup, nil
+	}
+
+	// 3. Try raw PHP file detection.
+	isRawPHP, err := site.DetectRawPHPSite(sitePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for PHP files: %w", err)
+	}
+	if isRawPHP {
+		setup.isPHP = true
+		setup.phpInfo = site.RawPHPDefaults()
+		return setup, nil
+	}
+
+	// 4. Fall back to static site.
+	setup.isStatic = true
 	return setup, nil
 }
 
 // promptForMissingConfig prompts user for any missing configuration
 func promptForMissingConfig(setup *siteSetup) error {
-	// Get service name (only for non-static sites)
-	if !setup.isStatic {
+	// Get service name (only for compose sites)
+	if !setup.isStatic && !setup.isPHP {
 		if err := promptForService(setup); err != nil {
 			return err
 		}
@@ -210,6 +246,22 @@ func promptForMissingConfig(setup *siteSetup) error {
 	setup.spa = addFlags.spa
 	setup.cache = addFlags.cache
 	setup.cors = addFlags.cors
+
+	// PHP site: apply flag overrides on top of auto-detected values.
+	if setup.isPHP && setup.phpInfo != nil {
+		if addFlags.phpVersion != "" {
+			setup.phpInfo.PHPVersion = addFlags.phpVersion
+		}
+		if addFlags.documentRoot != "" {
+			setup.phpInfo.DocumentRoot = addFlags.documentRoot
+		}
+		if addFlags.phpExtensions != "" {
+			setup.phpInfo.Extensions = site.ParseExtensionOverrides(
+				addFlags.phpExtensions,
+				setup.phpInfo.Extensions,
+			)
+		}
+	}
 
 	return nil
 }
@@ -383,19 +435,25 @@ func validateSiteInputs(setup *siteSetup) error {
 // setupSiteFiles writes configuration files for the site
 // All config is stored in ~/.config/srv - no files are created in the project directory
 func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
-	if setup.isStatic {
+	switch {
+	case setup.isPHP:
+		ui.Info("Configuring PHP site: %s", setup.siteName)
+	case setup.isStatic:
 		ui.Info("Configuring static site: %s", setup.siteName)
-	} else {
+	default:
 		ui.Info("Configuring site: %s", setup.siteName)
 	}
 
 	// Determine site type
 	siteType := site.SiteTypeCompose
-	if setup.isStatic {
+	switch {
+	case setup.isPHP:
+		siteType = site.SiteTypePHP
+	case setup.isStatic:
 		siteType = site.SiteTypeStatic
 	}
 
-	// Write site metadata
+	// Build base metadata.
 	meta := site.SiteMetadata{
 		Type:               siteType,
 		Domain:             setup.domain,
@@ -410,17 +468,32 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		Cache:              setup.cache,
 		CORS:               setup.cors,
 	}
+
+	// Add PHP-specific fields to metadata.
+	if setup.isPHP && setup.phpInfo != nil {
+		meta.PHPVersion = setup.phpInfo.PHPVersion
+		meta.PHPExtensions = setup.phpInfo.Extensions
+		meta.PHPFramework = setup.phpInfo.Framework
+		meta.DocumentRoot = setup.phpInfo.DocumentRoot
+	}
+
 	if err := site.WriteSiteMetadata(setup.siteName, meta); err != nil {
 		return fmt.Errorf("failed to write site metadata: %w", err)
 	}
 
-	if setup.isStatic {
-		// Static site: generate docker-compose.yml and nginx.conf in config dir
+	switch {
+	case setup.isPHP:
+		// PHP site: generate Dockerfile, nginx.conf, and docker-compose.yml.
+		if err := site.WritePHPSiteConfig(setup.siteName, meta, setup.phpInfo); err != nil {
+			return fmt.Errorf("failed to write PHP site config: %w", err)
+		}
+	case setup.isStatic:
+		// Static site: generate docker-compose.yml and nginx.conf in config dir.
 		if err := site.WriteStaticSiteConfig(setup.siteName, meta); err != nil {
 			return fmt.Errorf("failed to write static site config: %w", err)
 		}
-	} else {
-		// Docker-compose site: generate Traefik file provider config
+	default:
+		// Docker-compose site: generate Traefik file provider config.
 		routeConfig := traefik.SiteRouteConfig{
 			Name:        setup.siteName,
 			Domain:      setup.domain,
@@ -445,9 +518,12 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine site type label
 	var siteType string
-	if setup.isStatic {
+	switch {
+	case setup.isPHP:
+		siteType = "php"
+	case setup.isStatic:
 		siteType = "static"
-	} else {
+	default:
 		siteType = "compose"
 	}
 
@@ -530,8 +606,8 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine the compose directory
 	var composeDir string
-	if setup.isStatic {
-		// Static sites have their compose file in the srv config directory
+	if setup.isStatic || setup.isPHP {
+		// Static and PHP sites have their compose file in the srv config directory
 		composeDir = site.SiteConfigDir(cfg, setup.siteName)
 	} else {
 		// Compose sites run from the project directory
@@ -542,8 +618,9 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 		return fmt.Errorf("failed to start site: %w", err)
 	}
 
-	// For compose sites, connect service to traefik network
-	if !setup.isStatic && setup.composeServiceName != "" {
+	// For compose sites, connect service to traefik network.
+	// Static and PHP sites manage network membership via compose labels.
+	if !setup.isStatic && !setup.isPHP && setup.composeServiceName != "" {
 		if err := docker.ConnectServiceToNetwork(setup.sitePath, setup.composeServiceName, cfg.NetworkName); err != nil {
 			if errors.Is(err, docker.ErrServiceNotRunning) {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", setup.composeServiceName)
@@ -717,9 +794,12 @@ func getModeLabel(s site.Site) string {
 
 	// Show site type and SSL mode
 	var typeLabel string
-	if s.Type == site.SiteTypeStatic {
+	switch s.Type {
+	case site.SiteTypeStatic:
 		typeLabel = "static"
-	} else {
+	case site.SiteTypePHP:
+		typeLabel = "php"
+	default:
 		typeLabel = "compose"
 	}
 
@@ -799,9 +879,12 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	ui.Print("  SSL:     %s", ui.TypeColor(s.IsLocal))
 
 	// Site type info
-	if s.Type == site.SiteTypeStatic {
+	switch s.Type {
+	case site.SiteTypeStatic:
 		ui.Print("  Type:    %s", "static (nginx)")
-	} else {
+	case site.SiteTypePHP:
+		ui.Print("  Type:    %s", "php (nginx + php-fpm)")
+	default:
 		ui.Print("  Type:    %s", "compose")
 		if s.ServiceName != "" {
 			ui.Print("  Service: %s", s.ServiceName)

@@ -305,6 +305,8 @@ const (
 	SiteTypeCompose = "compose"
 	// SiteTypeStatic is the static site type.
 	SiteTypeStatic = "static"
+	// SiteTypePHP is the PHP/FPM site type.
+	SiteTypePHP = "php"
 )
 
 // =============================================================================
@@ -331,6 +333,41 @@ const (
 	SchemeHTTPPrefix = "http://"
 	// SchemeHTTPSPrefix is the HTTPS URL scheme prefix.
 	SchemeHTTPSPrefix = "https://"
+)
+
+// =============================================================================
+// PHP Constants
+// =============================================================================
+
+const (
+	// PHPFPMImageLatest is the PHP-FPM alpine Docker image (latest stable).
+	PHPFPMImageLatest = "php:fpm-alpine"
+	// PHPFPMImageFormat is the format string for versioned PHP-FPM alpine images.
+	PHPFPMImageFormat = "php:%s-fpm-alpine"
+	// PHPFPMPort is the PHP-FPM FastCGI port.
+	PHPFPMPort = 9000
+	// PHPFPMServiceName is the service name for the PHP-FPM container in compose.
+	PHPFPMServiceName = "php"
+	// PHPWebServiceName is the service name for the nginx container in compose.
+	PHPWebServiceName = "web"
+	// PHPDockerfileFile is the Dockerfile filename generated for PHP sites.
+	PHPDockerfileFile = "Dockerfile"
+	// PHPDockerRootPath is the working directory inside PHP/nginx containers.
+	PHPDockerRootPath = "/var/www/html"
+	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".
+	PHPVersionLatest = "latest"
+)
+
+// PHP framework identifiers.
+const (
+	// PHPFrameworkLaravel is the Laravel framework identifier.
+	PHPFrameworkLaravel = "laravel"
+	// PHPFrameworkSymfony is the Symfony framework identifier.
+	PHPFrameworkSymfony = "symfony"
+	// PHPFrameworkWordPress is the WordPress framework identifier.
+	PHPFrameworkWordPress = "wordpress"
+	// PHPFrameworkGeneric is the generic PHP framework identifier.
+	PHPFrameworkGeneric = "generic"
 )
 
 // =============================================================================
