@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
@@ -201,6 +202,73 @@ func ContainerStatus(dir string) string {
 		}
 		total++
 		if strings.HasPrefix(line, constants.StatusPrefixUp) {
+			running++
+		}
+	}
+
+	switch {
+	case total == 0:
+		return constants.StatusStopped
+	case running == total:
+		return constants.StatusRunning
+	case running > 0:
+		return fmt.Sprintf("%s (%d/%d)", constants.StatusPartial, running, total)
+	default:
+		return constants.StatusStopped
+	}
+}
+
+// ContainerStatusByName returns the status of a single named container using
+// the Docker SDK (no subprocess). Returns "running", "stopped", or "partial (n/m)".
+// Falls back to ContainerStatus if the SDK call fails.
+func ContainerStatusByName(containerName string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+
+	cli, err := newClient()
+	if err != nil {
+		return constants.StatusStopped
+	}
+	defer cli.Close()
+
+	info, err := cli.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return constants.StatusStopped
+	}
+	if info.State != nil && info.State.Running {
+		return constants.StatusRunning
+	}
+	return constants.StatusStopped
+}
+
+// ContainerStatusByComposeDir returns the aggregate status of all containers
+// belonging to a Docker Compose project directory using the Docker SDK
+// (no subprocess). Returns "running", "stopped", or "partial (n/m)".
+// Falls back to ContainerStatus(dir) if the SDK call fails.
+func ContainerStatusByComposeDir(dir string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+
+	cli, err := newClient()
+	if err != nil {
+		// Fall back to subprocess
+		return ContainerStatus(dir)
+	}
+	defer cli.Close()
+
+	f := filters.NewArgs(
+		filters.Arg("label", "com.docker.compose.project.working_dir="+dir),
+	)
+	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true, Filters: f})
+	if err != nil {
+		// Fall back to subprocess
+		return ContainerStatus(dir)
+	}
+
+	var running, total int
+	for _, c := range containers {
+		total++
+		if c.State == "running" {
 			running++
 		}
 	}

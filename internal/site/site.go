@@ -192,6 +192,28 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	return s, true // Needs status check
 }
 
+// siteContainerStatus returns the container status for a site using the most
+// efficient available method:
+//   - Static/PHP sites have a single container with a known name → Docker SDK inspect (no subprocess).
+//   - Compose sites have their containers associated with a working-dir label → Docker SDK list (no subprocess).
+//   - Fallback (no service name, unknown type): subprocess docker compose ps.
+func siteContainerStatus(s Site) string {
+	switch s.Type {
+	case SiteTypeStatic, SiteTypePHP:
+		// Single-container sites: service name IS the container name.
+		if s.ServiceName != "" {
+			return docker.ContainerStatusByName(s.ServiceName)
+		}
+	case SiteTypeCompose:
+		// Multi-container compose projects: query by working-dir label.
+		if s.ComposeDir != "" {
+			return docker.ContainerStatusByComposeDir(s.ComposeDir)
+		}
+	}
+	// Fallback: subprocess docker compose ps (backward compat).
+	return docker.ContainerStatus(s.ComposeDir)
+}
+
 // fetchSiteStatuses fetches container statuses for sites in parallel.
 func fetchSiteStatuses(sites []Site, indices []int) {
 	if len(indices) == 0 {
@@ -220,8 +242,7 @@ func fetchSiteStatuses(sites []Site, indices []int) {
 			sem <- struct{}{}        // Acquire
 			defer func() { <-sem }() // Release
 
-			// Use ComposeDir for status check
-			status := docker.ContainerStatus(sites[i].ComposeDir)
+			status := siteContainerStatus(sites[i])
 			statusChan <- siteStatusResult{i, status}
 		}(idx)
 	}
@@ -323,7 +344,7 @@ func GetByName(name string) (*Site, error) {
 		if entry.Name() == name && entry.IsDir() {
 			s, needsStatus := loadSiteFromDir(cfg, entry)
 			if needsStatus {
-				s.Status = docker.ContainerStatus(s.ComposeDir)
+				s.Status = siteContainerStatus(s)
 			}
 			return &s, nil
 		}
