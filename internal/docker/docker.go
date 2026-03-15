@@ -71,6 +71,15 @@ func EnsureRunning() error {
 	return nil
 }
 
+// EnsureInitialized checks that the srv proxy network exists, which is created
+// by srv init. Returns a clear error directing the user to run srv init if not.
+func EnsureInitialized(networkName string) error {
+	if !NetworkExists(networkName) {
+		return fmt.Errorf("srv is not initialized. Run: srv init")
+	}
+	return nil
+}
+
 // NetworkExists checks if a Docker network with the given name exists.
 func NetworkExists(name string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)

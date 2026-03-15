@@ -103,6 +103,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
+		return err
+	}
+
 	// Validate and resolve site setup
 	setup, err := validateSiteSetup(args[0])
 	if err != nil {
@@ -983,6 +987,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
+		return err
+	}
+
 	if startFlags.all {
 		return startAllSites()
 	}
@@ -1191,6 +1203,14 @@ func init() {
 
 func runRestart(cmd *cobra.Command, args []string) error {
 	if err := docker.EnsureRunning(); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
 		return err
 	}
 

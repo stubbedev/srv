@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -534,20 +535,87 @@ type PortConflict struct {
 // or a generic message if the process could not be identified.
 func (c PortConflict) StopHint() string {
 	switch c.Process {
-	case "nginx":
-		return "sudo systemctl stop nginx"
+	case "systemd-resolved":
+		// Stopping systemd-resolved entirely breaks system DNS. The correct fix
+		// is to disable only its stub listener on port 53.
+		return "sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf && sudo systemctl restart systemd-resolved"
+	case "nginx", "lighttpd", "caddy":
+		return fmt.Sprintf("sudo systemctl stop %s", c.Process)
 	case "apache2", "httpd":
 		return fmt.Sprintf("sudo systemctl stop %s", c.Process)
-	case "lighttpd":
-		return "sudo systemctl stop lighttpd"
-	case "caddy":
-		return "sudo systemctl stop caddy"
 	default:
 		if c.Process != "" {
 			return fmt.Sprintf("sudo systemctl stop %s", c.Process)
 		}
 		return fmt.Sprintf("identify and stop the process using port %d (try: sudo ss -tlnp | grep :%d)", c.Port, c.Port)
 	}
+}
+
+// CanAutoFix reports whether srv knows how to fix this conflict automatically.
+func (c PortConflict) CanAutoFix() bool {
+	switch c.Process {
+	case "systemd-resolved", "nginx", "apache2", "httpd", "lighttpd", "caddy":
+		return true
+	}
+	return false
+}
+
+// AutoFix attempts to automatically resolve the port conflict.
+func (c PortConflict) AutoFix() error {
+	switch c.Process {
+	case "systemd-resolved":
+		return fixSystemdResolved()
+	case "nginx", "lighttpd", "caddy", "apache2", "httpd":
+		return shell.Sudo("systemctl", "stop", c.Process)
+	default:
+		return fmt.Errorf("no automatic fix available for process %q", c.Process)
+	}
+}
+
+// fixSystemdResolved disables the systemd-resolved DNS stub listener on port 53
+// without stopping systemd-resolved entirely (which would break system DNS).
+// It sets DNSStubListener=no in /etc/systemd/resolved.conf and restarts the service.
+func fixSystemdResolved() error {
+	const resolvedConf = "/etc/systemd/resolved.conf"
+
+	// Read current config.
+	data, err := os.ReadFile(resolvedConf)
+	if err != nil {
+		return fmt.Errorf("could not read %s: %w", resolvedConf, err)
+	}
+
+	content := string(data)
+
+	// Replace commented or active DNSStubListener with disabled value.
+	// Handles: #DNSStubListener=yes, DNSStubListener=yes, #DNSStubListener=no
+	re := regexp.MustCompile(`(?m)^#?DNSStubListener=.*$`)
+	if re.MatchString(content) {
+		content = re.ReplaceAllString(content, "DNSStubListener=no")
+	} else {
+		// Not present at all — append under [Resolve] section or at end.
+		content += "\nDNSStubListener=no\n"
+	}
+
+	// Write via a temp file and sudo tee to handle permissions.
+	tmp, err := os.CreateTemp("", "resolved-*.conf")
+	if err != nil {
+		return fmt.Errorf("could not create temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("could not write temp file: %w", err)
+	}
+	tmp.Close()
+
+	if err := shell.Sudo("cp", tmp.Name(), resolvedConf); err != nil {
+		return fmt.Errorf("could not update %s: %w", resolvedConf, err)
+	}
+	if err := shell.Sudo("systemctl", "restart", "systemd-resolved"); err != nil {
+		return fmt.Errorf("could not restart systemd-resolved: %w", err)
+	}
+	return nil
 }
 
 // CheckPortConflicts checks whether any of the ports srv requires are occupied

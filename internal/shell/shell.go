@@ -164,6 +164,9 @@ func isPortInUseError(err error) bool {
 // IdentifyPortProcess returns the name of the process listening on the given
 // port, or an empty string if it cannot be determined.
 // It tries ss(8) first (Linux), then lsof(8) (macOS/Linux fallback).
+// Special case: systemd-resolved is detected by its well-known stub listener
+// addresses (127.0.0.53, 127.0.0.54) even when running without sudo, since ss
+// hides process names for other users' processes without elevated privileges.
 func IdentifyPortProcess(port string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
@@ -177,13 +180,13 @@ func IdentifyPortProcess(port string) string {
 			for line := range strings.SplitSeq(string(out), "\n") {
 				fields := strings.Fields(line)
 				// Check if this line is for our port (field index 3 is local address)
-				if len(fields) < 5 {
+				if len(fields) < 4 {
 					continue
 				}
 				if !strings.HasSuffix(fields[3], portSuffix) {
 					continue
 				}
-				// Extract process name from users:(("name",...))
+				// Extract process name from users:(("name",...)) when visible.
 				for _, f := range fields {
 					if strings.HasPrefix(f, "users:") {
 						name := extractProcessName(f)
@@ -191,6 +194,13 @@ func IdentifyPortProcess(port string) string {
 							return name
 						}
 					}
+				}
+				// Process name not visible (no sudo). Detect systemd-resolved by
+				// its stub listener addresses — it only ever binds on 127.0.0.53
+				// and 127.0.0.54, never on 0.0.0.0 or ::.
+				addr := fields[3]
+				if strings.HasPrefix(addr, "127.0.0.53:") || strings.HasPrefix(addr, "127.0.0.54:") {
+					return "systemd-resolved"
 				}
 			}
 		}

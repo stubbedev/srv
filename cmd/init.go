@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -146,18 +145,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Pre-flight: check for port conflicts before attempting to bind.
 	if conflicts := traefik.CheckPortConflicts(); len(conflicts) > 0 {
-		var msg strings.Builder
-		msg.WriteString("cannot start: the following ports are already in use\n")
-		for _, c := range conflicts {
-			if c.Process != "" {
-				fmt.Fprintf(&msg, "\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
-			} else {
-				fmt.Fprintf(&msg, "\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
-			}
-			fmt.Fprintf(&msg, "\n    stop it with: %s\n", c.StopHint())
+		if err := resolvePortConflicts(conflicts); err != nil {
+			return err
 		}
-		msg.WriteString("\nThen run 'srv init' again.")
-		return fmt.Errorf("%s", msg.String())
 	}
 
 	if err := docker.ComposeUp(cfg.TraefikDir); err != nil {
@@ -195,4 +185,79 @@ func startSites(sites []site.Site) {
 	runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
 		return docker.ComposeUp(s.ComposeDir)
 	})
+}
+
+// resolvePortConflicts handles port conflicts detected before starting Traefik.
+// For conflicts where srv knows how to fix them automatically it prompts the
+// user to confirm, then applies the fix. For unknown processes it prints the
+// manual steps and returns an error.
+func resolvePortConflicts(conflicts []traefik.PortConflict) error {
+	// Separate fixable conflicts from ones that need manual intervention.
+	var fixable []traefik.PortConflict
+	var manual []traefik.PortConflict
+	for _, c := range conflicts {
+		if c.CanAutoFix() {
+			fixable = append(fixable, c)
+		} else {
+			manual = append(manual, c)
+		}
+	}
+
+	// For manual conflicts, print instructions and return an error.
+	if len(manual) > 0 {
+		msg := "cannot start: the following ports are already in use\n"
+		for _, c := range manual {
+			if c.Process != "" {
+				msg += fmt.Sprintf("\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
+			} else {
+				msg += fmt.Sprintf("\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
+			}
+			msg += fmt.Sprintf("\n    stop it with: %s\n", c.StopHint())
+		}
+		msg += "\nThen run 'srv init' again."
+		return fmt.Errorf("%s", msg)
+	}
+
+	// For fixable conflicts, describe them and offer to fix.
+	ui.Warn("The following ports are in use by processes srv can fix automatically:")
+	for _, c := range fixable {
+		ui.Dim("  :%d (%s) held by %s", c.Port, c.Name, c.Process)
+		ui.Dim("    fix: %s", c.StopHint())
+	}
+	ui.Blank()
+
+	var doFix bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Fix these conflicts automatically?").
+				Description("This requires sudo privileges").
+				Value(&doFix),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return err
+	}
+	if !doFix {
+		return fmt.Errorf("port conflicts not resolved; run 'srv init' again after freeing the ports above")
+	}
+
+	for _, c := range fixable {
+		ui.Info("Fixing :%d (%s)...", c.Port, c.Name)
+		if err := c.AutoFix(); err != nil {
+			return fmt.Errorf("failed to fix :%d (%s): %w", c.Port, c.Name, err)
+		}
+	}
+
+	// Re-check: give the OS a moment and verify the ports are now free.
+	if remaining := traefik.CheckPortConflicts(); len(remaining) > 0 {
+		msg := "ports still in use after fix attempt:\n"
+		for _, c := range remaining {
+			msg += fmt.Sprintf("\n  :%d (%s) — stop it with: %s\n", c.Port, c.Name, c.StopHint())
+		}
+		msg += "\nRun 'srv init' again."
+		return fmt.Errorf("%s", msg)
+	}
+
+	return nil
 }
