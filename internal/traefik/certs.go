@@ -6,29 +6,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/shell"
+	"github.com/stubbedev/srv/internal/mkcert"
 )
 
-// CheckMkcert verifies mkcert is installed and provides installation instructions if not.
+// CheckMkcert verifies mkcert is available (embedded or system).
 func CheckMkcert() error {
-	if !shell.Exists("mkcert") {
-		if runtime.GOOS == "darwin" {
-			return fmt.Errorf("mkcert is not installed.\n  Install with: %s", constants.MkcertInstallMac)
-		}
-		return fmt.Errorf("mkcert is not installed.\n  See: %s", constants.MkcertInstallURL)
+	if !mkcert.Available() {
+		return fmt.Errorf("mkcert is not available on this platform (embedded binary missing)")
 	}
 	return nil
 }
 
 // IsCAInstalled checks if the mkcert CA is installed.
 func IsCAInstalled() bool {
-	output, err := shell.MkcertQuiet("-CAROOT")
+	output, err := mkcert.Output("-CAROOT")
 	if err != nil {
 		return false
 	}
@@ -42,14 +38,9 @@ func IsCAInstalled() bool {
 
 // InstallCA installs the mkcert CA certificate.
 func InstallCA() error {
-	if !shell.Exists("mkcert") {
-		return fmt.Errorf("mkcert is not installed.\n  Install it first: %s", constants.MkcertInstallURL)
-	}
-
-	if err := shell.Mkcert("-install"); err != nil {
+	if err := mkcert.Run("-install"); err != nil {
 		return fmt.Errorf("failed to install mkcert CA: %w", err)
 	}
-
 	return nil
 }
 
@@ -115,7 +106,10 @@ func GenerateLocalCert(siteName, domain string) error {
 		domain,
 	}
 
-	if err := shell.Mkcert(args...); err != nil {
+	// RunQuiet suppresses mkcert's advisory stderr warnings (e.g. the "not
+	// installed in system trust store" note that fires immediately after
+	// install due to mkcert's cached cert pool — see FiloSottile/mkcert#234).
+	if err := mkcert.RunQuiet(args...); err != nil {
 		return fmt.Errorf("failed to generate certificate for %s: %w", domain, err)
 	}
 

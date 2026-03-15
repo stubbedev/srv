@@ -104,87 +104,177 @@ func SetupDNS() error {
 }
 
 // setupSystemdResolved configures systemd-resolved for local domains.
+// It delegates to updateSystemdResolvedConfig with the current domain list.
 func setupSystemdResolved() error {
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		domains = []string{}
+	}
+	return updateSystemdResolvedConfig(domains)
+}
+
+// updateSystemdResolvedConfig writes /etc/systemd/resolved.conf.d/srv-local.conf
+// so that systemd-resolved routes queries for each registered local domain
+// (and the standard local TLDs) through dnsmasq on 127.0.0.1:53.
+// It is called whenever the domain list changes.
+func updateSystemdResolvedConfig(domains []string) error {
 	configFile := constants.SystemdResolvedConfigPath
 	configDir := filepath.Dir(configFile)
 
-	// Check if already configured
-	if _, err := os.Stat(configFile); err == nil {
-		return nil // Already configured
+	// Build the Domains= value: standard local TLDs plus one entry per
+	// registered domain. The ~ prefix tells systemd-resolved to route
+	// matching queries to this DNS server rather than to the default.
+	routingDomains := make([]string, 0, len(LocalDomains)+len(domains))
+	for _, tld := range LocalDomains {
+		routingDomains = append(routingDomains, "~"+tld)
+	}
+	for _, d := range domains {
+		routingDomains = append(routingDomains, "~"+d)
 	}
 
-	content := fmt.Sprintf(`[Resolve]
-DNS=%s
-Domains=~test ~local ~localhost
-`, constants.LocalhostIP)
+	content := fmt.Sprintf("[Resolve]\nDNS=%s\nDomains=%s\n",
+		constants.LocalhostIP,
+		strings.Join(routingDomains, " "),
+	)
 
 	if err := shell.SudoMkdir(configDir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-
 	if err := shell.SudoWrite(configFile, content); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
 	if err := shell.SudoSystemctl("restart", "systemd-resolved"); err != nil {
 		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
 	}
-
 	return nil
 }
 
+// FlushDNSCache flushes the system DNS cache using the appropriate mechanism
+// for the detected resolver. Called after updating DNS routing config so the
+// new domain takes effect immediately without waiting for cache TTLs.
+func FlushDNSCache() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	switch DetectResolver() {
+	case ResolverSystemdResolved:
+		// systemd-resolved is already restarted in updateSystemdResolvedConfig,
+		// but resolvectl flush-caches clears any remaining per-link caches.
+		if shell.Exists("resolvectl") {
+			_, _ = shell.RunQuietWithContext(ctx, "resolvectl", "flush-caches")
+		}
+	case ResolverMacOS:
+		_, _ = shell.RunQuietWithContext(ctx, "dscacheutil", "-flushcache")
+		_, _ = shell.RunQuietWithContext(ctx, "killall", "-HUP", "mDNSResponder")
+	case ResolverNetworkManager:
+		if shell.Exists("resolvectl") {
+			_, _ = shell.RunQuietWithContext(ctx, "resolvectl", "flush-caches")
+		}
+	}
+}
+
 // setupMacOSResolver configures macOS resolver for local domains.
+// It delegates to updateMacOSResolverConfig with the current domain list.
 func setupMacOSResolver() error {
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		domains = []string{}
+	}
+	return updateMacOSResolverConfig(domains)
+}
+
+// updateMacOSResolverConfig ensures /etc/resolver/<name> files exist for every
+// local TLD and every registered domain. macOS consults /etc/resolver/ per
+// file name — each file routes queries for that name through the listed
+// nameserver, so dev.com needs its own /etc/resolver/dev.com file.
+// Files for domains that are no longer registered are removed.
+func updateMacOSResolverConfig(domains []string) error {
 	if err := shell.SudoMkdir(constants.MacOSResolverDir); err != nil {
 		return fmt.Errorf("failed to create resolver directory: %w", err)
 	}
 
-	for _, domain := range LocalDomains {
-		resolverFile := filepath.Join(constants.MacOSResolverDir, domain)
+	nameserver := "nameserver " + constants.LocalhostIP + "\n"
 
-		// Check if already configured
+	// Build the full set of names that should have resolver files.
+	wanted := make(map[string]bool)
+	for _, tld := range LocalDomains {
+		wanted[tld] = true
+	}
+	for _, d := range domains {
+		wanted[d] = true
+	}
+
+	// Write a resolver file for each wanted name.
+	for name := range wanted {
+		resolverFile := filepath.Join(constants.MacOSResolverDir, name)
 		if data, err := os.ReadFile(resolverFile); err == nil {
 			if strings.Contains(string(data), constants.LocalhostIP) {
-				continue // Already configured
+				continue // Already correct.
 			}
 		}
+		if err := shell.SudoWrite(resolverFile, nameserver); err != nil {
+			return fmt.Errorf("failed to write resolver file for %s: %w", name, err)
+		}
+	}
 
-		if err := shell.SudoWrite(resolverFile, "nameserver "+constants.LocalhostIP+"\n"); err != nil {
-			return fmt.Errorf("failed to write resolver file for .%s: %w", domain, err)
+	// Remove resolver files for domains no longer registered (but keep TLD files).
+	entries, err := os.ReadDir(constants.MacOSResolverDir)
+	if err != nil {
+		return nil // Non-fatal if we can't read the directory.
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if wanted[name] {
+			continue
+		}
+		// Only remove files that contain our nameserver line — don't touch
+		// files written by other tools.
+		resolverFile := filepath.Join(constants.MacOSResolverDir, name)
+		if data, err := os.ReadFile(resolverFile); err == nil {
+			if strings.Contains(string(data), constants.LocalhostIP) {
+				_ = shell.SudoRemove(resolverFile)
+			}
 		}
 	}
 
 	return nil
 }
 
-// setupNetworkManager configures NetworkManager to use local DNS for .test domains.
+// setupNetworkManager configures NetworkManager to use local DNS for local domains.
+// It delegates to updateNetworkManagerConfig with the current domain list.
 func setupNetworkManager() error {
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		domains = []string{}
+	}
+	return updateNetworkManagerConfig(domains)
+}
+
+// updateNetworkManagerConfig writes /etc/NetworkManager/dnsmasq.d/srv-local.conf
+// so that NetworkManager's built-in dnsmasq routes queries for each registered
+// domain through srv's dnsmasq on 127.0.0.1:53.
+func updateNetworkManagerConfig(domains []string) error {
 	configFile := constants.NetworkManagerConfigPath
 	configDir := filepath.Dir(configFile)
 
-	// Check if already configured
-	if _, err := os.Stat(configFile); err == nil {
-		return nil // Already configured
+	var content strings.Builder
+	content.WriteString("# srv local DNS configuration\n")
+	for _, tld := range LocalDomains {
+		fmt.Fprintf(&content, "server=/%s/%s\n", tld, constants.LocalhostIP)
 	}
-
-	content := fmt.Sprintf(`# srv local DNS configuration
-server=/test/%s
-server=/local/%s
-server=/localhost/%s
-`, constants.LocalhostIP, constants.LocalhostIP, constants.LocalhostIP)
+	for _, d := range domains {
+		fmt.Fprintf(&content, "server=/%s/%s\n", d, constants.LocalhostIP)
+	}
 
 	if err := shell.SudoMkdir(configDir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-
-	if err := shell.SudoWrite(configFile, content); err != nil {
+	if err := shell.SudoWrite(configFile, content.String()); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
 	if err := shell.SudoSystemctl("restart", "NetworkManager"); err != nil {
 		return fmt.Errorf("failed to restart NetworkManager: %w", err)
 	}
-
 	return nil
 }
 
@@ -203,13 +293,20 @@ func RemoveDNS() error {
 		return shell.SudoSystemctl("restart", "systemd-resolved")
 
 	case ResolverMacOS:
+		// Remove all resolver files that contain our nameserver line.
+		// This covers both local TLD files and per-domain files (e.g. dev.com).
+		entries, err := os.ReadDir(constants.MacOSResolverDir)
+		if err != nil {
+			return nil // Already removed or directory doesn't exist.
+		}
 		var lastErr error
-		for _, domain := range LocalDomains {
-			resolverFile := filepath.Join(constants.MacOSResolverDir, domain)
-			if err := shell.SudoRemove(resolverFile); err != nil {
-				// Only track errors for files that exist
-				if _, statErr := os.Stat(resolverFile); statErr == nil {
-					lastErr = err
+		for _, entry := range entries {
+			resolverFile := filepath.Join(constants.MacOSResolverDir, entry.Name())
+			if data, readErr := os.ReadFile(resolverFile); readErr == nil {
+				if strings.Contains(string(data), constants.LocalhostIP) {
+					if removeErr := shell.SudoRemove(resolverFile); removeErr != nil {
+						lastErr = removeErr
+					}
 				}
 			}
 		}
@@ -429,6 +526,32 @@ func UpdateDnsmasqConfig() error {
 	if err := os.WriteFile(dnsmasqPath, []byte(content.String()), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
 	}
+
+	// Keep the system resolver routing config in sync so that every registered
+	// domain (not just .test/.local/.localhost TLDs) is routed through dnsmasq.
+	switch DetectResolver() {
+	case ResolverSystemdResolved:
+		if _, err := os.Stat(constants.SystemdResolvedConfigPath); err == nil {
+			if err := updateSystemdResolvedConfig(domains); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to update systemd-resolved config: %v\n", err)
+			}
+		}
+	case ResolverNetworkManager:
+		if _, err := os.Stat(constants.NetworkManagerConfigPath); err == nil {
+			if err := updateNetworkManagerConfig(domains); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to update NetworkManager config: %v\n", err)
+			}
+		}
+	case ResolverMacOS:
+		if _, err := os.Stat(constants.MacOSResolverDir); err == nil {
+			if err := updateMacOSResolverConfig(domains); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to update macOS resolver config: %v\n", err)
+			}
+		}
+	}
+
+	// Flush system DNS cache so the new routing takes effect immediately.
+	FlushDNSCache()
 
 	// Reload DNS container if running
 	if IsDNSRunning() {

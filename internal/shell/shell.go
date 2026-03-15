@@ -83,39 +83,35 @@ func Exists(name string) bool {
 	return err == nil
 }
 
-// Mkcert runs mkcert with the given arguments.
-func Mkcert(args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), LongTimeout)
-	defer cancel()
-	return RunWithContext(ctx, "mkcert", args...)
-}
-
-// MkcertQuiet runs mkcert and returns its output.
-func MkcertQuiet(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), LongTimeout)
-	defer cancel()
-	return RunQuietWithContext(ctx, "mkcert", args...)
-}
-
 // CheckPort checks if a port is in use.
 // Uses net.Listen for reliable cross-platform port checking.
 // Falls back to ss/netstat if net.Listen fails due to permissions.
 func CheckPort(port string) (bool, error) {
-	// First, try direct port binding - most reliable method
-	listener, err := net.Listen("tcp", ":"+port)
+	return CheckPortOnAddr("", port)
+}
+
+// CheckPortOnAddr checks whether a specific addr:port is in use.
+// addr may be empty to check all interfaces (0.0.0.0), or a specific IP
+// such as "127.0.0.1" to check only that binding address.
+func CheckPortOnAddr(addr, port string) (bool, error) {
+	bindAddr := addr
+	if bindAddr == "" {
+		bindAddr = "0.0.0.0"
+	}
+
+	// First, try direct port binding — most reliable method.
+	listener, err := net.Listen("tcp", bindAddr+":"+port)
 	if err != nil {
-		// If we get an error, check if it's because the port is in use
-		// or if it's a permission error (ports < 1024 require root)
 		if isPortInUseError(err) {
 			return true, nil
 		}
-		// Permission denied or other error - fall back to ss/netstat
+		// Permission denied or other error — fall back to ss/netstat.
 	} else {
 		listener.Close()
 		return false, nil // Port is available
 	}
 
-	// Fallback to ss/netstat for privileged ports or when binding fails
+	// Fallback to ss/netstat for privileged ports or when binding fails.
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
@@ -133,18 +129,25 @@ func CheckPort(port string) (bool, error) {
 		return false, err
 	}
 
-	// Parse output line by line for more accurate matching
-	// Look for patterns like ":80 " or ":80\t" or "]:80 " (IPv6)
-	lines := strings.Split(string(output), "\n")
 	portSuffix := ":" + port
-	for _, line := range lines {
-		// Check for port at end of address (before whitespace)
-		// Handles both IPv4 (0.0.0.0:80) and IPv6 ([::]:80)
-		fields := strings.FieldsSeq(line)
-		for field := range fields {
-			if strings.HasSuffix(field, portSuffix) {
-				return true, nil
+	for line := range strings.SplitSeq(string(output), "\n") {
+		fields := strings.Fields(line)
+		for _, field := range fields {
+			if !strings.HasSuffix(field, portSuffix) {
+				continue
 			}
+			// When checking a specific addr, only count it as in-use if the
+			// listening address matches. Addresses that bind on a *different*
+			// IP (e.g. 127.0.0.53:53) do not block binding on addr:port.
+			if addr != "" {
+				// field is "ip:port"; extract the IP part.
+				host := strings.TrimSuffix(field, portSuffix)
+				// Wildcard listeners (0.0.0.0 / ::) conflict with any addr.
+				if host != "0.0.0.0" && host != "[::]" && host != addr {
+					continue // Different specific IP — not a conflict.
+				}
+			}
+			return true, nil
 		}
 	}
 
@@ -164,9 +167,6 @@ func isPortInUseError(err error) bool {
 // IdentifyPortProcess returns the name of the process listening on the given
 // port, or an empty string if it cannot be determined.
 // It tries ss(8) first (Linux), then lsof(8) (macOS/Linux fallback).
-// Special case: systemd-resolved is detected by its well-known stub listener
-// addresses (127.0.0.53, 127.0.0.54) even when running without sudo, since ss
-// hides process names for other users' processes without elevated privileges.
 func IdentifyPortProcess(port string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
@@ -195,13 +195,7 @@ func IdentifyPortProcess(port string) string {
 						}
 					}
 				}
-				// Process name not visible (no sudo). Detect systemd-resolved by
-				// its stub listener addresses — it only ever binds on 127.0.0.53
-				// and 127.0.0.54, never on 0.0.0.0 or ::.
-				addr := fields[3]
-				if strings.HasPrefix(addr, "127.0.0.53:") || strings.HasPrefix(addr, "127.0.0.54:") {
-					return "systemd-resolved"
-				}
+
 			}
 		}
 	}

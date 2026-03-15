@@ -1,3 +1,7 @@
+# Embedded mkcert binaries and generated version file — produced by scripts/download-mkcert.sh
+internal/mkcert/bin/
+internal/mkcert/version.go
+
 # Build artifacts
 srv
 main

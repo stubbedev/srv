@@ -539,8 +539,19 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	return startSiteAfterAdd(cfg, setup)
 }
 
-// generateLocalCert generates SSL certificate for local domains and registers DNS
+// generateLocalCert generates SSL certificate for local domains and registers DNS.
+// DNS registration always runs regardless of whether mkcert is available —
+// TLS and DNS are independent concerns.
 func generateLocalCert(siteName, domain string) {
+	// Always register DNS — this must happen even if mkcert is missing.
+	if err := traefik.RegisterLocalDomain(domain); err != nil {
+		ui.Warn("Failed to register DNS for %s: %v", domain, err)
+	} else {
+		ui.Dim("If %s doesn't resolve, clear your browser DNS cache:", domain)
+		ui.Dim("  Chrome: chrome://net-internals/#dns  →  Clear host cache")
+		ui.Dim("  Firefox: about:networking#dns  →  Clear DNS Cache")
+	}
+
 	if err := traefik.CheckMkcert(); err != nil {
 		ui.Warn("%v", err)
 		ui.Dim("Local HTTPS will not work without mkcert")
@@ -570,11 +581,6 @@ func generateLocalCert(siteName, domain string) {
 		if err := traefik.UpdateDynamicConfig(); err != nil {
 			ui.Warn("Failed to update Traefik config: %v", err)
 		}
-	}
-
-	// Register domain for local DNS
-	if err := traefik.RegisterLocalDomain(domain); err != nil {
-		ui.Warn("Failed to register DNS for %s: %v", domain, err)
 	}
 }
 

@@ -17,6 +17,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Download mkcert binaries for embedding
+        run: make mkcert
+
       - name: Build
         run: go build ./...
 

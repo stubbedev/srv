@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -535,13 +534,7 @@ type PortConflict struct {
 // or a generic message if the process could not be identified.
 func (c PortConflict) StopHint() string {
 	switch c.Process {
-	case "systemd-resolved":
-		// Stopping systemd-resolved entirely breaks system DNS. The correct fix
-		// is to disable only its stub listener on port 53.
-		return "sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf && sudo systemctl restart systemd-resolved"
-	case "nginx", "lighttpd", "caddy":
-		return fmt.Sprintf("sudo systemctl stop %s", c.Process)
-	case "apache2", "httpd":
+	case "nginx", "lighttpd", "caddy", "apache2", "httpd":
 		return fmt.Sprintf("sudo systemctl stop %s", c.Process)
 	default:
 		if c.Process != "" {
@@ -554,7 +547,7 @@ func (c PortConflict) StopHint() string {
 // CanAutoFix reports whether srv knows how to fix this conflict automatically.
 func (c PortConflict) CanAutoFix() bool {
 	switch c.Process {
-	case "systemd-resolved", "nginx", "apache2", "httpd", "lighttpd", "caddy":
+	case "nginx", "apache2", "httpd", "lighttpd", "caddy":
 		return true
 	}
 	return false
@@ -563,8 +556,6 @@ func (c PortConflict) CanAutoFix() bool {
 // AutoFix attempts to automatically resolve the port conflict.
 func (c PortConflict) AutoFix() error {
 	switch c.Process {
-	case "systemd-resolved":
-		return fixSystemdResolved()
 	case "nginx", "lighttpd", "caddy", "apache2", "httpd":
 		return shell.Sudo("systemctl", "stop", c.Process)
 	default:
@@ -572,77 +563,40 @@ func (c PortConflict) AutoFix() error {
 	}
 }
 
-// fixSystemdResolved disables the systemd-resolved DNS stub listener on port 53
-// without stopping systemd-resolved entirely (which would break system DNS).
-// It sets DNSStubListener=no in /etc/systemd/resolved.conf and restarts the service.
-func fixSystemdResolved() error {
-	const resolvedConf = "/etc/systemd/resolved.conf"
-
-	// Read current config.
-	data, err := os.ReadFile(resolvedConf)
-	if err != nil {
-		return fmt.Errorf("could not read %s: %w", resolvedConf, err)
-	}
-
-	content := string(data)
-
-	// Replace commented or active DNSStubListener with disabled value.
-	// Handles: #DNSStubListener=yes, DNSStubListener=yes, #DNSStubListener=no
-	re := regexp.MustCompile(`(?m)^#?DNSStubListener=.*$`)
-	if re.MatchString(content) {
-		content = re.ReplaceAllString(content, "DNSStubListener=no")
-	} else {
-		// Not present at all — append under [Resolve] section or at end.
-		content += "\nDNSStubListener=no\n"
-	}
-
-	// Write via a temp file and sudo tee to handle permissions.
-	tmp, err := os.CreateTemp("", "resolved-*.conf")
-	if err != nil {
-		return fmt.Errorf("could not create temp file: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		return fmt.Errorf("could not write temp file: %w", err)
-	}
-	tmp.Close()
-
-	if err := shell.Sudo("cp", tmp.Name(), resolvedConf); err != nil {
-		return fmt.Errorf("could not update %s: %w", resolvedConf, err)
-	}
-	if err := shell.Sudo("systemctl", "restart", "systemd-resolved"); err != nil {
-		return fmt.Errorf("could not restart systemd-resolved: %w", err)
-	}
-	return nil
-}
-
 // CheckPortConflicts checks whether any of the ports srv requires are occupied
 // by a non-srv process. It skips ports already owned by srv containers.
 // Only ports 80, 443, and 53 are checked; port 8080 (dashboard) is advisory only.
+//
+// Port 53 is checked on 127.0.0.1 specifically, because the dnsmasq container
+// binds "127.0.0.1:53:53/udp" — not 0.0.0.0:53. systemd-resolved's stub
+// listener on 127.0.0.53:53 does not conflict with this binding and is not
+// reported as a conflict.
 func CheckPortConflicts() []PortConflict {
 	type check struct {
 		port      int
+		bindAddr  string // specific bind address to check; "" means 0.0.0.0
 		name      string
 		ownedByFn func() bool
 	}
 
 	checks := []check{
-		{constants.PortHTTP, constants.PortNameHTTP, IsRunning},
-		{constants.PortHTTPS, constants.PortNameHTTPS, IsRunning},
-		{constants.PortDNS, constants.PortNameDNS, IsDNSRunning},
+		{constants.PortHTTP, "", constants.PortNameHTTP, IsRunning},
+		{constants.PortHTTPS, "", constants.PortNameHTTPS, IsRunning},
+		// DNS binds on 127.0.0.1 only — check that address, not 0.0.0.0.
+		{constants.PortDNS, constants.LocalhostIP, constants.PortNameDNS, IsDNSRunning},
 	}
 
 	var conflicts []PortConflict
 	for _, c := range checks {
-		if CheckPortAvailable(c.port) {
-			continue // port is free
+		portStr := fmt.Sprintf("%d", c.port)
+		inUse, _ := shell.CheckPortOnAddr(c.bindAddr, portStr)
+		if !inUse {
+			continue // port is free at the relevant address
 		}
 		if c.ownedByFn() {
 			continue // port is ours — no conflict
 		}
-		process := shell.IdentifyPortProcess(fmt.Sprintf("%d", c.port))
+		process := shell.IdentifyPortProcess(portStr)
 		conflicts = append(conflicts, PortConflict{
 			Port:    c.port,
 			Name:    c.name,
