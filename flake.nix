@@ -18,6 +18,21 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         version = self.shortRev or self.dirtyShortRev or "dev";
+
+        # Build mkcert from the submodule as a separate derivation.
+        # This runs in its own sandbox with its own vendorHash, completely
+        # independent of srv's dependency fetch — so our preBuild hook
+        # is never inherited by the goModules fixed-output derivation.
+        mkcertBin = pkgs.buildGoModule {
+          pname = "mkcert";
+          version = "submodule";
+          src = "${self}/third_party/mkcert";
+          vendorHash = "sha256-DdA7s+N5S1ivwUgZ+M2W/HCp/7neeoqRQL0umn3m6Do=";
+          env.CGO_ENABLED = "0";
+          ldflags = [ "-X main.Version=submodule" ];
+          meta.mainProgram = "mkcert";
+        };
+
       in
       {
         packages = {
@@ -36,24 +51,18 @@
               "-X main.BuildDate=1970-01-01T00:00:00Z"
             ];
 
-            # Build mkcert from the submodule before go build runs.
-            # The binary is written to internal/mkcert/bin/mkcert where
-            # the //go:embed directive expects it.
-            preBuild = ''
+            # Copy the pre-built mkcert binary into place before go build runs.
+            # This is NOT inherited by the goModules derivation (only preBuild is),
+            # so it runs only in the main build sandbox where the binary is available.
+            preConfigure = ''
               mkdir -p internal/mkcert/bin
-              MKCERT_VERSION=$(cd third_party/mkcert && git describe --tags 2>/dev/null || echo "unknown")
-              (cd third_party/mkcert && CGO_ENABLED=0 go build \
-                -ldflags "-X main.Version=$MKCERT_VERSION" \
-                -o ../../internal/mkcert/bin/mkcert .)
+              cp ${mkcertBin}/bin/mkcert internal/mkcert/bin/mkcert
 
-              # Generate version.go from the submodule's git tag.
-              MKCERT_VERSION=$(cd third_party/mkcert && git describe --tags --abbrev=0 2>/dev/null || echo "unknown")
-              cat > internal/mkcert/version.go <<EOF
+              cat > internal/mkcert/version.go <<'EOF'
               // Code generated during Nix build — do not edit.
               package mkcert
 
-              // Version is the version of the embedded mkcert binary.
-              const Version = "$MKCERT_VERSION"
+              const Version = "submodule"
               EOF
             '';
 
