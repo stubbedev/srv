@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    mkcert = {
+      url = "github:FiloSottile/mkcert/1c1dc4ed27ed5936046b6398d39cab4d657a2d8e";
+      flake = false;
+    };
   };
 
   outputs =
@@ -11,6 +15,7 @@
       self,
       nixpkgs,
       flake-utils,
+      mkcert,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -25,11 +30,11 @@
         # is never inherited by the goModules fixed-output derivation.
         mkcertBin = pkgs.buildGoModule {
           pname = "mkcert";
-          version = "submodule";
-          src = "${self}/third_party/mkcert";
+          version = mkcert.shortRev or "unknown";
+          src = mkcert;
           vendorHash = "sha256-DdA7s+N5S1ivwUgZ+M2W/HCp/7neeoqRQL0umn3m6Do=";
           env.CGO_ENABLED = "0";
-          ldflags = [ "-X main.Version=submodule" ];
+          ldflags = [ "-X main.Version=${mkcert.shortRev or "unknown"}" ];
           meta.mainProgram = "mkcert";
         };
 

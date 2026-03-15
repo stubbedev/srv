@@ -1,9 +1,22 @@
-.PHONY: build test clean mkcert
+.PHONY: build test clean mkcert update-mkcert
 
 BINARY         := srv
 MKCERT_SRC     := third_party/mkcert
 MKCERT_BIN     := internal/mkcert/bin/mkcert
 MKCERT_VERSION_FILE := internal/mkcert/version.go
+
+## Update mkcert to the latest upstream commit, rebuild the embedded binary,
+## refresh flake.lock, and commit everything in one step.
+update-mkcert:
+	@echo "Updating mkcert submodule to latest..."
+	git submodule update --remote third_party/mkcert
+	$(eval MKCERT_COMMIT := $(shell git -C $(MKCERT_SRC) rev-parse HEAD))
+	@echo "Updated to $(MKCERT_COMMIT)"
+	@sed -i 's|url = "github:FiloSottile/mkcert/[^"]*"|url = "github:FiloSottile/mkcert/$(MKCERT_COMMIT)"|' flake.nix
+	nix flake update mkcert
+	@$(MAKE) mkcert
+	git add third_party/mkcert flake.nix flake.lock
+	git commit -m "chore: update mkcert to $(MKCERT_COMMIT)"
 
 ## Build mkcert from the submodule source and embed it.
 mkcert: $(MKCERT_BIN)

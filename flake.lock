@@ -18,6 +18,23 @@
         "type": "github"
       }
     },
+    "mkcert": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1713430407,
+        "narHash": "sha256-gVm69SScwkQFHxzk2EwdCZjllaQ4lxYeQ10PeJZv65M=",
+        "owner": "FiloSottile",
+        "repo": "mkcert",
+        "rev": "1c1dc4ed27ed5936046b6398d39cab4d657a2d8e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "FiloSottile",
+        "repo": "mkcert",
+        "rev": "1c1dc4ed27ed5936046b6398d39cab4d657a2d8e",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1773507054,
@@ -37,6 +54,7 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "mkcert": "mkcert",
         "nixpkgs": "nixpkgs"
       }
     },
