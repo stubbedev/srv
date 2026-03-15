@@ -129,15 +129,31 @@ func CreateNetwork(name string) error {
 // ComposeUp runs docker compose up -d in the specified directory.
 // Uses --remove-orphans to clean up stale containers.
 func ComposeUp(dir string) error {
-	return Compose(dir, "up", "-d", "--remove-orphans")
+	return ComposeUpWithProfile(dir, "")
+}
+
+// ComposeUpBuild runs docker compose up -d --build, forcing a rebuild of any
+// images defined by a Dockerfile before starting the containers.
+func ComposeUpBuild(dir string) error {
+	return ComposeUpBuildWithProfile(dir, "")
 }
 
 // ComposeUpWithProfile runs docker compose up -d with a specific profile.
 func ComposeUpWithProfile(dir, profile string) error {
-	if profile == "" {
-		return ComposeUp(dir)
+	args := []string{"up", "-d", "--remove-orphans"}
+	if profile != "" {
+		return Compose(dir, append([]string{"--profile", profile}, args...)...)
 	}
-	return Compose(dir, "--profile", profile, "up", "-d", "--remove-orphans")
+	return Compose(dir, args...)
+}
+
+// ComposeUpBuildWithProfile runs docker compose up -d --build with a specific profile.
+func ComposeUpBuildWithProfile(dir, profile string) error {
+	args := []string{"up", "-d", "--build", "--remove-orphans"}
+	if profile != "" {
+		return Compose(dir, append([]string{"--profile", profile}, args...)...)
+	}
+	return Compose(dir, args...)
 }
 
 // ComposeDown runs docker compose down in the specified directory.

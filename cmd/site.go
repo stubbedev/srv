@@ -963,7 +963,8 @@ func showCertInfo(domain string) {
 // =============================================================================
 
 var startFlags struct {
-	all bool
+	all   bool
+	build bool
 }
 
 var startCmd = &cobra.Command{
@@ -987,6 +988,7 @@ Use --all to start all registered sites in parallel.`,
 
 func init() {
 	startCmd.Flags().BoolVarP(&startFlags.all, "all", "a", false, "Start all sites")
+	startCmd.Flags().BoolVar(&startFlags.build, "build", false, "Rebuild images before starting")
 	startCmd.GroupID = GroupSites
 	RootCmd.AddCommand(startCmd)
 }
@@ -1024,8 +1026,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	ui.Info("Starting %s...", s.Name)
 	// Use ComposeDir which is set correctly for both static and compose sites
-	if err := docker.ComposeUpWithProfile(s.ComposeDir, s.Profile); err != nil {
-		return fmt.Errorf("failed to start site: %w", err)
+	var startErr error
+	if startFlags.build {
+		startErr = docker.ComposeUpBuildWithProfile(s.ComposeDir, s.Profile)
+	} else {
+		startErr = docker.ComposeUpWithProfile(s.ComposeDir, s.Profile)
+	}
+	if startErr != nil {
+		return fmt.Errorf("failed to start site: %w", startErr)
 	}
 
 	// For compose sites, connect service to traefik network after starting
@@ -1182,7 +1190,8 @@ func stopAllSites() error {
 // =============================================================================
 
 var restartFlags struct {
-	all bool
+	all   bool
+	build bool
 }
 
 var restartCmd = &cobra.Command{
@@ -1206,6 +1215,7 @@ Use --all to restart all registered sites in parallel.`,
 
 func init() {
 	restartCmd.Flags().BoolVarP(&restartFlags.all, "all", "a", false, "Restart all sites")
+	restartCmd.Flags().BoolVar(&restartFlags.build, "build", false, "Rebuild images before restarting")
 	restartCmd.GroupID = GroupSites
 	RootCmd.AddCommand(restartCmd)
 }
@@ -1237,8 +1247,14 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Info("Restarting %s...", s.Name)
-	if err := docker.ComposeRestart(s.ComposeDir); err != nil {
-		return fmt.Errorf("failed to restart site: %w", err)
+	if restartFlags.build {
+		if err := docker.ComposeUpBuildWithProfile(s.ComposeDir, s.Profile); err != nil {
+			return fmt.Errorf("failed to rebuild and restart site: %w", err)
+		}
+	} else {
+		if err := docker.ComposeRestart(s.ComposeDir); err != nil {
+			return fmt.Errorf("failed to restart site: %w", err)
+		}
 	}
 
 	ui.Success("Site '%s' restarted", s.Name)
