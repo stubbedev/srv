@@ -453,7 +453,8 @@ func generatePHPNginxConf(info *PHPSiteInfo) string {
 // requires, and whether it needs a special configure or PECL install step.
 type extInfo struct {
 	alpinePkgs []string // apk packages required
-	configure  string   // extra configure flags (empty if none)
+	configure  string   // extra configure flags passed to docker-php-ext-configure
+	cppflags   string   // CPPFLAGS set for the docker-php-ext-configure invocation
 	pecl       bool     // true if installed via PECL instead of docker-php-ext-install
 }
 
@@ -472,7 +473,7 @@ var phpExtensionCatalog = map[string]extInfo{
 	"pgsql":      {alpinePkgs: []string{"postgresql-dev"}},
 	"mongodb":    {alpinePkgs: []string{"autoconf", "g++", "make"}, pecl: true},
 	// Core
-	"mbstring":  {},
+	"mbstring":  {alpinePkgs: []string{"oniguruma-dev"}},
 	"xml":       {alpinePkgs: []string{"libxml2-dev"}},
 	"curl":      {alpinePkgs: []string{"curl-dev"}},
 	"tokenizer": {},
@@ -480,9 +481,14 @@ var phpExtensionCatalog = map[string]extInfo{
 	"zip":      {alpinePkgs: []string{"libzip-dev"}},
 	"fileinfo": {},
 	// Text processing
-	"iconv":     {},
+	// iconv: musl's built-in iconv is incomplete; use GNU libiconv instead.
+	// --with-iconv=/usr points PHP's configure at the GNU libiconv headers.
+	"iconv":     {alpinePkgs: []string{"gnu-libiconv-dev"}, configure: "--with-iconv=/usr"},
 	"simplexml": {alpinePkgs: []string{"libxml2-dev"}},
-	"dom":       {alpinePkgs: []string{"libxml2-dev"}},
+	// dom requires lexbor headers (PHP 8.4+). lexbor is bundled inside the PHP
+	// source tree at ext/lexbor/, so we point CPPFLAGS at those paths via a
+	// docker-php-ext-configure step; no external lexbor-dev package is needed.
+	"dom": {alpinePkgs: []string{"libxml2-dev"}, cppflags: "-I/usr/src/php/ext/lexbor -I/usr/src/php"},
 	// Performance & math
 	"opcache": {},
 	"bcmath":  {},
@@ -490,7 +496,8 @@ var phpExtensionCatalog = map[string]extInfo{
 	"intl":    {alpinePkgs: []string{"icu-dev"}},
 	"gettext": {alpinePkgs: []string{"gettext-dev"}},
 	// Networking
-	"sockets":  {},
+	// sockets requires linux-headers for kernel socket interfaces (e.g. linux/sock_diag.h).
+	"sockets":  {alpinePkgs: []string{"linux-headers"}},
 	"ftp":      {},
 	"calendar": {},
 	// Security (usually built-in, but listed for completeness)
@@ -500,17 +507,22 @@ var phpExtensionCatalog = map[string]extInfo{
 }
 
 // builtinExtensions are always compiled into PHP — no installation step needed.
+// These extensions are either statically compiled into the PHP binary or are
+// deeply integrated and cannot be built as a separate shared extension via
+// docker-php-ext-install (e.g. opcache, tokenizer).
 var builtinExtensions = map[string]bool{
-	"json":     true,
-	"hash":     true,
-	"openssl":  true,
-	"sodium":   true,
-	"filter":   true,
-	"ctype":    true,
-	"session":  true,
-	"pcre":     true,
-	"spl":      true,
-	"standard": true,
+	"json":      true,
+	"hash":      true,
+	"openssl":   true,
+	"sodium":    true,
+	"filter":    true,
+	"ctype":     true,
+	"session":   true,
+	"pcre":      true,
+	"spl":       true,
+	"standard":  true,
+	"opcache":   true, // built into the base image; cannot be reinstalled as a shared ext
+	"tokenizer": true, // requires Zend parser source files not present after PHP is compiled
 }
 
 // generatePHPDockerfile generates a Dockerfile for a PHP site, installing all
@@ -542,7 +554,7 @@ func generatePHPDockerfile(info *PHPSiteInfo) string {
 			peclExts = append(peclExts, ext)
 			hasPeclExts = true
 		} else {
-			if ei.configure != "" {
+			if ei.configure != "" || ei.cppflags != "" {
 				configureExts = append(configureExts, ext)
 			}
 			standardExts = append(standardExts, ext)
@@ -576,11 +588,19 @@ func generatePHPDockerfile(info *PHPSiteInfo) string {
 		sb.WriteString("\n\n")
 	}
 
-	// Configure steps (e.g. GD with JPEG/FreeType).
+	// Configure steps (e.g. GD with JPEG/FreeType, or dom needing lexbor headers).
 	if len(configureExts) > 0 {
 		for _, ext := range configureExts {
 			ei := phpExtensionCatalog[ext]
-			fmt.Fprintf(&sb, "RUN docker-php-ext-configure %s %s\n", ext, ei.configure)
+			if ei.cppflags != "" {
+				if ei.configure != "" {
+					fmt.Fprintf(&sb, "RUN CPPFLAGS=\"%s\" docker-php-ext-configure %s %s\n", ei.cppflags, ext, ei.configure)
+				} else {
+					fmt.Fprintf(&sb, "RUN CPPFLAGS=\"%s\" docker-php-ext-configure %s\n", ei.cppflags, ext)
+				}
+			} else {
+				fmt.Fprintf(&sb, "RUN docker-php-ext-configure %s %s\n", ext, ei.configure)
+			}
 		}
 		sb.WriteString("\n")
 	}
