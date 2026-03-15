@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -27,11 +28,10 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Download mkcert binaries for embedding
-        run: make mkcert
-
       - name: Test
-        run: go test ./...
+        run: |
+          make mkcert
+          go test ./...
 
       - name: Build binaries
         run: |
@@ -40,10 +40,8 @@ jobs:
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           LDFLAGS="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}"
 
-          # Create output directory
           mkdir -p dist
 
-          # Build matrix: OS/ARCH combinations
           platforms=(
             "linux/amd64"
             "linux/arm64"
@@ -60,17 +58,20 @@ jobs:
             if [ -n "$GOARM" ]; then
               output_name="srv-${GOOS}-${GOARCH}v${GOARM}"
             fi
-            if [ "$GOOS" = "windows" ]; then
-              output_name="${output_name}.exe"
-            fi
 
             echo "Building ${output_name}..."
+
+            # Build mkcert for this target platform, then srv.
+            mkdir -p internal/mkcert/bin
+            MKCERT_VERSION=$(git -C third_party/mkcert describe --tags 2>/dev/null || echo "unknown")
+            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOARM="$GOARM" \
+              go build -ldflags "-X main.Version=${MKCERT_VERSION}" \
+              -o internal/mkcert/bin/mkcert ./third_party/mkcert
 
             env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOARM="$GOARM" \
               go build -ldflags "$LDFLAGS" -trimpath -o "dist/${output_name}" .
           done
 
-          # Create checksums
           cd dist
           sha256sum * > checksums.txt
 

@@ -1,4 +1,4 @@
-# Embedded mkcert binaries and generated version file — produced by scripts/download-mkcert.sh
+# mkcert binary built from submodule and generated version file — produced by make mkcert
 internal/mkcert/bin/
 internal/mkcert/version.go
 

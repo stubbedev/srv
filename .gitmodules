@@ -1,0 +1,3 @@
+[submodule "third_party/mkcert"]
+	path = third_party/mkcert
+	url = https://github.com/FiloSottile/mkcert.git
