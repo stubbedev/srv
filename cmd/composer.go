@@ -138,6 +138,11 @@ func composerSubcommands() []*cobra.Command {
 			[]string{"rm", "uninstall"},
 		),
 		composerSubcmd(
+			"init [SITE]",
+			"Interactively create a composer.json in the current directory",
+			nil,
+		),
+		composerSubcmd(
 			"dump-autoload [SITE]",
 			"Regenerate the autoloader",
 			[]string{"dumpautoload"},
