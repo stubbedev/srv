@@ -2,6 +2,9 @@
 internal/mkcert/bin/
 internal/mkcert/version.go
 
+# Go vendor directory — dependencies fetched by go mod or Nix
+vendor/
+
 # Build artifacts
 srv
 main
