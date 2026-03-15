@@ -62,7 +62,7 @@ func Name(fw FirewallType) string {
 
 // isUFWActive checks if UFW is active.
 func isUFWActive() bool {
-	output, err := shell.RunQuiet("sudo", "ufw", "status")
+	output, err := shell.SudoRunQuiet("ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -104,7 +104,7 @@ func CheckPorts() Status {
 
 // checkUFWPort checks if a port is allowed in UFW.
 func checkUFWPort(port string) bool {
-	output, err := shell.RunQuiet("sudo", "ufw", "status")
+	output, err := shell.SudoRunQuiet("ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -149,7 +149,7 @@ func checkFirewalldService(service string) bool {
 
 // checkIPTablesPort checks if a port is allowed in iptables.
 func checkIPTablesPort(port string) bool {
-	output, err := shell.RunQuiet("sudo", "iptables", "-L", "INPUT", "-n")
+	output, err := shell.SudoRunQuiet("iptables", "-L", "INPUT", "-n")
 	if err != nil {
 		return false
 	}
@@ -178,12 +178,12 @@ func OpenPorts() error {
 // openUFWPorts opens HTTP and HTTPS ports in UFW.
 func openUFWPorts() error {
 	// Allow HTTP
-	if err := shell.Sudo("ufw", "allow", constants.PortHTTPStr+"/tcp"); err != nil {
+	if err := shell.SudoRun("ufw", "allow", constants.PortHTTPStr+"/tcp"); err != nil {
 		return fmt.Errorf("failed to allow port %s: %w", constants.PortHTTPStr, err)
 	}
 
 	// Allow HTTPS
-	if err := shell.Sudo("ufw", "allow", constants.PortHTTPSStr+"/tcp"); err != nil {
+	if err := shell.SudoRun("ufw", "allow", constants.PortHTTPSStr+"/tcp"); err != nil {
 		return fmt.Errorf("failed to allow port %s: %w", constants.PortHTTPSStr, err)
 	}
 
@@ -193,17 +193,17 @@ func openUFWPorts() error {
 // openFirewalldPorts opens HTTP and HTTPS services in firewalld.
 func openFirewalldPorts() error {
 	// Allow HTTP
-	if err := shell.Sudo("firewall-cmd", "--permanent", "--add-service=http"); err != nil {
+	if err := shell.SudoRun("firewall-cmd", "--permanent", "--add-service=http"); err != nil {
 		return fmt.Errorf("failed to allow http service: %w", err)
 	}
 
 	// Allow HTTPS
-	if err := shell.Sudo("firewall-cmd", "--permanent", "--add-service=https"); err != nil {
+	if err := shell.SudoRun("firewall-cmd", "--permanent", "--add-service=https"); err != nil {
 		return fmt.Errorf("failed to allow https service: %w", err)
 	}
 
 	// Reload firewall
-	if err := shell.Sudo("firewall-cmd", "--reload"); err != nil {
+	if err := shell.SudoRun("firewall-cmd", "--reload"); err != nil {
 		return fmt.Errorf("failed to reload firewall: %w", err)
 	}
 
@@ -213,12 +213,12 @@ func openFirewalldPorts() error {
 // openIPTablesPorts opens HTTP and HTTPS ports in iptables.
 func openIPTablesPorts() error {
 	// Allow HTTP
-	if err := shell.Sudo("iptables", "-A", "INPUT", "-p", "tcp", "--dport", constants.PortHTTPStr, "-j", "ACCEPT"); err != nil {
+	if err := shell.SudoRun("iptables", "-A", "INPUT", "-p", "tcp", "--dport", constants.PortHTTPStr, "-j", "ACCEPT"); err != nil {
 		return fmt.Errorf("failed to allow port %s: %w", constants.PortHTTPStr, err)
 	}
 
 	// Allow HTTPS
-	if err := shell.Sudo("iptables", "-A", "INPUT", "-p", "tcp", "--dport", constants.PortHTTPSStr, "-j", "ACCEPT"); err != nil {
+	if err := shell.SudoRun("iptables", "-A", "INPUT", "-p", "tcp", "--dport", constants.PortHTTPSStr, "-j", "ACCEPT"); err != nil {
 		return fmt.Errorf("failed to allow port %s: %w", constants.PortHTTPSStr, err)
 	}
 
@@ -234,7 +234,7 @@ func persistIPTablesRules() {
 	// Try iptables-save (Debian/Ubuntu with iptables-persistent)
 	if shell.Exists("netfilter-persistent") {
 		// Best effort - rules are already applied, persistence is optional
-		_ = shell.Sudo("netfilter-persistent", "save") //nolint:errcheck
+		_ = shell.SudoRun("netfilter-persistent", "save") //nolint:errcheck
 		return
 	}
 
@@ -244,7 +244,7 @@ func persistIPTablesRules() {
 	// the > as the unprivileged user and silently failed.
 	if shell.Exists("iptables-save") {
 		// Best effort - rules are already applied, persistence is optional
-		out, err := shell.RunQuiet("sudo", "iptables-save")
+		out, err := shell.SudoRunQuiet("iptables-save")
 		if err == nil {
 			_ = shell.RunWithStdin(string(out), "sudo", "tee", "/etc/iptables/rules.v4") //nolint:errcheck
 		}
@@ -253,7 +253,7 @@ func persistIPTablesRules() {
 
 	// Try service iptables save (RHEL/CentOS without firewalld)
 	// Best effort - rules are already applied, persistence is optional
-	_ = shell.Sudo("service", "iptables", "save") //nolint:errcheck
+	_ = shell.SudoRun("service", "iptables", "save") //nolint:errcheck
 }
 
 // IsActive returns true if any firewall is detected and active.

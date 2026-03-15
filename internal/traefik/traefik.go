@@ -557,7 +557,7 @@ func (c PortConflict) CanAutoFix() bool {
 func (c PortConflict) AutoFix() error {
 	switch c.Process {
 	case "nginx", "lighttpd", "caddy", "apache2", "httpd":
-		return shell.Sudo("systemctl", "stop", c.Process)
+		return shell.SudoRun("systemctl", "stop", c.Process)
 	default:
 		return fmt.Errorf("no automatic fix available for process %q", c.Process)
 	}

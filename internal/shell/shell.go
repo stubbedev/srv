@@ -52,9 +52,14 @@ func RunWithStdin(stdin string, name string, args ...string) error {
 	return cmd.Run()
 }
 
-// Sudo executes a command with sudo, stdout/stderr attached.
-func Sudo(args ...string) error {
+// SudoRun executes a command with sudo, stdout/stderr attached.
+func SudoRun(args ...string) error {
 	return Run("sudo", args...)
+}
+
+// SudoRunQuiet executes a command with sudo and returns its output.
+func SudoRunQuiet(args ...string) ([]byte, error) {
+	return RunQuiet("sudo", args...)
 }
 
 // SudoWrite writes content to a file using sudo tee.
@@ -64,17 +69,17 @@ func SudoWrite(path, content string) error {
 
 // SudoMkdir creates a directory with sudo.
 func SudoMkdir(path string) error {
-	return Sudo("mkdir", "-p", path)
+	return SudoRun("mkdir", "-p", path)
 }
 
 // SudoRemove removes a file with sudo.
 func SudoRemove(path string) error {
-	return Sudo("rm", "-f", path)
+	return SudoRun("rm", "-f", path)
 }
 
 // SudoSystemctl runs a systemctl command with sudo.
 func SudoSystemctl(action, service string) error {
-	return Sudo("systemctl", action, service)
+	return SudoRun("systemctl", action, service)
 }
 
 // Exists checks if a command exists in PATH.
@@ -131,8 +136,8 @@ func CheckPortOnAddr(addr, port string) (bool, error) {
 
 	portSuffix := ":" + port
 	for line := range strings.SplitSeq(string(output), "\n") {
-		fields := strings.Fields(line)
-		for _, field := range fields {
+		fields := strings.FieldsSeq(line)
+		for field := range fields {
 			if !strings.HasSuffix(field, portSuffix) {
 				continue
 			}
