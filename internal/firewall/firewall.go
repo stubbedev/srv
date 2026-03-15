@@ -62,7 +62,7 @@ func Name(fw FirewallType) string {
 
 // isUFWActive checks if UFW is active.
 func isUFWActive() bool {
-	output, err := shell.RunQuiet("ufw", "status")
+	output, err := shell.RunQuiet("sudo", "ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -104,7 +104,7 @@ func CheckPorts() Status {
 
 // checkUFWPort checks if a port is allowed in UFW.
 func checkUFWPort(port string) bool {
-	output, err := shell.RunQuiet("ufw", "status")
+	output, err := shell.RunQuiet("sudo", "ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -149,7 +149,7 @@ func checkFirewalldService(service string) bool {
 
 // checkIPTablesPort checks if a port is allowed in iptables.
 func checkIPTablesPort(port string) bool {
-	output, err := shell.RunQuiet("iptables", "-L", "INPUT", "-n")
+	output, err := shell.RunQuiet("sudo", "iptables", "-L", "INPUT", "-n")
 	if err != nil {
 		return false
 	}

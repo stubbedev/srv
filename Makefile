@@ -1,5 +1,7 @@
 .PHONY: build test clean mkcert update-mkcert
 
+.DEFAULT_GOAL := build
+
 BINARY         := srv
 MKCERT_SRC     := third_party/mkcert
 MKCERT_BIN     := internal/mkcert/bin/mkcert
