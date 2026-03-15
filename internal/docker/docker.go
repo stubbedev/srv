@@ -155,6 +155,16 @@ func ComposeRestart(dir string) error {
 	return Compose(dir, "restart")
 }
 
+// Exec runs a command inside a running container with stdin/stdout/stderr attached.
+// This is equivalent to `docker exec -it <container> <args...>`.
+func Exec(container string, args ...string) error {
+	cmd := exec.Command("docker", append([]string{"exec", "-it", container}, args...)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // Compose runs docker compose with given arguments in the specified directory.
 // Output is attached to stdout/stderr for interactive use.
 // docker compose is intentionally kept as a shell-out: the Docker SDK has no

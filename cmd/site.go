@@ -89,6 +89,9 @@ func init() {
 	addCmd.Flags().StringVar(&addFlags.phpVersion, "php-version", "", "PHP version (auto-detected; use 'latest' for newest)")
 	addCmd.Flags().StringVar(&addFlags.documentRoot, "document-root", "", "Document root relative to project (auto-detected)")
 	addCmd.Flags().StringVar(&addFlags.phpExtensions, "php-extensions", "", "PHP extensions: full list, or +ext/-ext to add/remove from defaults")
+	_ = addCmd.RegisterFlagCompletionFunc("php-extensions", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return site.KnownPHPExtensions(), cobra.ShellCompDirectiveNoFileComp
+	})
 	addCmd.GroupID = GroupSites
 	RootCmd.AddCommand(addCmd)
 }

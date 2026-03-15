@@ -647,18 +647,18 @@ func TestGeneratePHPDockerfile_SpecificVersion(t *testing.T) {
 	}
 }
 
-func TestGeneratePHPDockerfile_MongoDBViaPECL(t *testing.T) {
+func TestGeneratePHPDockerfile_UsesIPE(t *testing.T) {
 	info := &PHPSiteInfo{
 		PHPVersion: constants.PHPVersionLatest,
 		Extensions: []string{"mongodb"},
 	}
 	df := generatePHPDockerfile(info)
 
-	if !strings.Contains(df, "pecl install mongodb") {
-		t.Errorf("expected PECL install for mongodb, got:\n%s", df)
+	if !strings.Contains(df, "install-php-extensions") {
+		t.Errorf("expected install-php-extensions, got:\n%s", df)
 	}
-	if !strings.Contains(df, "docker-php-ext-enable mongodb") {
-		t.Errorf("expected docker-php-ext-enable mongodb, got:\n%s", df)
+	if !strings.Contains(df, "mongodb") {
+		t.Errorf("expected mongodb in install-php-extensions call, got:\n%s", df)
 	}
 }
 
@@ -674,18 +674,18 @@ func TestGeneratePHPDockerfile_OpcacheConfig(t *testing.T) {
 	}
 }
 
-func TestGeneratePHPDockerfile_GDConfigureStep(t *testing.T) {
+func TestGeneratePHPDockerfile_GDInstalled(t *testing.T) {
 	info := &PHPSiteInfo{
 		PHPVersion: constants.PHPVersionLatest,
 		Extensions: []string{"gd"},
 	}
 	df := generatePHPDockerfile(info)
 
-	if !strings.Contains(df, "docker-php-ext-configure gd") {
-		t.Errorf("expected configure step for gd, got:\n%s", df)
+	if !strings.Contains(df, "install-php-extensions") {
+		t.Errorf("expected install-php-extensions, got:\n%s", df)
 	}
-	if !strings.Contains(df, "--with-freetype") {
-		t.Errorf("expected --with-freetype in gd configure, got:\n%s", df)
+	if !strings.Contains(df, "gd") {
+		t.Errorf("expected gd in install-php-extensions call, got:\n%s", df)
 	}
 }
 
@@ -697,9 +697,9 @@ func TestGeneratePHPDockerfile_BuiltinExtensionsSkipped(t *testing.T) {
 	df := generatePHPDockerfile(info)
 
 	// Built-ins (json, hash, openssl) should not appear in install commands.
-	// Only pdo_mysql should be in docker-php-ext-install.
-	if strings.Contains(df, "docker-php-ext-install json") {
-		t.Error("json is built-in, should not be in docker-php-ext-install")
+	// Only pdo_mysql should be passed to install-php-extensions.
+	if strings.Contains(df, "install-php-extensions") && strings.Contains(df, " json") {
+		t.Error("json is built-in, should not be in install-php-extensions")
 	}
 	if !strings.Contains(df, "pdo_mysql") {
 		t.Error("pdo_mysql should be installed")

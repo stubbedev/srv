@@ -449,61 +449,48 @@ func generatePHPNginxConf(info *PHPSiteInfo) string {
 // Dockerfile generation (PHP)
 // =============================================================================
 
-// extensionDeps maps a PHP extension name to the Alpine system packages it
-// requires, and whether it needs a special configure or PECL install step.
-type extInfo struct {
-	alpinePkgs []string // apk packages required
-	configure  string   // extra configure flags passed to docker-php-ext-configure
-	cppflags   string   // CPPFLAGS set for the docker-php-ext-configure invocation
-	pecl       bool     // true if installed via PECL instead of docker-php-ext-install
+// ipeExtensions is the full list of PHP extensions supported by
+// install-php-extensions (https://github.com/mlocati/docker-php-extension-installer).
+// All dependency resolution (Alpine packages, PECL vs bundled, configure flags)
+// is handled automatically by IPE at build time.
+var ipeExtensions = []string{
+	"amqp", "apcu", "apcu_bc", "ast",
+	"bcmath", "bitset", "blackfire", "brotli", "bz2",
+	"calendar", "cassandra", "cmark", "csv",
+	"dba", "ddtrace", "decimal", "ds",
+	"ecma_intl", "enchant", "ev", "event", "excimer", "exif",
+	"ffi", "ftp",
+	"gd", "gearman", "geoip", "geos", "geospatial", "gettext", "gmagick", "gmp", "gnupg", "grpc",
+	"http",
+	"igbinary", "imagick", "imap", "inotify", "intl", "ion", "ioncube_loader", "ip2location",
+	"jsmin", "json_post", "jsonpath", "judy",
+	"ldap", "luasandbox", "lz4", "lzf",
+	"mailparse", "maxminddb", "mbstring", "mcrypt", "md4c", "memcache", "memcached", "memprof",
+	"mongodb", "msgpack", "mysqli",
+	"oauth", "oci8", "odbc", "opcache", "opencensus", "openswoole", "opentelemetry", "operator",
+	"parallel", "parle", "pcntl", "pcov",
+	"pdo", "pdo_dblib", "pdo_firebird", "pdo_mysql", "pdo_oci", "pdo_odbc", "pdo_pgsql",
+	"pdo_snowflake", "pdo_sqlite", "pdo_sqlsrv", "pgsql", "phalcon", "php_trie", "phpy",
+	"pkcs11", "pq", "propro", "protobuf", "pspell", "psr",
+	"raphf", "rdkafka", "redis", "relay",
+	"saxon", "seasclick", "seaslog", "shmop", "simdjson", "simplexml", "smbclient", "snappy",
+	"snmp", "snuffleupagus", "soap", "sockets", "sodium", "solr", "sourceguardian", "spx", "sqlsrv",
+	"ssh2", "stomp", "swoole", "sync", "sysvmsg", "sysvsem", "sysvshm",
+	"tensor", "tideways", "tidy", "timezonedb", "translit",
+	"uopz", "uploadprogress", "uuid", "uv",
+	"vips", "vld",
+	"xattr", "xdebug", "xdiff", "xhprof", "xlswriter", "xmldiff", "xmlrpc", "xpass", "xsl",
+	"yac", "yaml", "yar",
+	"zephir_parser", "zip", "zmq", "zookeeper", "zstd",
 }
 
-// phpExtensionCatalog is the catalogue of all known extensions and their
-// build requirements on Alpine Linux.
-var phpExtensionCatalog = map[string]extInfo{
-	// Image processing
-	"gd":   {alpinePkgs: []string{"libpng-dev", "libjpeg-turbo-dev", "freetype-dev"}, configure: "--with-freetype --with-jpeg"},
-	"exif": {},
-	// Database
-	"pdo":        {},
-	"pdo_mysql":  {},
-	"pdo_pgsql":  {alpinePkgs: []string{"postgresql-dev"}},
-	"pdo_sqlite": {alpinePkgs: []string{"sqlite-dev"}},
-	"mysqli":     {},
-	"pgsql":      {alpinePkgs: []string{"postgresql-dev"}},
-	"mongodb":    {alpinePkgs: []string{"autoconf", "g++", "make"}, pecl: true},
-	// Core
-	"mbstring":  {alpinePkgs: []string{"oniguruma-dev"}},
-	"xml":       {alpinePkgs: []string{"libxml2-dev"}},
-	"curl":      {alpinePkgs: []string{"curl-dev"}},
-	"tokenizer": {},
-	// File handling
-	"zip":      {alpinePkgs: []string{"libzip-dev"}},
-	"fileinfo": {},
-	// Text processing
-	// iconv: musl's built-in iconv is incomplete; use GNU libiconv instead.
-	// --with-iconv=/usr points PHP's configure at the GNU libiconv headers.
-	"iconv":     {alpinePkgs: []string{"gnu-libiconv-dev"}, configure: "--with-iconv=/usr"},
-	"simplexml": {alpinePkgs: []string{"libxml2-dev"}},
-	// dom requires lexbor headers (PHP 8.4+). lexbor is bundled inside the PHP
-	// source tree at ext/lexbor/, so we point CPPFLAGS at those paths via a
-	// docker-php-ext-configure step; no external lexbor-dev package is needed.
-	"dom": {alpinePkgs: []string{"libxml2-dev"}, cppflags: "-I/usr/src/php/ext/lexbor -I/usr/src/php"},
-	// Performance & math
-	"opcache": {},
-	"bcmath":  {},
-	// Internationalization
-	"intl":    {alpinePkgs: []string{"icu-dev"}},
-	"gettext": {alpinePkgs: []string{"gettext-dev"}},
-	// Networking
-	// sockets requires linux-headers for kernel socket interfaces (e.g. linux/sock_diag.h).
-	"sockets":  {alpinePkgs: []string{"linux-headers"}},
-	"ftp":      {},
-	"calendar": {},
-	// Security (usually built-in, but listed for completeness)
-	"openssl": {},
-	"sodium":  {},
-	"hash":    {},
+// KnownPHPExtensions returns a sorted list of all PHP extensions supported by
+// install-php-extensions.
+func KnownPHPExtensions() []string {
+	exts := make([]string, len(ipeExtensions))
+	copy(exts, ipeExtensions)
+	sort.Strings(exts)
+	return exts
 }
 
 // builtinExtensions are always compiled into PHP — no installation step needed.
@@ -526,111 +513,36 @@ var builtinExtensions = map[string]bool{
 }
 
 // generatePHPDockerfile generates a Dockerfile for a PHP site, installing all
-// required extensions.
+// required extensions via install-php-extensions (https://github.com/mlocati/docker-php-extension-installer).
 func generatePHPDockerfile(info *PHPSiteInfo) string {
 	image := PHPImageTag(info.PHPVersion)
 
-	// Partition extensions into categories.
-	var standardExts []string // docker-php-ext-install
-	var peclExts []string     // pecl install
-	var configureExts []string
-	apkPkgs := make(map[string]bool)
-	hasPeclExts := false
-
+	// Filter out built-in extensions — they are already compiled into PHP.
+	var exts []string
 	for _, ext := range info.Extensions {
-		if builtinExtensions[ext] {
-			continue
-		}
-		ei, known := phpExtensionCatalog[ext]
-		if !known {
-			// Unknown extension: attempt docker-php-ext-install and hope for the best.
-			standardExts = append(standardExts, ext)
-			continue
-		}
-		for _, pkg := range ei.alpinePkgs {
-			apkPkgs[pkg] = true
-		}
-		if ei.pecl {
-			peclExts = append(peclExts, ext)
-			hasPeclExts = true
-		} else {
-			if ei.configure != "" || ei.cppflags != "" {
-				configureExts = append(configureExts, ext)
-			}
-			standardExts = append(standardExts, ext)
+		if !builtinExtensions[ext] {
+			exts = append(exts, ext)
 		}
 	}
-
-	// PECL builds always need these build-time tools.
-	if hasPeclExts {
-		apkPkgs["autoconf"] = true
-		apkPkgs["g++"] = true
-		apkPkgs["make"] = true
-	}
-
-	sort.Strings(standardExts)
-	sort.Strings(peclExts)
-	sort.Strings(configureExts)
-	pkgList := sortedKeys(apkPkgs)
+	sort.Strings(exts)
 
 	var sb strings.Builder
 	sb.WriteString("# Generated by srv - PHP site Dockerfile\n")
-	fmt.Fprintf(&sb, "FROM %s\n", image)
-	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "FROM %s\n\n", image)
 
-	// System dependencies.
-	if len(pkgList) > 0 {
-		sb.WriteString("# Install system dependencies\n")
-		sb.WriteString("RUN apk add --no-cache")
-		for _, pkg := range pkgList {
-			sb.WriteString(" \\\n    " + pkg)
-		}
-		sb.WriteString("\n\n")
+	// Install extensions and composer via install-php-extensions (IPE).
+	// IPE resolves all Alpine packages, PECL vs bundled, and configure flags automatically.
+	// @composer is always included so that `srv composer` works inside the container.
+	sb.WriteString("# Install PHP extensions and composer\n")
+	sb.WriteString("ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/\n")
+	sb.WriteString("RUN install-php-extensions \\\n    @composer")
+	for _, ext := range exts {
+		sb.WriteString(" \\\n    " + ext)
 	}
-
-	// Configure steps (e.g. GD with JPEG/FreeType, or dom needing lexbor headers).
-	if len(configureExts) > 0 {
-		for _, ext := range configureExts {
-			ei := phpExtensionCatalog[ext]
-			if ei.cppflags != "" {
-				if ei.configure != "" {
-					fmt.Fprintf(&sb, "RUN CPPFLAGS=\"%s\" docker-php-ext-configure %s %s\n", ei.cppflags, ext, ei.configure)
-				} else {
-					fmt.Fprintf(&sb, "RUN CPPFLAGS=\"%s\" docker-php-ext-configure %s\n", ei.cppflags, ext)
-				}
-			} else {
-				fmt.Fprintf(&sb, "RUN docker-php-ext-configure %s %s\n", ext, ei.configure)
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Standard extensions.
-	if len(standardExts) > 0 {
-		// Remove configure-only exts that are also in standardExts (they need both).
-		sb.WriteString("# Install PHP extensions\n")
-		sb.WriteString("RUN docker-php-ext-install -j$(nproc)")
-		for _, ext := range standardExts {
-			sb.WriteString(" \\\n    " + ext)
-		}
-		sb.WriteString("\n\n")
-	}
-
-	// PECL extensions.
-	for _, ext := range peclExts {
-		fmt.Fprintf(&sb, "# Install %s via PECL\n", ext)
-		fmt.Fprintf(&sb, "RUN pecl install %s \\\n    && docker-php-ext-enable %s\n\n", ext, ext)
-	}
-
-	// Clean up build-time tools if they were only needed for PECL.
-	if hasPeclExts {
-		sb.WriteString("# Remove build-time tools\n")
-		sb.WriteString("RUN apk del autoconf g++ make\n\n")
-	}
+	sb.WriteString("\n\n")
 
 	// Configure opcache if requested.
-	hasOpcache := slices.Contains(info.Extensions, "opcache")
-	if hasOpcache {
+	if slices.Contains(info.Extensions, "opcache") {
 		sb.WriteString("# Configure opcache\n")
 		sb.WriteString("RUN echo \"opcache.enable=1\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
 		sb.WriteString("    && echo \"opcache.memory_consumption=128\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
@@ -640,16 +552,6 @@ func generatePHPDockerfile(info *PHPSiteInfo) string {
 	fmt.Fprintf(&sb, "WORKDIR %s\n", constants.PHPDockerRootPath)
 
 	return sb.String()
-}
-
-// sortedKeys returns a sorted slice of the keys of a map[string]bool.
-func sortedKeys(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // =============================================================================
