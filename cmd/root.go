@@ -53,6 +53,8 @@ func init() {
 
 // Execute runs the root command.
 func Execute() error {
+	// Setup our custom colored help
+	setupColoredHelp()
 	return RootCmd.Execute()
 }
 
