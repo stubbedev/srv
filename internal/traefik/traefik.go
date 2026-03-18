@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -96,20 +97,14 @@ const dockerComposeTemplate = `services:
   traefik:
     image: {{TRAEFIK_IMAGE}}
     container_name: {{TRAEFIK_CONTAINER}}
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"
+    restart: unless-stopped{{NETWORK_MODE}}{{PORTS}}{{EXTRA_HOSTS}}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./conf/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./conf:/etc/traefik/conf:ro
       - ./certs:/etc/traefik/certs
       - ./logs:/etc/traefik/logs
-      - {{SITES_DIR}}:/etc/traefik/sites:ro
-    networks:
-      - traefik
+      - {{SITES_DIR}}:/etc/traefik/sites:ro{{NETWORKS}}
 
   dns:
     image: {{DNS_IMAGE}}
@@ -123,7 +118,7 @@ const dockerComposeTemplate = `services:
     volumes:
       - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
     logging:
-      driver: none
+      driver: none{{HOST_RELAY}}
 
 networks:
   traefik:
@@ -149,12 +144,49 @@ func generateRandomString(length int) string {
 // every call.
 // Credential values are YAML-single-quote-escaped so that any special characters
 // in future credential formats cannot break the YAML structure.
+//
+// On Linux, Traefik uses network_mode: host to access localhost services directly.
+// This allows 'srv proxy' to work with services bound to 127.0.0.1 without code changes.
+// The custom Docker network is still used for container-to-container communication
+// (containers connect to it and publish ports that Traefik can reach via localhost).
 func DockerComposeTemplate(dnsUser, dnsPass string) string {
+	// On Linux, use host networking to access localhost services directly
+	// On Mac/Windows, Docker Desktop provides host.docker.internal automatically
+	networkMode := ""
+	ports := `
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"`
+	extraHosts := ""
+	networks := `
+    networks:
+      - traefik`
+	hostRelay := ""
+
+	if runtime.GOOS == "linux" {
+		// Use host network mode on Linux - this gives Traefik access to localhost
+		// Traefik can still proxy to Docker containers via their published ports on localhost
+		networkMode = `
+    network_mode: host`
+		// Host mode doesn't need port mappings (Traefik binds directly to host ports)
+		ports = ""
+		// Host mode can't use custom networks, but Traefik can reach containers via Docker API
+		networks = ""
+		// No need for extra_hosts with host mode
+		extraHosts = ""
+	}
+
 	r := strings.NewReplacer(
 		"{{TRAEFIK_IMAGE}}", docker.ImageTraefik,
 		"{{DNS_IMAGE}}", docker.ImageDNS,
 		"{{TRAEFIK_CONTAINER}}", docker.ContainerTraefik,
 		"{{DNS_CONTAINER}}", docker.ContainerDNS,
+		"{{NETWORK_MODE}}", networkMode,
+		"{{PORTS}}", ports,
+		"{{EXTRA_HOSTS}}", extraHosts,
+		"{{NETWORKS}}", networks,
+		"{{HOST_RELAY}}", hostRelay,
 		// Single-quote the credential values so YAML-special chars are safe.
 		// Single quotes in the value itself are escaped as '' per YAML spec.
 		"{{DNS_HTTP_USER}}", yamlSingleQuote(dnsUser),

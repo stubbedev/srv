@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -252,7 +253,13 @@ func setupProxyCertificate(input *proxyInput) error {
 // Returns the target URL for the proxy.
 func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error) {
 	if !input.isContainer {
-		return fmt.Sprintf("http://%s:%s", constants.DockerHostInternal, input.port), nil
+		// On Linux, Traefik uses network_mode: host, so it can reach localhost directly
+		// On Mac/Windows, Traefik runs in bridge mode and uses host.docker.internal
+		host := constants.DockerHostInternal
+		if runtime.GOOS == "linux" {
+			host = constants.LocalhostIP
+		}
+		return fmt.Sprintf("http://%s:%s", host, input.port), nil
 	}
 
 	// Connect container to Traefik network so it can be reached
