@@ -124,3 +124,24 @@ func ValidateSiteName(name string) error {
 
 	return nil
 }
+
+// ValidateProxyName validates a proxy name.
+// Proxy names can contain periods since they're often derived from domain names.
+// Returns an error if the name contains invalid characters.
+func ValidateProxyName(name string) error {
+	if name == "" {
+		return fmt.Errorf("proxy name cannot be empty")
+	}
+
+	// Allow domain-like names (alphanumeric, hyphens, underscores, and periods)
+	// Since proxy names are often derived from domains (e.g., "kontainer.com")
+	if !domainRegex.MatchString(name) {
+		return fmt.Errorf("invalid proxy name: %s (use alphanumeric characters, hyphens, periods, and underscores)", name)
+	}
+
+	if len(name) > constants.MaxDomainLength {
+		return fmt.Errorf("proxy name is too long (max %d characters)", constants.MaxDomainLength)
+	}
+
+	return nil
+}

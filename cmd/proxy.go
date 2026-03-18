@@ -201,7 +201,7 @@ func validateProxyInput() (*proxyInput, error) {
 		name = strings.ToLower(domain)
 	}
 
-	if err := ValidateSiteName(name); err != nil {
+	if err := ValidateProxyName(name); err != nil {
 		return nil, fmt.Errorf("invalid proxy name: %w", err)
 	}
 	input.name = name
