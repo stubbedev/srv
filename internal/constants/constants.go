@@ -180,6 +180,10 @@ const (
 	SiteConfigPrefix = "site-"
 	// ProxyConfigPrefix is the prefix for proxy configuration files.
 	ProxyConfigPrefix = "proxy-"
+	// TraefikDashboardDomain is the local domain used to expose the Traefik dashboard over HTTPS.
+	TraefikDashboardDomain = "traefik.local"
+	// TraefikDashboardProxyName is the proxy name used for the dashboard proxy.
+	TraefikDashboardProxyName = "traefik"
 	// NetworkSuffix is the suffix for the Docker network name.
 	NetworkSuffix = "_traefik"
 	// NetworkHashLength is the length of the hash in the network name.
@@ -529,5 +533,6 @@ const (
 
 const (
 	// InitBaseSteps is the base number of initialization steps.
-	InitBaseSteps = 3
+	// network + config + start traefik + dashboard proxy
+	InitBaseSteps = 4
 )

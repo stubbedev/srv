@@ -155,7 +155,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	steps.Done("Traefik started")
 
-	// Step 4: Install daemon service
+	// Step 4: Set up dashboard HTTPS proxy (traefik.local)
+	steps.Next("Setting up dashboard proxy (%s)", traefik.DashboardLocalURL())
+	if err := traefik.CheckMkcert(); err != nil {
+		steps.Skip("Dashboard proxy skipped (mkcert not available)")
+		ui.Dim("Install mkcert to enable %s", traefik.DashboardLocalURL())
+	} else {
+		if !traefik.IsCAInstalled() {
+			if err := traefik.InstallCA(); err != nil {
+				ui.Warn("Failed to install mkcert CA: %v", err)
+			}
+		}
+		if err := traefik.SetupDashboardProxy(); err != nil {
+			ui.Warn("Failed to set up dashboard proxy: %v", err)
+			steps.Skip("Dashboard proxy setup failed")
+		} else {
+			steps.Done("Dashboard available at %s", traefik.DashboardLocalURL())
+		}
+	}
+
+	// Step 5: Install daemon service
 	if needDaemon {
 		steps.Next("Installing daemon service")
 		if err := daemon.Install(); err != nil {
@@ -167,7 +186,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 5: Start all sites (if any)
+	// Step 6: Start all sites (if any)
 	if len(sites) > 0 {
 		steps.Next("Starting %d site(s)", len(sites))
 		startSites(sites)
@@ -177,6 +196,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	ui.Blank()
 	ui.Success("srv installed successfully!")
 	ui.Info("Dashboard: %s", traefik.DashboardURL())
+	ui.Info("Dashboard (HTTPS): %s", traefik.DashboardLocalURL())
 
 	return nil
 }
