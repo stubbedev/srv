@@ -229,11 +229,13 @@ func setupProxyCertificate(input *proxyInput) error {
 // Returns the target URL for the proxy.
 func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error) {
 	if !input.isContainer {
-		// On Linux, Traefik uses network_mode: host, so it can reach localhost directly
-		// On Mac/Windows, Traefik runs in bridge mode and uses host.docker.internal
+		// On Linux, Traefik uses network_mode: host, so it can reach localhost directly.
+		// Use "localhost" rather than "127.0.0.1" so that services bound only to the
+		// IPv6 loopback (::1) — e.g. Nuxt, Vite — are also reachable.
+		// On Mac/Windows, Traefik runs in bridge mode and needs host.docker.internal.
 		host := constants.DockerHostInternal
 		if runtime.GOOS == "linux" {
-			host = constants.LocalhostIP
+			host = "localhost"
 		}
 		return fmt.Sprintf("http://%s:%s", host, input.port), nil
 	}
@@ -306,6 +308,7 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 		ui.Dim("https://%s -> %s:%s (container)", input.domain, input.containerName, input.containerPort)
 	} else {
 		ui.Dim("https://%s -> localhost:%s", input.domain, input.port)
+		ui.Dim("Start your service on port %s to use this proxy", input.port)
 	}
 	return nil
 }
