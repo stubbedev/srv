@@ -331,8 +331,6 @@ const (
 	SchemeHTTPS = "https"
 	// SchemeHTTPPrefix is the HTTP URL scheme prefix.
 	SchemeHTTPPrefix = "http://"
-	// SchemeHTTPSPrefix is the HTTPS URL scheme prefix.
-	SchemeHTTPSPrefix = "https://"
 )
 
 // =============================================================================
@@ -411,17 +409,6 @@ const (
 	MkcertInstallMac = "brew install mkcert"
 	// MkcertInstallURL is the mkcert installation documentation URL.
 	MkcertInstallURL = "https://github.com/FiloSottile/mkcert#installation"
-)
-
-// =============================================================================
-// Tunnel Tools
-// =============================================================================
-
-const (
-	// ToolCloudflared is the cloudflared tunnel tool name.
-	ToolCloudflared = "cloudflared"
-	// ToolNgrok is the ngrok tunnel tool name.
-	ToolNgrok = "ngrok"
 )
 
 // =============================================================================

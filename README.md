@@ -62,7 +62,6 @@ srv add /var/www/myapp --domain example.com
 | `srv list` | List all registered sites |
 | `srv info SITE` | Show detailed site information |
 | `srv logs SITE` | View site container logs |
-| `srv share SITE` | Share site via tunnel (cloudflared/ngrok) |
 
 ### Proxy Management
 
@@ -71,7 +70,6 @@ srv add /var/www/myapp --domain example.com
 | `srv proxy add` | Create a proxy to localhost port or container |
 | `srv proxy remove NAME` | Remove a proxy |
 | `srv proxy list` | List all proxies |
-| `srv proxy share NAME` | Share a proxy via tunnel |
 
 ### Daemon Management
 
@@ -205,18 +203,6 @@ srv logs SITE [flags]
 | `--follow` | `-f` | Follow log output |
 | `--tail` | | Number of lines to show from the end |
 | `--since` | | Show logs since timestamp (e.g., `10m`, `1h`) |
-
-### `srv share`
-
-Share a site publicly via tunnel service.
-
-```bash
-srv share SITE [flags]
-```
-
-| Flag | Description |
-|------|-------------|
-| `--tool` | Tunnel tool to use (`cloudflared`, `ngrok`) |
 
 ### `srv proxy add`
 
@@ -446,25 +432,6 @@ srv proxy remove api.test
 ```
 
 All proxies use local SSL (mkcert) and automatically register with the local DNS server.
-
-## Sharing Sites
-
-Share local sites publicly using tunnel services:
-
-```bash
-# Auto-detect tunnel tool (prefers cloudflared)
-srv share mysite
-
-# Use specific tool
-srv share mysite --tool ngrok
-
-# Share a proxy
-srv proxy share api.test
-```
-
-**Supported tools:**
-- [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (recommended)
-- [ngrok](https://ngrok.com/)
 
 ## How It Works
 

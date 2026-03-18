@@ -84,34 +84,6 @@ var proxyListCmd = &cobra.Command{
 	RunE:    runProxyList,
 }
 
-var proxyShareCmd = &cobra.Command{
-	Use:   "share NAME",
-	Short: "Share a proxy via tunnel",
-	Long: `Share a proxy publicly using a tunnel service.
-
-Supported tools:
-  - cloudflared (Cloudflare Tunnel) - recommended
-  - ngrok`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			cmd.Help()
-			return ui.UsageError("srv proxy share NAME", "a proxy name is required")
-		}
-		if len(args) > 1 {
-			return ui.UsageError("srv proxy share NAME", "too many arguments — expected a single proxy name, got %d", len(args))
-		}
-		return nil
-	},
-	RunE: runProxyShare,
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return getProxyNames(), cobra.ShellCompDirectiveNoFileComp
-	},
-}
-
-var proxyShareFlags struct {
-	tool string
-}
-
 var proxyAddFlags struct {
 	domain    string
 	port      string
@@ -124,7 +96,6 @@ func init() {
 	proxyCmd.AddCommand(proxyAddCmd)
 	proxyCmd.AddCommand(proxyRemoveCmd)
 	proxyCmd.AddCommand(proxyListCmd)
-	proxyCmd.AddCommand(proxyShareCmd)
 
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.domain, "domain", "d", "", "Domain name (e.g., api.test)")
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.port, "port", "p", "", "Localhost port to proxy to")
@@ -132,8 +103,6 @@ func init() {
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.name, "name", "n", "", "Proxy name (default: derived from domain)")
 	proxyAddCmd.Flags().BoolVarP(&proxyAddFlags.force, "force", "f", false, "Overwrite existing proxy configuration")
 	proxyAddCmd.MarkFlagRequired("domain")
-
-	proxyShareCmd.Flags().StringVar(&proxyShareFlags.tool, "tool", "", "Tunnel tool to use (cloudflared, ngrok)")
 
 	proxyCmd.GroupID = GroupProxy
 	RootCmd.AddCommand(proxyCmd)
@@ -412,52 +381,6 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 
 	ui.PrintTable(headers, rows)
 	return nil
-}
-
-func runProxyShare(cmd *cobra.Command, args []string) error {
-	name := args[0]
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	// Check if proxy exists
-	proxyFile := filepath.Join(cfg.TraefikConfDir(), constants.ProxyConfigPrefix+name+constants.ExtYAML)
-	if _, err := os.Stat(proxyFile); os.IsNotExist(err) {
-		return fmt.Errorf("proxy not found: %s", name)
-	}
-
-	proxyInfo := readProxyConfig(cfg, name)
-	if proxyInfo.Domain == "" {
-		return fmt.Errorf("proxy '%s' has no domain configured", name)
-	}
-
-	// Determine which tool to use
-	tool := proxyShareFlags.tool
-	if tool == "" {
-		if CommandExists(constants.ToolCloudflared) {
-			tool = constants.ToolCloudflared
-		} else if CommandExists(constants.ToolNgrok) {
-			tool = constants.ToolNgrok
-		} else {
-			return fmt.Errorf("no tunnel tool found. Install cloudflared or ngrok")
-		}
-	}
-
-	url := constants.SchemeHTTPSPrefix + proxyInfo.Domain
-	ui.Info("Sharing %s via %s...", name, tool)
-	ui.Dim("Press Ctrl+C to stop sharing")
-	ui.Blank()
-
-	switch tool {
-	case constants.ToolCloudflared:
-		return runShareCloudflared(url)
-	case constants.ToolNgrok:
-		return runShareNgrok(proxyInfo.Domain)
-	default:
-		return fmt.Errorf("unsupported tunnel tool: %s", tool)
-	}
 }
 
 // =============================================================================

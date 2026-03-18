@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -73,38 +72,6 @@ func ValidatePortString(port string) error {
 	}
 
 	return ValidatePort(portNum)
-}
-
-// ValidateProxyURL validates a proxy target URL.
-// Returns an error if the URL is invalid or uses an unsupported scheme.
-func ValidateProxyURL(targetURL string) error {
-	if targetURL == "" {
-		return fmt.Errorf("URL cannot be empty")
-	}
-
-	parsed, err := url.Parse(targetURL)
-	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
-	}
-
-	// Check scheme
-	if parsed.Scheme != constants.SchemeHTTP && parsed.Scheme != constants.SchemeHTTPS {
-		return fmt.Errorf("invalid URL scheme: %s (must be %s or %s)", parsed.Scheme, constants.SchemeHTTP, constants.SchemeHTTPS)
-	}
-
-	// Check host is present
-	if parsed.Host == "" {
-		return fmt.Errorf("URL must include a host")
-	}
-
-	// If port is specified in URL, validate it
-	if parsed.Port() != "" {
-		if err := ValidatePortString(parsed.Port()); err != nil {
-			return fmt.Errorf("invalid port in URL: %w", err)
-		}
-	}
-
-	return nil
 }
 
 // ValidateSiteName validates a site name.
