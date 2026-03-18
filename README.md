@@ -24,7 +24,7 @@ Download the binary for your platform from [releases](https://github.com/stubbed
 
 ```bash
 # One-time setup
-srv init
+srv install
 
 # Add a site (auto-detects static, PHP, or docker-compose)
 srv add ~/my-project --domain mysite.test --local
@@ -35,8 +35,8 @@ srv add ~/my-project --domain mysite.test --local
 ### Production
 
 ```bash
-# Initialize (prompts for Let's Encrypt email)
-srv init
+# Install (prompts for Let's Encrypt email)
+srv install
 
 # Add a site with a real domain
 srv add /var/www/myapp --domain example.com
@@ -89,7 +89,7 @@ srv add /var/www/myapp --domain example.com
 
 | Command | Description |
 |---------|-------------|
-| `srv init` | Initialize srv environment |
+| `srv install` | Install srv environment |
 | `srv doctor` | Run diagnostic checks |
 | `srv update` | Update Traefik and DNS images |
 | `srv paths` | Show configuration paths |
@@ -247,12 +247,12 @@ srv proxy add --domain db.test --container postgres:5432
 srv proxy add -d myapp.test -p 8080
 ```
 
-### `srv init`
+### `srv install`
 
-Initialize the srv environment: creates Docker network, generates Traefik configuration, and starts containers.
+Install the srv environment: creates Docker network, generates Traefik configuration, and starts containers.
 
 ```bash
-srv init [flags]
+srv install [flags]
 ```
 
 | Flag | Description |
@@ -525,7 +525,7 @@ srv logs mysite
 srv doctor | grep -A10 "DNS"
 
 # Restart srv
-srv init
+srv install
 ```
 
 ### Port already in use?
@@ -543,7 +543,7 @@ sudo lsof -i :443
 
 ```bash
 # Remove all configuration and start fresh
-srv init --fresh
+srv install --fresh
 ```
 
 ## License

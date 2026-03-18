@@ -269,6 +269,19 @@ func Blank() {
 	fmt.Println()
 }
 
+// UsageError returns a formatted error that includes a usage hint.
+// The hint is printed to stderr alongside the error so the user sees
+// both the problem and the correct invocation in one glance.
+// Example output:
+//
+//	✗ path to a directory is required
+//	  usage: srv add PATH --domain DOMAIN
+func UsageError(usage, format string, args ...any) error {
+	msg := fmt.Sprintf(format, args...)
+	hint := DimStyle.Render("  usage: " + usage)
+	return fmt.Errorf("%s\n%s", msg, hint)
+}
+
 // VerboseLog prints a message only if verbose mode is enabled.
 func VerboseLog(format string, args ...any) {
 	if Verbose {

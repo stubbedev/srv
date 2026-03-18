@@ -65,9 +65,12 @@ Supported tools:
   - cloudflared (Cloudflare Tunnel) - recommended
   - ngrok`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
+		if len(args) == 0 {
 			cmd.Help()
-			return fmt.Errorf("expected 1 argument, got %d", len(args))
+			return ui.UsageError("srv share SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv share SITE", "too many arguments — expected a single site name, got %d", len(args))
 		}
 		return nil
 	},

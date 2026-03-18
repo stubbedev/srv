@@ -100,7 +100,7 @@ func checkFirewall() int {
 			issues++
 		}
 		if !fwStatus.HTTPOpen || !fwStatus.HTTPSOpen {
-			ui.IndentedDim(1, "Run 'srv init' to configure firewall")
+			ui.IndentedDim(1, "Run 'srv install' to configure firewall")
 		}
 	}
 
@@ -167,7 +167,7 @@ func checkNetwork() int {
 		ui.IndentedSuccess(1, "Network '%s' exists", cfg.NetworkName)
 	} else {
 		ui.IndentedWarn(1, "Network '%s' does not exist", cfg.NetworkName)
-		ui.IndentedDim(1, "Run 'srv init' to create it")
+		ui.IndentedDim(1, "Run 'srv install' to create it")
 		ui.Blank()
 		return 1
 	}
@@ -186,7 +186,7 @@ func checkTraefik() int {
 	}
 
 	ui.IndentedWarn(1, "Container is not running")
-	ui.IndentedDim(1, "Run 'srv init' to start")
+	ui.IndentedDim(1, "Run 'srv install' to start")
 	ui.Blank()
 	return 1
 }
@@ -227,7 +227,7 @@ func checkDNS() int {
 		// DNS container not running is only an issue if there are local domains
 		if hasLocalDomains {
 			ui.IndentedWarn(1, "Container is not running")
-			ui.IndentedDim(1, "Run 'srv init' to start")
+			ui.IndentedDim(1, "Run 'srv install' to start")
 			issues++
 		} else {
 			ui.IndentedDim(1, "Not running (no local domains registered)")
@@ -341,7 +341,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		ui.Success("Traefik and DNS updated and restarted")
 	} else {
 		ui.Success("Images updated")
-		ui.Dim("Run 'srv init' to start containers")
+		ui.Dim("Run 'srv install' to start containers")
 	}
 
 	return nil

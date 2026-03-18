@@ -168,7 +168,7 @@ install_binary() {
 verify() {
   if command -v srv >/dev/null 2>&1; then
     info "Installed $(srv version 2>/dev/null || echo "srv")"
-    info "Run 'srv init' to get started"
+    info "Run 'srv install' to get started"
   else
     warn "Installed to ${INSTALL_DIR}/${BINARY}"
     warn "Add ${INSTALL_DIR} to your PATH"

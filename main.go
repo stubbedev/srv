@@ -28,7 +28,7 @@ func restoreCursor() {
 
 func main() {
 	// Skip cursor handling during shell completion to avoid polluting output
-	isCompletion := len(os.Args) > 1 && os.Args[1] == "__complete"
+	isCompletion := len(os.Args) > 1 && (os.Args[1] == "__complete" || os.Args[1] == "__completeNoDesc")
 
 	if !isCompletion {
 		// Ensure cursor is always restored on exit

@@ -16,14 +16,14 @@ import (
 	"github.com/stubbedev/srv/internal/ui"
 )
 
-var initFlags struct {
+var installFlags struct {
 	fresh bool
 }
 
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize srv environment",
-	Long: `Initialize the srv environment:
+var installCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Install srv environment",
+	Long: `Install the srv environment:
   1. Creates the Docker network
   2. Generates Traefik configuration
   3. Starts Traefik container
@@ -31,18 +31,18 @@ var initCmd = &cobra.Command{
   5. Starts all registered sites
 
 Use --fresh to remove all existing configuration and start fresh.`,
-	RunE: runInit,
+	RunE: runInstall,
 }
 
 func init() {
-	initCmd.Flags().BoolVar(&initFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
-	initCmd.GroupID = GroupSystem
-	RootCmd.AddCommand(initCmd)
+	installCmd.Flags().BoolVar(&installFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
+	installCmd.GroupID = GroupSystem
+	RootCmd.AddCommand(installCmd)
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
+func runInstall(cmd *cobra.Command, args []string) error {
 	// Handle fresh flag - reset everything
-	if initFlags.fresh {
+	if installFlags.fresh {
 		ui.Warn("Removing existing configuration...")
 		if err := traefik.Reset(); err != nil {
 			return fmt.Errorf("failed to reset configuration: %w", err)
@@ -175,7 +175,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Blank()
-	ui.Success("srv initialized successfully!")
+	ui.Success("srv installed successfully!")
 	ui.Info("Dashboard: %s", traefik.DashboardURL())
 
 	return nil
@@ -214,7 +214,7 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 			}
 			msg += fmt.Sprintf("\n    stop it with: %s\n", c.StopHint())
 		}
-		msg += "\nThen run 'srv init' again."
+		msg += "\nThen run 'srv install' again."
 		return fmt.Errorf("%s", msg)
 	}
 
@@ -239,7 +239,7 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 		return err
 	}
 	if !doFix {
-		return fmt.Errorf("port conflicts not resolved; run 'srv init' again after freeing the ports above")
+		return fmt.Errorf("port conflicts not resolved; run 'srv install' again after freeing the ports above")
 	}
 
 	for _, c := range fixable {
@@ -255,7 +255,7 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 		for _, c := range remaining {
 			msg += fmt.Sprintf("\n  :%d (%s) — stop it with: %s\n", c.Port, c.Name, c.StopHint())
 		}
-		msg += "\nRun 'srv init' again."
+		msg += "\nRun 'srv install' again."
 		return fmt.Errorf("%s", msg)
 	}
 

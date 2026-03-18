@@ -483,7 +483,7 @@ func GetEmail(prompt bool) (string, error) {
 	}
 
 	if !prompt {
-		return "", fmt.Errorf("no email configured. Run: srv init")
+		return "", fmt.Errorf("no email configured. Run: srv install")
 	}
 
 	// Prompt for email

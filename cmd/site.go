@@ -62,11 +62,20 @@ Examples:
   srv add /path/to/site --domain myapp.test --local   # Local dev with mkcert
   srv add . --domain example.com --start              # Add and start immediately
   srv add /path/to/static --domain site.test --local  # Static files with nginx`,
-	Args: cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			cmd.Help()
+			return ui.UsageError("srv add PATH --domain DOMAIN", "a path to a directory is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv add PATH --domain DOMAIN", "too many arguments — expected a single directory path, got %d", len(args))
+		}
+		return nil
+	},
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if addFlags.domain == "" {
 			cmd.Help()
-			return fmt.Errorf("required flag --domain not set")
+			return ui.UsageError("srv add PATH --domain DOMAIN", "--domain is required (e.g. --domain myapp.test or --domain example.com)")
 		}
 		return nil
 	},
@@ -659,9 +668,12 @@ var removeCmd = &cobra.Command{
 	Short:   "Remove a site",
 	Long:    `Stop a site's containers and remove it from srv.`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
+		if len(args) == 0 {
 			cmd.Help()
-			return fmt.Errorf("expected 1 argument, got %d", len(args))
+			return ui.UsageError("srv remove SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv remove SITE", "too many arguments — expected a single site name, got %d", len(args))
 		}
 		return nil
 	},
@@ -857,9 +869,12 @@ var infoCmd = &cobra.Command{
   - Container status
   - SSL certificate status (for local sites)`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
+		if len(args) == 0 {
 			cmd.Help()
-			return fmt.Errorf("expected 1 argument, got %d", len(args))
+			return ui.UsageError("srv info SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv info SITE", "too many arguments — expected a single site name, got %d", len(args))
 		}
 		return nil
 	},
@@ -974,9 +989,9 @@ var startCmd = &cobra.Command{
 
 Use --all to start all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 && !startFlags.all {
+		if len(args) == 0 && !startFlags.all {
 			cmd.Help()
-			return fmt.Errorf("provide a site name or use --all")
+			return ui.UsageError("srv start SITE", "a site name is required (or use --all to start every site)")
 		}
 		return nil
 	},
@@ -1120,9 +1135,9 @@ var stopCmd = &cobra.Command{
 
 Use --all to stop all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 && !stopFlags.all {
+		if len(args) == 0 && !stopFlags.all {
 			cmd.Help()
-			return fmt.Errorf("provide a site name or use --all")
+			return ui.UsageError("srv stop SITE", "a site name is required (or use --all to stop every site)")
 		}
 		return nil
 	},
@@ -1201,9 +1216,9 @@ var restartCmd = &cobra.Command{
 
 Use --all to restart all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 && !restartFlags.all {
+		if len(args) == 0 && !restartFlags.all {
 			cmd.Help()
-			return fmt.Errorf("provide a site name or use --all")
+			return ui.UsageError("srv restart SITE", "a site name is required (or use --all to restart every site)")
 		}
 		return nil
 	},
@@ -1345,9 +1360,12 @@ var logsCmd = &cobra.Command{
 	Use:   "logs SITE",
 	Short: "Show site logs",
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
+		if len(args) == 0 {
 			cmd.Help()
-			return fmt.Errorf("expected 1 argument, got %d", len(args))
+			return ui.UsageError("srv logs SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv logs SITE", "too many arguments — expected a single site name, got %d", len(args))
 		}
 		return nil
 	},

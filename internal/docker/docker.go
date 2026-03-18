@@ -72,10 +72,10 @@ func EnsureRunning() error {
 }
 
 // EnsureInitialized checks that the srv proxy network exists, which is created
-// by srv init. Returns a clear error directing the user to run srv init if not.
+// by srv install. Returns a clear error directing the user to run srv install if not.
 func EnsureInitialized(networkName string) error {
 	if !NetworkExists(networkName) {
-		return fmt.Errorf("srv is not initialized. Run: srv init")
+		return fmt.Errorf("srv is not installed. Run: srv install")
 	}
 	return nil
 }

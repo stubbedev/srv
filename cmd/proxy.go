@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -49,7 +50,7 @@ Examples:
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if proxyAddFlags.domain == "" {
 			cmd.Help()
-			return fmt.Errorf("required flag --domain not set")
+			return ui.UsageError("srv proxy add --domain DOMAIN --port PORT", "--domain is required (e.g. --domain api.test)")
 		}
 		return nil
 	},
@@ -61,9 +62,12 @@ var proxyRemoveCmd = &cobra.Command{
 	Aliases: []string{"rm"},
 	Short:   "Remove a proxy",
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
+		if len(args) == 0 {
 			cmd.Help()
-			return fmt.Errorf("expected 1 argument, got %d", len(args))
+			return ui.UsageError("srv proxy remove NAME", "a proxy name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv proxy remove NAME", "too many arguments — expected a single proxy name, got %d", len(args))
 		}
 		return nil
 	},
@@ -89,9 +93,12 @@ Supported tools:
   - cloudflared (Cloudflare Tunnel) - recommended
   - ngrok`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
+		if len(args) == 0 {
 			cmd.Help()
-			return fmt.Errorf("expected 1 argument, got %d", len(args))
+			return ui.UsageError("srv proxy share NAME", "a proxy name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv proxy share NAME", "too many arguments — expected a single proxy name, got %d", len(args))
 		}
 		return nil
 	},
@@ -198,8 +205,8 @@ func validateProxyInput() (*proxyInput, error) {
 	// Derive name from domain if not provided
 	name := proxyAddFlags.name
 	if name == "" {
-		// Use full domain as name for uniqueness (consistent with site add)
-		name = strings.ToLower(domain)
+		// Use SanitizeName for consistency with site add (dots become dashes)
+		name = site.SanitizeName(domain)
 	}
 
 	if err := ValidateProxyName(name); err != nil {
