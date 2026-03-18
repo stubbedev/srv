@@ -280,8 +280,9 @@ func List() ([]Site, error) {
 	var validSiteIndices []int // Indices of sites that need status check
 
 	for _, entry := range entries {
-		// Only process directories (site config dirs)
-		if !entry.IsDir() {
+		// Only process directories (site config dirs).
+		// Skip internal directories prefixed with "_" (e.g. _proxy-* cert dirs).
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") {
 			continue
 		}
 

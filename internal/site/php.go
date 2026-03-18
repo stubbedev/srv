@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
@@ -55,7 +54,10 @@ func DetectPHPSite(dir string) (*PHPSiteInfo, error) {
 	framework := DetectFramework(dir, &composer)
 	docRoot := DetectDocumentRoot(dir, framework)
 	phpVersion := ParsePHPVersionFromComposer(&composer)
-	extensions := ExtractComposerExtensions(&composer)
+	// Start from the common baseline and merge in any ext-* entries from
+	// composer.json. This ensures every site gets a usable set of extensions
+	// without requiring every project to exhaustively declare them.
+	extensions := InjectFrameworkExtensions(framework, mergeExtensions(BaselinePHPExtensions(), ExtractComposerExtensions(&composer)))
 
 	return &PHPSiteInfo{
 		PHPVersion:   phpVersion,
@@ -63,6 +65,59 @@ func DetectPHPSite(dir string) (*PHPSiteInfo, error) {
 		Framework:    framework,
 		DocumentRoot: docRoot,
 	}, nil
+}
+
+// frameworkExtensions lists extensions that are essential for each framework
+// but not always declared in composer.json's ext-* requires.
+var frameworkExtensions = map[string][]string{
+	constants.PHPFrameworkLaravel: {
+		"bcmath",   // used by many Laravel packages and numeric operations
+		"fileinfo", // required for file uploads and MIME detection
+		"intl",     // used by Carbon, string helpers, and localisation
+		"opcache",  // production performance; always worth having
+		"pcntl",    // required by queue workers and Horizon
+	},
+}
+
+// InjectFrameworkExtensions merges the framework-specific essential extensions
+// into the provided list, deduplicating and sorting the result.
+// This ensures common extensions are always present even when not explicitly
+// listed in composer.json's ext-* requires.
+func InjectFrameworkExtensions(framework string, extensions []string) []string {
+	required, ok := frameworkExtensions[framework]
+	if !ok {
+		return extensions
+	}
+	set := make(map[string]bool, len(extensions)+len(required))
+	for _, e := range extensions {
+		set[e] = true
+	}
+	for _, e := range required {
+		set[e] = true
+	}
+	result := make([]string, 0, len(set))
+	for e := range set {
+		result = append(result, e)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// mergeExtensions returns a sorted, deduplicated union of two extension slices.
+func mergeExtensions(a, b []string) []string {
+	set := make(map[string]bool, len(a)+len(b))
+	for _, e := range a {
+		set[e] = true
+	}
+	for _, e := range b {
+		set[e] = true
+	}
+	result := make([]string, 0, len(set))
+	for e := range set {
+		result = append(result, e)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // DetectRawPHPSite checks whether dir contains PHP files without a
@@ -98,55 +153,72 @@ func IsPHPFile(filename string) bool {
 	return ext == ".php" || ext == ".phtml"
 }
 
-// RawPHPDefaults returns PHPSiteInfo with the extensive default extension set
+// RawPHPDefaults returns PHPSiteInfo with the baseline extension set
 // and the latest PHP image tag, used when no composer.json is available.
 func RawPHPDefaults() *PHPSiteInfo {
 	return &PHPSiteInfo{
 		PHPVersion:   constants.PHPVersionLatest,
-		Extensions:   DefaultPHPExtensions(),
+		Extensions:   BaselinePHPExtensions(),
 		Framework:    constants.PHPFrameworkGeneric,
 		DocumentRoot: "",
 	}
 }
 
-// DefaultPHPExtensions returns an extensive default set of PHP extensions for
-// projects that have no composer.json to declare their requirements.
-func DefaultPHPExtensions() []string {
+// BaselinePHPExtensions returns the set of extensions installed for every PHP
+// site regardless of what composer.json declares. It covers the most common
+// needs out of the box so projects work without having to enumerate every
+// ext-* dependency.
+func BaselinePHPExtensions() []string {
 	return []string{
-		// Database
+		// Databases — relational
 		"pdo",
 		"pdo_mysql",
 		"pdo_pgsql",
 		"pdo_sqlite",
 		"mysqli",
 		"pgsql",
-		// mongodb is installed via PECL (handled separately in Dockerfile generation)
+		// Databases — NoSQL / cache
 		"mongodb",
-		// Core functionality
+		"redis",
+		// Core string / encoding
 		"mbstring",
+		"iconv",
+		"intl",
+		"gettext",
+		// XML / HTML
 		"xml",
+		"simplexml",
+		"dom",
+		"soap",
+		// Networking
 		"curl",
-		"tokenizer",
+		"sockets",
 		// File handling
 		"zip",
 		"fileinfo",
+		"ftp",
 		// Image processing
 		"gd",
 		"exif",
-		// Text processing
-		"iconv",
-		"simplexml",
-		"dom",
-		// Performance & math
-		"opcache",
+		"imagick",
+		// Cryptography & security
+		"mcrypt",
+		"sodium",
+		// Math
 		"bcmath",
-		// Internationalization
-		"intl",
-		"gettext",
-		// Other common needs
-		"sockets",
-		"ftp",
+		"gmp",
+		// Performance
+		"opcache",
+		"apcu",
+		// Process control (queues, workers)
+		"pcntl",
+		"posix",
+		// Misc commonly needed
 		"calendar",
+		"shmop",
+		"sysvmsg",
+		"sysvsem",
+		"sysvshm",
 	}
 }
 
@@ -351,6 +423,27 @@ func PHPImageTag(version string) string {
 // Nginx config generation (PHP)
 // =============================================================================
 
+// generatePHPIni generates a php.ini with sensible development defaults.
+// It is mounted into the container as a drop-in override file so it cannot
+// conflict with the base image's own php.ini.
+func generatePHPIni() string {
+	return `; Generated by srv - PHP site configuration overrides
+; Tuned for local development
+
+[PHP]
+memory_limit          = 2G
+upload_max_filesize   = 2G
+post_max_size         = 2G
+max_execution_time    = 300
+max_input_time        = 300
+max_input_vars        = 10000
+date.timezone         = UTC
+
+[Session]
+session.gc_maxlifetime = 86400
+`
+}
+
 // generatePHPNginxConf generates an nginx configuration for a PHP site.
 func generatePHPNginxConf(info *PHPSiteInfo) string {
 	// Determine the document root path inside the container.
@@ -508,8 +601,9 @@ var builtinExtensions = map[string]bool{
 	"pcre":      true,
 	"spl":       true,
 	"standard":  true,
-	"opcache":   true, // built into the base image; cannot be reinstalled as a shared ext
 	"tokenizer": true, // requires Zend parser source files not present after PHP is compiled
+	// Note: opcache is NOT listed here — IPE handles enabling it correctly via
+	// docker-php-ext-enable, and we always write an opcache.ini regardless.
 }
 
 // generatePHPDockerfile generates a Dockerfile for a PHP site, installing all
@@ -541,13 +635,14 @@ func generatePHPDockerfile(info *PHPSiteInfo) string {
 	}
 	sb.WriteString("\n\n")
 
-	// Configure opcache if requested.
-	if slices.Contains(info.Extensions, "opcache") {
-		sb.WriteString("# Configure opcache\n")
-		sb.WriteString("RUN echo \"opcache.enable=1\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
-		sb.WriteString("    && echo \"opcache.memory_consumption=128\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
-		sb.WriteString("    && echo \"opcache.max_accelerated_files=10000\" >> /usr/local/etc/php/conf.d/opcache.ini\n\n")
-	}
+	// Configure opcache — always write sensible defaults. opcache is included in
+	// every PHP-FPM image but must be explicitly enabled via ini.
+	sb.WriteString("# Configure opcache\n")
+	sb.WriteString("RUN echo \"opcache.enable=1\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
+	sb.WriteString("    && echo \"opcache.enable_cli=0\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
+	sb.WriteString("    && echo \"opcache.memory_consumption=128\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
+	sb.WriteString("    && echo \"opcache.max_accelerated_files=10000\" >> /usr/local/etc/php/conf.d/opcache.ini \\\n")
+	sb.WriteString("    && echo \"opcache.validate_timestamps=1\" >> /usr/local/etc/php/conf.d/opcache.ini\n\n")
 
 	fmt.Fprintf(&sb, "WORKDIR %s\n", constants.PHPDockerRootPath)
 
@@ -616,6 +711,13 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo) error
 		return fmt.Errorf("failed to write Dockerfile: %w", err)
 	}
 
+	// Write php.ini overrides.
+	phpIni := generatePHPIni()
+	phpIniPath := filepath.Join(siteDir, constants.PHPIniFile)
+	if err := os.WriteFile(phpIniPath, []byte(phpIni), constants.FilePermDefault); err != nil {
+		return fmt.Errorf("failed to write php.ini: %w", err)
+	}
+
 	// Write nginx.conf.
 	nginxConf := generatePHPNginxConf(info)
 	nginxConfPath := SiteNginxConfPath(cfg, name)
@@ -646,6 +748,12 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo) error
 						Type:   "bind",
 						Source: meta.ProjectPath,
 						Target: constants.PHPDockerRootPath,
+					},
+					{
+						Type:     "bind",
+						Source:   phpIniPath,
+						Target:   constants.PHPIniContainerPath,
+						ReadOnly: true,
 					},
 				},
 				Networks: []string{"internal"},

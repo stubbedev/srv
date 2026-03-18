@@ -547,6 +547,13 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	ui.Dim("Domain: %s (%s, %s)", setup.domain, siteType, ui.Highlight(TypeLabel(setup.isLocal)))
 	ui.Dim("Config: %s/sites/%s/ (no project files modified)", cfg.Root, setup.siteName)
 
+	if setup.isPHP && setup.phpInfo != nil && setup.phpInfo.Framework == constants.PHPFrameworkLaravel {
+		ui.Blank()
+		ui.Dim("Laravel: ensure storage and bootstrap/cache are writable:")
+		ui.Dim("  chmod -R 777 %s/storage %s/bootstrap/cache", setup.sitePath, setup.sitePath)
+		ui.Dim("Then run: srv composer %s install", setup.siteName)
+	}
+
 	// Always start the site after adding
 	return startSiteAfterAdd(cfg, setup)
 }
@@ -638,6 +645,21 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	if err := docker.ComposeUpWithProfile(composeDir, setup.profile); err != nil {
 		return fmt.Errorf("failed to start site: %w", err)
+	}
+
+	// For PHP sites: run composer install automatically if vendor/ is absent.
+	// The project is bind-mounted so vendor/ written inside the container is
+	// immediately visible on the host as well.
+	if setup.isPHP {
+		vendorDir := setup.sitePath + "/vendor"
+		if _, err := os.Stat(vendorDir); os.IsNotExist(err) {
+			containerName := "srv-" + setup.siteName + "-php"
+			ui.Info("Running composer install...")
+			if err := docker.ExecNonInteractive(containerName, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
+				ui.Warn("composer install failed: %v", err)
+				ui.Dim("Run manually: srv composer %s install", setup.siteName)
+			}
+		}
 	}
 
 	// For compose sites, connect service to traefik network.
@@ -776,7 +798,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	})
 
 	// Build table
-	headers := []string{"NAME", "DOMAIN", "PATH", "MODE", "SSL", "STATUS"}
+	headers := []string{"NAME", "DOMAIN", "TARGET", "TYPE", "SSL", "STATUS"}
 	rows := make([][]string, 0, len(sites))
 
 	for _, s := range sites {
@@ -785,23 +807,20 @@ func runList(cmd *cobra.Command, args []string) error {
 			status = constants.StatusBroken
 		}
 
-		// Determine mode (local dev vs production)
-		mode := getModeLabel(s)
-
 		// Determine SSL status
 		sslStatus := getSSLStatus(s)
 
-		// Show directory path (or placeholder if broken)
-		dir := s.Dir
+		// Show directory path as target (or placeholder if broken)
+		target := s.Dir
 		if s.IsBroken {
-			dir = ui.DimText("-")
+			target = ui.DimText("-")
 		}
 
 		rows = append(rows, []string{
 			s.Name,
 			s.Domain,
-			dir,
-			mode,
+			target,
+			getSiteTypeLabel(s),
 			sslStatus,
 			ui.StatusColor(status),
 		})
@@ -811,24 +830,19 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getModeLabel returns a formatted mode label for a site
-func getModeLabel(s site.Site) string {
+// getSiteTypeLabel returns the site type label (php/static/compose).
+func getSiteTypeLabel(s site.Site) string {
 	if s.IsBroken {
 		return ui.DimText("-")
 	}
-
-	// Show site type and SSL mode
-	var typeLabel string
 	switch s.Type {
 	case site.SiteTypeStatic:
-		typeLabel = "static"
+		return "static"
 	case site.SiteTypePHP:
-		typeLabel = "php"
+		return "php"
 	default:
-		typeLabel = "compose"
+		return "compose"
 	}
-
-	return typeLabel + "/" + ui.TypeColor(s.IsLocal)
 }
 
 // getSSLStatus returns a formatted SSL status string for a site

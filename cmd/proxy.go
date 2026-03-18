@@ -235,7 +235,7 @@ func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error
 		// On Mac/Windows, Traefik runs in bridge mode and needs host.docker.internal.
 		host := constants.DockerHostInternal
 		if runtime.GOOS == "linux" {
-			host = "localhost"
+			host = constants.LocalhostAlias
 		}
 		return fmt.Sprintf("http://%s:%s", host, input.port), nil
 	}
@@ -366,7 +366,9 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"NAME", "DOMAIN", "TARGET", "TYPE", "SSL"}
+	traefikUp := traefik.IsRunning()
+
+	headers := []string{"NAME", "DOMAIN", "TARGET", "TYPE", "SSL", "STATUS"}
 	rows := make([][]string, 0, len(proxies))
 
 	for _, name := range proxies {
@@ -379,7 +381,13 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 			proxyType = constants.ProxyTypeContainer
 		}
 
-		rows = append(rows, []string{name, proxyInfo.Domain, proxyInfo.Target, proxyType, sslStatus})
+		// Proxy status depends on Traefik being up; proxies have no containers of their own
+		status := "inactive"
+		if traefikUp {
+			status = "active"
+		}
+
+		rows = append(rows, []string{name, proxyInfo.Domain, proxyInfo.Target, proxyType, sslStatus, ui.StatusColor(status)})
 	}
 
 	ui.PrintTable(headers, rows)
@@ -452,11 +460,10 @@ func writeProxyConfig(cfg *config.Config, name, domain, targetURL, containerName
 		LoadBalancer LoadBalancer `yaml:"loadBalancer"`
 	}
 	type Router struct {
-		Rule        string   `yaml:"rule"`
-		EntryPoints []string `yaml:"entryPoints"`
-		Service     string   `yaml:"service"`
-		TLS         *struct {
-		} `yaml:"tls,omitempty"`
+		Rule        string    `yaml:"rule"`
+		EntryPoints []string  `yaml:"entryPoints"`
+		Service     string    `yaml:"service"`
+		TLS         *struct{} `yaml:"tls,omitempty"`
 	}
 	type HTTP struct {
 		Routers  map[string]Router  `yaml:"routers"`
@@ -517,8 +524,8 @@ type proxyConfigInfo struct {
 type traefikRouteConfig = traefik.RouteConfig
 
 // extractContainerFromURL extracts the container name from a target URL.
-// Uses proper URL parsing instead of manual string manipulation.
-// Returns empty string if the target is host.docker.internal (localhost proxy).
+// Returns empty string if the target resolves to the host machine (localhost,
+// 127.0.0.1, ::1, or host.docker.internal) rather than a named container.
 func extractContainerFromURL(targetURL string) string {
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
@@ -526,8 +533,8 @@ func extractContainerFromURL(targetURL string) string {
 	}
 
 	host := parsed.Hostname()
-	// If it's host.docker.internal, this is a localhost proxy, not a container
-	if host == constants.DockerHostInternal {
+	switch host {
+	case constants.DockerHostInternal, constants.LocalhostIP, "localhost", "::1":
 		return ""
 	}
 

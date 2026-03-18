@@ -38,7 +38,8 @@ const (
 
 const (
 	// LocalhostIP is the localhost IP address.
-	LocalhostIP = "127.0.0.1"
+	LocalhostIP    = "127.0.0.1"
+	LocalhostAlias = "localhost"
 	// DockerHostInternal is the hostname for reaching the host from inside a Docker container.
 	DockerHostInternal = "host.docker.internal"
 )
@@ -354,6 +355,10 @@ const (
 	PHPWebServiceName = "web"
 	// PHPDockerfileFile is the Dockerfile filename generated for PHP sites.
 	PHPDockerfileFile = "Dockerfile"
+	// PHPIniFile is the php.ini filename generated for PHP sites.
+	PHPIniFile = "php.ini"
+	// PHPIniContainerPath is the path inside the PHP container where php.ini is mounted.
+	PHPIniContainerPath = "/usr/local/etc/php/conf.d/srv-overrides.ini"
 	// PHPDockerRootPath is the working directory inside PHP/nginx containers.
 	PHPDockerRootPath = "/var/www/html"
 	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".

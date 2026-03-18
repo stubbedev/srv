@@ -596,11 +596,10 @@ func writeDashboardProxyConfig(cfg *config.Config, name, domain string) error {
 		LoadBalancer LoadBalancer `yaml:"loadBalancer"`
 	}
 	type Router struct {
-		Rule        string   `yaml:"rule"`
-		EntryPoints []string `yaml:"entryPoints"`
-		Service     string   `yaml:"service"`
-		TLS         *struct {
-		} `yaml:"tls,omitempty"`
+		Rule        string    `yaml:"rule"`
+		EntryPoints []string  `yaml:"entryPoints"`
+		Service     string    `yaml:"service"`
+		TLS         *struct{} `yaml:"tls,omitempty"`
 	}
 	type HTTP struct {
 		Routers  map[string]Router  `yaml:"routers"`
@@ -611,7 +610,7 @@ func writeDashboardProxyConfig(cfg *config.Config, name, domain string) error {
 	}
 
 	routerName := constants.ProxyConfigPrefix + name
-	targetURL := fmt.Sprintf("%s%s:%d", constants.SchemeHTTPPrefix, constants.LocalhostIP, constants.PortDashboard)
+	targetURL := fmt.Sprintf("%s%s:%d", constants.SchemeHTTPPrefix, constants.LocalhostAlias, constants.PortDashboard)
 
 	proxyConfig := ProxyConfig{
 		HTTP: HTTP{

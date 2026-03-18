@@ -181,6 +181,16 @@ func Exec(container string, args ...string) error {
 	return cmd.Run()
 }
 
+// ExecNonInteractive runs a command inside a container without a TTY,
+// streaming its output to stdout/stderr. Use this for automated steps where
+// there is no terminal attached (e.g. running composer install after srv add).
+func ExecNonInteractive(container string, args ...string) error {
+	cmd := exec.Command("docker", append([]string{"exec", container}, args...)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // Compose runs docker compose with given arguments in the specified directory.
 // Output is attached to stdout/stderr for interactive use.
 // docker compose is intentionally kept as a shell-out: the Docker SDK has no

@@ -184,16 +184,28 @@ func TestDetectPHPSite_LaravelProject(t *testing.T) {
 	if info.DocumentRoot != "public" {
 		t.Errorf("expected DocumentRoot 'public', got %q", info.DocumentRoot)
 	}
-	// Should contain gd and pdo_mysql from ext- requirements.
+	// Should contain declared ext- requirements, baseline, AND Laravel essentials.
 	extMap := make(map[string]bool)
 	for _, e := range info.Extensions {
 		extMap[e] = true
 	}
-	if !extMap["gd"] {
-		t.Error("expected 'gd' extension from composer.json")
+	// From composer.json ext-* declarations.
+	for _, ext := range []string{"gd", "pdo_mysql"} {
+		if !extMap[ext] {
+			t.Errorf("expected composer-declared extension %q", ext)
+		}
 	}
-	if !extMap["pdo_mysql"] {
-		t.Error("expected 'pdo_mysql' extension from composer.json")
+	// From the common baseline (all sites get these).
+	for _, ext := range []string{"redis", "mongodb", "imagick", "curl", "zip"} {
+		if !extMap[ext] {
+			t.Errorf("expected baseline extension %q", ext)
+		}
+	}
+	// From the Laravel-specific injections.
+	for _, essential := range []string{"bcmath", "fileinfo", "intl", "opcache", "pcntl"} {
+		if !extMap[essential] {
+			t.Errorf("expected auto-injected Laravel extension %q", essential)
+		}
 	}
 }
 
@@ -526,6 +538,52 @@ func TestParseExtensionOverrides(t *testing.T) {
 }
 
 // =============================================================================
+// InjectFrameworkExtensions
+// =============================================================================
+
+func TestInjectFrameworkExtensions_Laravel(t *testing.T) {
+	base := []string{"pdo_mysql", "gd"}
+	result := InjectFrameworkExtensions(constants.PHPFrameworkLaravel, base)
+
+	extMap := make(map[string]bool)
+	for _, e := range result {
+		extMap[e] = true
+	}
+
+	// Original extensions must be preserved.
+	for _, e := range base {
+		if !extMap[e] {
+			t.Errorf("base extension %q missing after injection", e)
+		}
+	}
+
+	// Essential Laravel extensions must be present.
+	for _, essential := range []string{"bcmath", "fileinfo", "intl", "opcache", "pcntl"} {
+		if !extMap[essential] {
+			t.Errorf("expected injected Laravel extension %q", essential)
+		}
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(result); i++ {
+		if result[i] < result[i-1] {
+			t.Errorf("extensions not sorted: %v", result)
+			break
+		}
+	}
+}
+
+func TestInjectFrameworkExtensions_NonLaravel(t *testing.T) {
+	base := []string{"pdo_mysql"}
+	for _, fw := range []string{constants.PHPFrameworkSymfony, constants.PHPFrameworkWordPress, constants.PHPFrameworkGeneric} {
+		result := InjectFrameworkExtensions(fw, base)
+		if len(result) != len(base) || result[0] != base[0] {
+			t.Errorf("InjectFrameworkExtensions(%q) should return base unchanged, got %v", fw, result)
+		}
+	}
+}
+
+// =============================================================================
 // PHPImageTag
 // =============================================================================
 
@@ -663,14 +721,18 @@ func TestGeneratePHPDockerfile_UsesIPE(t *testing.T) {
 }
 
 func TestGeneratePHPDockerfile_OpcacheConfig(t *testing.T) {
+	// opcache ini is always written regardless of the extensions list.
 	info := &PHPSiteInfo{
 		PHPVersion: constants.PHPVersionLatest,
-		Extensions: []string{"opcache"},
+		Extensions: []string{},
 	}
 	df := generatePHPDockerfile(info)
 
 	if !strings.Contains(df, "opcache.enable=1") {
-		t.Errorf("expected opcache configuration, got:\n%s", df)
+		t.Errorf("expected opcache configuration even with empty extensions, got:\n%s", df)
+	}
+	if !strings.Contains(df, "opcache.validate_timestamps") {
+		t.Errorf("expected opcache.validate_timestamps directive, got:\n%s", df)
 	}
 }
 
@@ -737,9 +799,10 @@ func TestRawPHPDefaults(t *testing.T) {
 	if len(d.Extensions) == 0 {
 		t.Error("expected non-empty extension list for raw PHP defaults")
 	}
-	// mongodb must be in the default set.
-	hasMongo := slices.Contains(d.Extensions, "mongodb")
-	if !hasMongo {
-		t.Error("expected 'mongodb' in default extension set")
+	// Spot-check a selection of baseline extensions.
+	for _, ext := range []string{"mongodb", "redis", "imagick", "gd", "pdo_mysql", "bcmath"} {
+		if !slices.Contains(d.Extensions, ext) {
+			t.Errorf("expected %q in baseline extension set", ext)
+		}
 	}
 }
