@@ -512,7 +512,11 @@ func UpdateDnsmasqConfig() error {
 		content.WriteString("# No local domains registered\n")
 	} else {
 		for _, domain := range domains {
-			fmt.Fprintf(&content, "address=/%s/127.0.0.1\n", domain)
+			// Use host-record instead of address= so that only the exact
+			// domain resolves to 127.0.0.1.  The address= directive matches
+			// the domain AND all subdomains; host-record creates an A record
+			// for the precise name only (like an /etc/hosts entry).
+			fmt.Fprintf(&content, "host-record=%s,127.0.0.1\n", domain)
 		}
 	}
 
