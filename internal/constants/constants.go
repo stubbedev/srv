@@ -312,6 +312,8 @@ const (
 	SiteTypeStatic = "static"
 	// SiteTypePHP is the PHP/FPM site type.
 	SiteTypePHP = "php"
+	// SiteTypeNode is the Node.js site type.
+	SiteTypeNode = "node"
 )
 
 // =============================================================================
@@ -375,6 +377,67 @@ const (
 	PHPFrameworkWordPress = "wordpress"
 	// PHPFrameworkGeneric is the generic PHP framework identifier.
 	PHPFrameworkGeneric = "generic"
+)
+
+// =============================================================================
+// Node.js Constants
+// =============================================================================
+
+const (
+	// NodeImageLTS is the Node.js LTS Alpine Docker image.
+	NodeImageLTS = "node:lts-alpine"
+	// NodeImageFormat is the format string for versioned Node.js Alpine images.
+	NodeImageFormat = "node:%s-alpine"
+	// BunImageAlpine is the official Bun Alpine Docker image.
+	BunImageAlpine = "oven/bun:alpine"
+	// DenoImageAlpine is the official Deno Alpine Docker image.
+	DenoImageAlpine = "denoland/deno:alpine"
+	// NodeVersionLTS is the sentinel value meaning "use the LTS Docker tag".
+	NodeVersionLTS = "lts"
+	// NodeDefaultPort is the default port for Node.js applications.
+	NodeDefaultPort = 3000
+	// NodeDockerWorkDir is the working directory inside Node/Bun/Deno containers.
+	NodeDockerWorkDir = "/app"
+)
+
+// Node.js runtime identifiers.
+const (
+	// NodeRuntimeNode is the Node.js runtime identifier.
+	NodeRuntimeNode = "node"
+	// NodeRuntimeBun is the Bun runtime identifier.
+	NodeRuntimeBun = "bun"
+	// NodeRuntimeDeno is the Deno runtime identifier.
+	NodeRuntimeDeno = "deno"
+)
+
+// Node.js package manager identifiers.
+const (
+	// NodePMNPM is the npm package manager identifier.
+	NodePMNPM = "npm"
+	// NodePMYarn is the Yarn package manager identifier.
+	NodePMYarn = "yarn"
+	// NodePMPNPM is the pnpm package manager identifier.
+	NodePMPNPM = "pnpm"
+	// NodePMBun is the Bun package manager identifier.
+	NodePMBun = "bun"
+	// NodePMDeno is used for Deno projects (manages its own dependencies).
+	NodePMDeno = "deno"
+)
+
+// Node.js framework identifiers.
+const (
+	// NodeFrameworkNext is the Next.js framework identifier.
+	NodeFrameworkNext = "next"
+	// NodeFrameworkNuxt is the Nuxt framework identifier.
+	NodeFrameworkNuxt = "nuxt"
+	// NodeFrameworkVite is the Vite framework identifier.
+	NodeFrameworkVite = "vite"
+	// NodeFrameworkExpress is the Express framework identifier.
+	NodeFrameworkExpress = "express"
+	// NodeFrameworkNestJS is the NestJS framework identifier.
+	NodeFrameworkNestJS = "nestjs"
+	// NodeFrameworkGeneric is the generic Node.js framework identifier.
+	NodeFrameworkGeneric = "generic"
 )
 
 // =============================================================================

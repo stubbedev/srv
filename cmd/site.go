@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +40,8 @@ var addFlags struct {
 	phpVersion    string
 	documentRoot  string
 	phpExtensions string
+	// Node.js site options
+	nodeVersion string
 }
 
 var addCmd = &cobra.Command{
@@ -101,6 +104,8 @@ func init() {
 	_ = addCmd.RegisterFlagCompletionFunc("php-extensions", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return site.KnownPHPExtensions(), cobra.ShellCompDirectiveNoFileComp
 	})
+	// Node.js site options
+	addCmd.Flags().StringVar(&addFlags.nodeVersion, "node-version", "", "Node.js version (auto-detected from .nvmrc / package.json; use 'lts' for latest LTS)")
 	addCmd.GroupID = GroupSites
 	RootCmd.AddCommand(addCmd)
 }
@@ -165,19 +170,22 @@ type siteSetup struct {
 	isLocal            bool
 	isStatic           bool // true if serving static files (no docker-compose.yml)
 	isPHP              bool // true if serving a PHP/FPM site
+	isNode             bool // true if serving a Node.js site
 	phpInfo            *site.PHPSiteInfo
+	nodeInfo           *site.NodeSiteInfo
 	// Static site options
 	spa   bool
 	cache bool
 	cors  bool
 }
 
-// validateSiteSetup validates the path and discovers compose file or PHP project.
+// validateSiteSetup validates the path and discovers compose file or PHP/Node project.
 // Detection order:
 //  1. docker-compose.yml present → compose site
 //  2. composer.json present      → PHP site (with full metadata)
 //  3. *.php / *.phtml present    → PHP site (raw, with defaults)
-//  4. otherwise                  → static site
+//  4. package.json present       → Node.js site
+//  5. otherwise                  → static site
 func validateSiteSetup(pathArg string) (*siteSetup, error) {
 	sitePath, err := site.ResolvePath(pathArg)
 	if err != nil {
@@ -225,7 +233,18 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		return setup, nil
 	}
 
-	// 4. Fall back to static site.
+	// 4. Try Node.js detection (package.json).
+	nodeInfo, err := site.DetectNodeSite(sitePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for Node.js project: %w", err)
+	}
+	if nodeInfo != nil {
+		setup.isNode = true
+		setup.nodeInfo = nodeInfo
+		return setup, nil
+	}
+
+	// 5. Fall back to static site.
 	setup.isStatic = true
 	return setup, nil
 }
@@ -276,6 +295,17 @@ func promptForMissingConfig(setup *siteSetup) error {
 				addFlags.phpExtensions,
 				setup.phpInfo.Extensions,
 			)
+		}
+	}
+
+	// Node.js site: apply flag overrides on top of auto-detected values.
+	if setup.isNode && setup.nodeInfo != nil {
+		if addFlags.nodeVersion != "" {
+			setup.nodeInfo.NodeVersion = addFlags.nodeVersion
+		}
+		// If the user explicitly set --port, use it; otherwise keep the detected port.
+		if addFlags.port != constants.DefaultContainerPort {
+			setup.nodeInfo.Port = addFlags.port
 		}
 	}
 
@@ -454,6 +484,8 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	switch {
 	case setup.isPHP:
 		ui.Info("Configuring PHP site: %s", setup.siteName)
+	case setup.isNode:
+		ui.Info("Configuring Node.js site: %s", setup.siteName)
 	case setup.isStatic:
 		ui.Info("Configuring static site: %s", setup.siteName)
 	default:
@@ -465,8 +497,16 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	switch {
 	case setup.isPHP:
 		siteType = site.SiteTypePHP
+	case setup.isNode:
+		siteType = site.SiteTypeNode
 	case setup.isStatic:
 		siteType = site.SiteTypeStatic
+	}
+
+	// Determine canonical port for routing metadata.
+	port := setup.port
+	if setup.isNode && setup.nodeInfo != nil {
+		port = setup.nodeInfo.Port
 	}
 
 	// Build base metadata.
@@ -477,7 +517,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		ServiceName:        setup.serviceName,
 		ComposeServiceName: setup.composeServiceName,
 		Profile:            setup.profile,
-		Port:               setup.port,
+		Port:               port,
 		IsLocal:            setup.isLocal,
 		NetworkName:        cfg.NetworkName,
 		SPA:                setup.spa,
@@ -493,6 +533,16 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		meta.DocumentRoot = setup.phpInfo.DocumentRoot
 	}
 
+	// Add Node.js-specific fields to metadata.
+	if setup.isNode && setup.nodeInfo != nil {
+		meta.NodeRuntime = setup.nodeInfo.Runtime
+		meta.NodePackageManager = setup.nodeInfo.PackageManager
+		meta.NodeVersion = setup.nodeInfo.NodeVersion
+		meta.NodeFramework = setup.nodeInfo.Framework
+		meta.NodeStartCmd = setup.nodeInfo.StartCmd
+		meta.ServiceName = "srv-" + setup.siteName + "-node"
+	}
+
 	if err := site.WriteSiteMetadata(setup.siteName, meta); err != nil {
 		return fmt.Errorf("failed to write site metadata: %w", err)
 	}
@@ -500,12 +550,17 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	switch {
 	case setup.isPHP:
 		// PHP site: generate Dockerfile, nginx.conf, and docker-compose.yml.
-		if err := site.WritePHPSiteConfig(setup.siteName, meta, setup.phpInfo); err != nil {
+		if err := site.WritePHPSiteConfig(setup.siteName, meta, setup.phpInfo, addFlags.force); err != nil {
 			return fmt.Errorf("failed to write PHP site config: %w", err)
+		}
+	case setup.isNode:
+		// Node.js site: generate docker-compose.yml.
+		if err := site.WriteNodeSiteConfig(setup.siteName, meta, setup.nodeInfo, addFlags.force); err != nil {
+			return fmt.Errorf("failed to write Node site config: %w", err)
 		}
 	case setup.isStatic:
 		// Static site: generate docker-compose.yml and nginx.conf in config dir.
-		if err := site.WriteStaticSiteConfig(setup.siteName, meta); err != nil {
+		if err := site.WriteStaticSiteConfig(setup.siteName, meta, addFlags.force); err != nil {
 			return fmt.Errorf("failed to write static site config: %w", err)
 		}
 	default:
@@ -537,6 +592,8 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	switch {
 	case setup.isPHP:
 		siteType = "php"
+	case setup.isNode:
+		siteType = "node"
 	case setup.isStatic:
 		siteType = "static"
 	default:
@@ -635,8 +692,8 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine the compose directory
 	var composeDir string
-	if setup.isStatic || setup.isPHP {
-		// Static and PHP sites have their compose file in the srv config directory
+	if setup.isStatic || setup.isPHP || setup.isNode {
+		// Static, PHP, and Node sites have their compose file in the srv config directory
 		composeDir = site.SiteConfigDir(cfg, setup.siteName)
 	} else {
 		// Compose sites run from the project directory
@@ -663,8 +720,8 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 	}
 
 	// For compose sites, connect service to traefik network.
-	// Static and PHP sites manage network membership via compose labels.
-	if !setup.isStatic && !setup.isPHP && setup.composeServiceName != "" {
+	// Static, PHP, and Node sites manage network membership via compose labels.
+	if !setup.isStatic && !setup.isPHP && !setup.isNode && setup.composeServiceName != "" {
 		if err := docker.ConnectServiceToNetwork(setup.sitePath, setup.composeServiceName, cfg.NetworkName); err != nil {
 			if errors.Is(err, docker.ErrServiceNotRunning) {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", setup.composeServiceName)
@@ -830,7 +887,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getSiteTypeLabel returns the site type label (php/static/compose).
+// getSiteTypeLabel returns the site type label (php/static/node/compose).
 func getSiteTypeLabel(s site.Site) string {
 	if s.IsBroken {
 		return ui.DimText("-")
@@ -840,6 +897,8 @@ func getSiteTypeLabel(s site.Site) string {
 		return "static"
 	case site.SiteTypePHP:
 		return "php"
+	case site.SiteTypeNode:
+		return "node"
 	default:
 		return "compose"
 	}
@@ -926,6 +985,19 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		ui.Print("  Type:    %s", "static (nginx)")
 	case site.SiteTypePHP:
 		ui.Print("  Type:    %s", "php (nginx + php-fpm)")
+	case site.SiteTypeNode:
+		meta, _ := site.ReadSiteMetadata(s.Name)
+		runtimeLabel := "node.js"
+		if meta != nil && meta.NodeRuntime != "" {
+			runtimeLabel = meta.NodeRuntime
+			if meta.NodePackageManager != "" && meta.NodePackageManager != meta.NodeRuntime && meta.NodePackageManager != constants.NodePMDeno {
+				runtimeLabel += " / " + meta.NodePackageManager
+			}
+		}
+		ui.Print("  Type:    %s", runtimeLabel)
+		if s.Port != 0 {
+			ui.Print("  Port:    %d", s.Port)
+		}
 	default:
 		ui.Print("  Type:    %s", "compose")
 		if s.ServiceName != "" {
@@ -1424,4 +1496,345 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	return docker.Compose(s.ComposeDir, composeArgs...)
+}
+
+// =============================================================================
+// runtime command
+// =============================================================================
+
+var runtimeFlags struct {
+	phpVersion    string
+	phpExtensions string
+	nodeVersion   string
+}
+
+var runtimeCmd = &cobra.Command{
+	Use:   "runtime SITE",
+	Short: "Change runtime version or PHP extensions for a site",
+	Long: `Update the runtime version or PHP extensions for a PHP or Node.js site.
+
+For PHP sites the Dockerfile is rebuilt with the new version / extension list.
+php.ini and nginx.conf are left untouched so your customisations are preserved.
+
+For Node.js sites the docker-compose.yml is regenerated with the new version.
+
+After updating, the site containers are rebuilt and restarted automatically.
+
+Examples:
+  srv site runtime mysite --php-version 8.3
+  srv site runtime mysite --php-extensions "+redis,-xdebug"
+  srv site runtime mysite --node-version 22`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			cmd.Help()
+			return ui.UsageError("srv site runtime SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv site runtime SITE", "too many arguments — expected a single site name, got %d", len(args))
+		}
+		return nil
+	},
+	RunE: runRuntime,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+	},
+}
+
+func init() {
+	runtimeCmd.Flags().StringVar(&runtimeFlags.phpVersion, "php-version", "", "PHP version (e.g. 8.3, 8.2, latest)")
+	runtimeCmd.Flags().StringVar(&runtimeFlags.phpExtensions, "php-extensions", "", "PHP extensions: full list, or +ext/-ext to add/remove from defaults")
+	runtimeCmd.Flags().StringVar(&runtimeFlags.nodeVersion, "node-version", "", "Node.js version (e.g. 22, 20, lts)")
+	_ = runtimeCmd.RegisterFlagCompletionFunc("php-extensions", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return site.KnownPHPExtensions(), cobra.ShellCompDirectiveNoFileComp
+	})
+	runtimeCmd.GroupID = GroupSites
+	RootCmd.AddCommand(runtimeCmd)
+}
+
+func runRuntime(cmd *cobra.Command, args []string) error {
+	siteName := args[0]
+
+	meta, err := site.ReadSiteMetadata(siteName)
+	if err != nil || meta == nil {
+		return fmt.Errorf("site '%s' not found", siteName)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	switch meta.Type {
+	case site.SiteTypePHP:
+		return runtimeUpdatePHP(cfg, siteName, meta)
+	case site.SiteTypeNode:
+		return runtimeUpdateNode(cfg, siteName, meta)
+	default:
+		return fmt.Errorf("site '%s' is a %s site — runtime management is only available for PHP and Node.js sites", siteName, meta.Type)
+	}
+}
+
+func runtimeUpdatePHP(cfg *config.Config, siteName string, meta *site.SiteMetadata) error {
+	if runtimeFlags.phpVersion == "" && runtimeFlags.phpExtensions == "" {
+		return fmt.Errorf("specify at least --php-version or --php-extensions")
+	}
+
+	if runtimeFlags.phpVersion != "" {
+		meta.PHPVersion = runtimeFlags.phpVersion
+	}
+	if runtimeFlags.phpExtensions != "" {
+		meta.PHPExtensions = site.ParseExtensionOverrides(runtimeFlags.phpExtensions, meta.PHPExtensions)
+	}
+
+	phpInfo := &site.PHPSiteInfo{
+		PHPVersion:   meta.PHPVersion,
+		Extensions:   meta.PHPExtensions,
+		Framework:    meta.PHPFramework,
+		DocumentRoot: meta.DocumentRoot,
+	}
+
+	ui.Info("Updating PHP runtime for '%s'...", siteName)
+	if err := site.WritePHPDockerConfig(siteName, *meta, phpInfo); err != nil {
+		return fmt.Errorf("failed to write PHP config: %w", err)
+	}
+
+	// Persist updated metadata.
+	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	composeDir := site.SiteConfigDir(cfg, siteName)
+	ui.Info("Rebuilding and restarting containers...")
+	if err := docker.ComposeUpBuildWithProfile(composeDir, meta.Profile); err != nil {
+		return fmt.Errorf("failed to rebuild containers: %w", err)
+	}
+
+	ui.Success("PHP runtime updated for '%s' (version: %s)", siteName, meta.PHPVersion)
+	return nil
+}
+
+func runtimeUpdateNode(cfg *config.Config, siteName string, meta *site.SiteMetadata) error {
+	if runtimeFlags.nodeVersion == "" {
+		return fmt.Errorf("specify --node-version")
+	}
+
+	if meta.NodeRuntime != "" && meta.NodeRuntime != constants.NodeRuntimeNode {
+		return fmt.Errorf("--node-version only applies to Node.js sites (this site uses %s)", meta.NodeRuntime)
+	}
+
+	meta.NodeVersion = runtimeFlags.nodeVersion
+
+	nodeInfo := &site.NodeSiteInfo{
+		Runtime:        meta.NodeRuntime,
+		PackageManager: meta.NodePackageManager,
+		NodeVersion:    meta.NodeVersion,
+		Framework:      meta.NodeFramework,
+		StartCmd:       meta.NodeStartCmd,
+		Port:           meta.Port,
+	}
+
+	ui.Info("Updating Node.js runtime for '%s'...", siteName)
+	if err := site.WriteNodeSiteConfig(siteName, *meta, nodeInfo, true); err != nil {
+		return fmt.Errorf("failed to write Node config: %w", err)
+	}
+
+	// Persist updated metadata.
+	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	composeDir := site.SiteConfigDir(cfg, siteName)
+	ui.Info("Restarting containers...")
+	if err := docker.ComposeUpWithProfile(composeDir, meta.Profile); err != nil {
+		return fmt.Errorf("failed to restart containers: %w", err)
+	}
+
+	ui.Success("Node.js runtime updated for '%s' (version: %s)", siteName, meta.NodeVersion)
+	return nil
+}
+
+// =============================================================================
+// regenerate command
+// =============================================================================
+
+var regenerateCmd = &cobra.Command{
+	Use:   "regenerate SITE",
+	Short: "Regenerate config files for a site, overwriting any customisations",
+	Long: `Regenerate all config files (nginx.conf, php.ini, docker-compose.yml, Dockerfile)
+for a site from scratch, overwriting any manual edits.
+
+Use this if you want to reset your config to srv defaults, or after changing
+the domain / SSL type.
+
+The site will be restarted automatically after regeneration.`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			cmd.Help()
+			return ui.UsageError("srv site regenerate SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv site regenerate SITE", "too many arguments — expected a single site name, got %d", len(args))
+		}
+		return nil
+	},
+	RunE: runRegenerate,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+	},
+}
+
+func init() {
+	regenerateCmd.GroupID = GroupSites
+	RootCmd.AddCommand(regenerateCmd)
+}
+
+func runRegenerate(cmd *cobra.Command, args []string) error {
+	siteName := args[0]
+
+	meta, err := site.ReadSiteMetadata(siteName)
+	if err != nil || meta == nil {
+		return fmt.Errorf("site '%s' not found", siteName)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// Confirm with user before overwriting.
+	var confirmed bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Regenerate config for '%s'?", siteName)).
+				Description("This will overwrite nginx.conf, php.ini, docker-compose.yml, and Dockerfile.\nYour manual edits will be lost.").
+				Value(&confirmed),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return err
+	}
+	if !confirmed {
+		ui.Dim("Cancelled.")
+		return nil
+	}
+
+	ui.Info("Regenerating config for '%s'...", siteName)
+
+	switch meta.Type {
+	case site.SiteTypePHP:
+		phpInfo := &site.PHPSiteInfo{
+			PHPVersion:   meta.PHPVersion,
+			Extensions:   meta.PHPExtensions,
+			Framework:    meta.PHPFramework,
+			DocumentRoot: meta.DocumentRoot,
+		}
+		if err := site.WritePHPSiteConfig(siteName, *meta, phpInfo, true); err != nil {
+			return fmt.Errorf("failed to regenerate PHP config: %w", err)
+		}
+	case site.SiteTypeNode:
+		nodeInfo := &site.NodeSiteInfo{
+			Runtime:        meta.NodeRuntime,
+			PackageManager: meta.NodePackageManager,
+			NodeVersion:    meta.NodeVersion,
+			Framework:      meta.NodeFramework,
+			StartCmd:       meta.NodeStartCmd,
+			Port:           meta.Port,
+		}
+		if err := site.WriteNodeSiteConfig(siteName, *meta, nodeInfo, true); err != nil {
+			return fmt.Errorf("failed to regenerate Node config: %w", err)
+		}
+	case site.SiteTypeStatic:
+		if err := site.WriteStaticSiteConfig(siteName, *meta, true); err != nil {
+			return fmt.Errorf("failed to regenerate static config: %w", err)
+		}
+	default:
+		return fmt.Errorf("regenerate is only available for PHP, Node.js, and static sites")
+	}
+
+	composeDir := site.SiteConfigDir(cfg, siteName)
+	ui.Info("Restarting containers...")
+	if err := docker.ComposeUpBuildWithProfile(composeDir, meta.Profile); err != nil {
+		return fmt.Errorf("failed to restart containers: %w", err)
+	}
+
+	ui.Success("Config regenerated for '%s'", siteName)
+	return nil
+}
+
+// =============================================================================
+// edit command
+// =============================================================================
+
+var editCmd = &cobra.Command{
+	Use:   "edit SITE",
+	Short: "Open the config directory for a site in your editor",
+	Long: `Open the srv config directory for a site in $EDITOR (or $VISUAL).
+
+The config directory contains nginx.conf, php.ini, docker-compose.yml,
+and the Dockerfile — all of which you can freely edit.
+
+If no editor is configured, the path is printed so you can open it manually.
+
+After editing, run "srv site restart SITE" for changes to take effect.`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			cmd.Help()
+			return ui.UsageError("srv site edit SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv site edit SITE", "too many arguments — expected a single site name, got %d", len(args))
+		}
+		return nil
+	},
+	RunE: runEdit,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+	},
+}
+
+func init() {
+	editCmd.GroupID = GroupSites
+	RootCmd.AddCommand(editCmd)
+}
+
+func runEdit(cmd *cobra.Command, args []string) error {
+	siteName := args[0]
+
+	if !site.Exists(siteName) {
+		return fmt.Errorf("site '%s' not found", siteName)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	siteDir := site.SiteConfigDir(cfg, siteName)
+
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+
+	if editor == "" {
+		ui.Print("Config directory for '%s':", siteName)
+		ui.Print("  %s", siteDir)
+		ui.Blank()
+		ui.Dim("Set $EDITOR or $VISUAL to open it automatically.")
+		ui.Dim("After editing, run: srv site restart %s", siteName)
+		return nil
+	}
+
+	ui.Dim("Opening %s in %s...", siteDir, editor)
+	c := exec.Command(editor, siteDir) //nolint:gosec // editor from trusted env var
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("editor exited with error: %w", err)
+	}
+
+	ui.Dim("Run 'srv site restart %s' for changes to take effect.", siteName)
+	return nil
 }
