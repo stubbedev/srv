@@ -314,6 +314,12 @@ const (
 	SiteTypePHP = "php"
 	// SiteTypeNode is the Node.js site type.
 	SiteTypeNode = "node"
+	// SiteTypeRuby is the Ruby site type.
+	SiteTypeRuby = "ruby"
+	// SiteTypePython is the Python site type.
+	SiteTypePython = "python"
+	// SiteTypeDockerfile is the Dockerfile site type.
+	SiteTypeDockerfile = "dockerfile"
 )
 
 // =============================================================================
@@ -593,6 +599,75 @@ const (
 	DefaultHostname = "default"
 	// DefaultContainerPort is the default container port.
 	DefaultContainerPort = 80
+)
+
+// =============================================================================
+// Ruby Constants
+// =============================================================================
+
+const (
+	// RubyImageAlpine is the official Ruby Alpine Docker image.
+	RubyImageAlpine = "ruby:alpine"
+	// RubyImageFormat is the format string for versioned Ruby Alpine images.
+	RubyImageFormat = "ruby:%s-alpine"
+	// RubyVersionLatest is the sentinel value meaning "use the latest tag".
+	RubyVersionLatest = "latest"
+	// RubyDefaultPort is the default port for Ruby applications.
+	RubyDefaultPort = 3000
+	// RubyDockerWorkDir is the working directory inside Ruby containers.
+	RubyDockerWorkDir = "/app"
+)
+
+// Ruby framework identifiers.
+const (
+	// RubyFrameworkRails is the Rails framework identifier.
+	RubyFrameworkRails = "rails"
+	// RubyFrameworkSinatra is the Sinatra framework identifier.
+	RubyFrameworkSinatra = "sinatra"
+	// RubyFrameworkRack is the Rack framework identifier.
+	RubyFrameworkRack = "rack"
+	// RubyFrameworkGeneric is the generic Ruby framework identifier.
+	RubyFrameworkGeneric = "generic"
+)
+
+// =============================================================================
+// Python Constants
+// =============================================================================
+
+const (
+	// PythonImageAlpine is the official Python Alpine Docker image.
+	PythonImageAlpine = "python:alpine"
+	// PythonImageFormat is the format string for versioned Python Alpine images.
+	PythonImageFormat = "python:%s-alpine"
+	// PythonVersionLatest is the sentinel value meaning "use the latest tag".
+	PythonVersionLatest = "latest"
+	// PythonDefaultPort is the default port for Python applications.
+	PythonDefaultPort = 8000
+	// PythonDockerWorkDir is the working directory inside Python containers.
+	PythonDockerWorkDir = "/app"
+)
+
+// Python framework identifiers.
+const (
+	// PythonFrameworkDjango is the Django framework identifier.
+	PythonFrameworkDjango = "django"
+	// PythonFrameworkFastAPI is the FastAPI framework identifier.
+	PythonFrameworkFastAPI = "fastapi"
+	// PythonFrameworkFlask is the Flask framework identifier.
+	PythonFrameworkFlask = "flask"
+	// PythonFrameworkGeneric is the generic Python framework identifier.
+	PythonFrameworkGeneric = "generic"
+)
+
+// =============================================================================
+// Dockerfile Constants
+// =============================================================================
+
+const (
+	// DockerfileDefaultPort is the default port when EXPOSE is not found.
+	DockerfileDefaultPort = 3000
+	// DockerfileFile is the Dockerfile filename to look for.
+	DockerfileFile = "Dockerfile"
 )
 
 // =============================================================================

@@ -181,10 +181,11 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	}
 
 	// Determine compose directory based on site type
-	if meta.Type == SiteTypeStatic || meta.Type == SiteTypePHP || meta.Type == SiteTypeNode {
-		// Static, PHP, and Node sites have their compose file in the srv config dir
+	switch meta.Type {
+	case SiteTypeStatic, SiteTypePHP, SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
+		// srv-managed sites have their compose file in the srv config dir
 		s.ComposeDir = SiteConfigDir(cfg, entry.Name())
-	} else {
+	default:
 		// Compose sites use the project directory
 		s.ComposeDir = meta.ProjectPath
 	}
@@ -199,7 +200,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 //   - Fallback (no service name, unknown type): subprocess docker compose ps.
 func siteContainerStatus(s Site) string {
 	switch s.Type {
-	case SiteTypeStatic, SiteTypePHP, SiteTypeNode:
+	case SiteTypeStatic, SiteTypePHP, SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
 		// Single-container sites: service name IS the container name.
 		if s.ServiceName != "" {
 			return docker.ContainerStatusByName(s.ServiceName)
@@ -825,10 +826,13 @@ server {
 type SiteType string
 
 const (
-	SiteTypeCompose SiteType = constants.SiteTypeCompose // Docker compose project
-	SiteTypeStatic  SiteType = constants.SiteTypeStatic  // Static files served via nginx
-	SiteTypePHP     SiteType = constants.SiteTypePHP     // PHP/FPM site (nginx + php-fpm)
-	SiteTypeNode    SiteType = constants.SiteTypeNode    // Node.js site
+	SiteTypeCompose    SiteType = constants.SiteTypeCompose    // Docker compose project
+	SiteTypeStatic     SiteType = constants.SiteTypeStatic     // Static files served via nginx
+	SiteTypePHP        SiteType = constants.SiteTypePHP        // PHP/FPM site (nginx + php-fpm)
+	SiteTypeNode       SiteType = constants.SiteTypeNode       // Node.js / Bun / Deno site
+	SiteTypeRuby       SiteType = constants.SiteTypeRuby       // Ruby site
+	SiteTypePython     SiteType = constants.SiteTypePython     // Python site
+	SiteTypeDockerfile SiteType = constants.SiteTypeDockerfile // Dockerfile site
 )
 
 // SiteMetadata holds all configuration for a site.
@@ -858,6 +862,16 @@ type SiteMetadata struct {
 	NodeVersion        string `yaml:"node_version,omitempty"`         // Node version ("lts" or "20"; node runtime only)
 	NodeFramework      string `yaml:"node_framework,omitempty"`       // Detected framework
 	NodeStartCmd       string `yaml:"node_start_cmd,omitempty"`       // Start command (e.g. "npm run dev")
+	// Ruby site options
+	RubyVersion   string `yaml:"ruby_version,omitempty"`   // Ruby version ("latest" or "3.3")
+	RubyFramework string `yaml:"ruby_framework,omitempty"` // Detected framework (rails/sinatra/rack/generic)
+	RubyStartCmd  string `yaml:"ruby_start_cmd,omitempty"` // Start command
+	// Python site options
+	PythonVersion   string `yaml:"python_version,omitempty"`   // Python version ("latest" or "3.12")
+	PythonFramework string `yaml:"python_framework,omitempty"` // Detected framework (django/fastapi/flask/generic)
+	PythonStartCmd  string `yaml:"python_start_cmd,omitempty"` // Start command
+	// Dockerfile site options
+	DockerfilePort int `yaml:"dockerfile_port,omitempty"` // Port from EXPOSE directive
 }
 
 // SiteConfigDir returns the path to a site's configuration directory.

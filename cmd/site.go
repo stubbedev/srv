@@ -32,6 +32,7 @@ var addFlags struct {
 	local          bool
 	force          bool
 	skipValidation bool
+	typeOverride   string // Force site type: php/node/ruby/python/dockerfile/static/compose
 	// Static site options
 	spa   bool
 	cache bool
@@ -106,6 +107,11 @@ func init() {
 	})
 	// Node.js site options
 	addCmd.Flags().StringVar(&addFlags.nodeVersion, "node-version", "", "Node.js version (auto-detected from .nvmrc / package.json; use 'lts' for latest LTS)")
+	// Type override
+	addCmd.Flags().StringVar(&addFlags.typeOverride, "type", "", "Force site type: php, node, ruby, python, dockerfile, static, compose")
+	_ = addCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"php", "node", "ruby", "python", "dockerfile", "static", "compose"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	addCmd.GroupID = GroupSites
 	RootCmd.AddCommand(addCmd)
 }
@@ -129,6 +135,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Print detection summary before prompting
+	ui.Dim("Detected: %s", detectionSummary(setup))
 
 	// Prompt for any missing configuration
 	if err := promptForMissingConfig(setup); err != nil {
@@ -171,8 +180,14 @@ type siteSetup struct {
 	isStatic           bool // true if serving static files (no docker-compose.yml)
 	isPHP              bool // true if serving a PHP/FPM site
 	isNode             bool // true if serving a Node.js site
+	isRuby             bool // true if serving a Ruby site
+	isPython           bool // true if serving a Python site
+	isDockerfile       bool // true if building from a bare Dockerfile
 	phpInfo            *site.PHPSiteInfo
 	nodeInfo           *site.NodeSiteInfo
+	rubyInfo           *site.RubySiteInfo
+	pythonInfo         *site.PythonSiteInfo
+	dockerfileInfo     *site.DockerfileSiteInfo
 	// Static site options
 	spa   bool
 	cache bool
@@ -180,12 +195,15 @@ type siteSetup struct {
 }
 
 // validateSiteSetup validates the path and discovers compose file or PHP/Node project.
-// Detection order:
+// Detection order (when --type is not specified):
 //  1. docker-compose.yml present → compose site
 //  2. composer.json present      → PHP site (with full metadata)
 //  3. *.php / *.phtml present    → PHP site (raw, with defaults)
-//  4. package.json present       → Node.js site
-//  5. otherwise                  → static site
+//  4. package.json / deno.json   → Node.js / Bun / Deno site
+//  5. Gemfile present            → Ruby site
+//  6. requirements.txt / pyproject.toml / Pipfile → Python site
+//  7. Dockerfile present         → Dockerfile site
+//  8. otherwise                  → static site
 func validateSiteSetup(pathArg string) (*siteSetup, error) {
 	sitePath, err := site.ResolvePath(pathArg)
 	if err != nil {
@@ -199,6 +217,11 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 	setup := &siteSetup{
 		sitePath: sitePath,
 		port:     addFlags.port,
+	}
+
+	// --type override: skip auto-detection and set type directly.
+	if addFlags.typeOverride != "" {
+		return applyTypeOverride(setup, sitePath, addFlags.typeOverride)
 	}
 
 	// 1. Try to find a compose file.
@@ -233,7 +256,7 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		return setup, nil
 	}
 
-	// 4. Try Node.js detection (package.json).
+	// 4. Try Node.js / Bun / Deno detection.
 	nodeInfo, err := site.DetectNodeSite(sitePath)
 	if err != nil {
 		return nil, fmt.Errorf("could not check for Node.js project: %w", err)
@@ -244,15 +267,110 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		return setup, nil
 	}
 
-	// 5. Fall back to static site.
+	// 5. Try Ruby detection (Gemfile).
+	rubyInfo, err := site.DetectRubySite(sitePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for Ruby project: %w", err)
+	}
+	if rubyInfo != nil {
+		setup.isRuby = true
+		setup.rubyInfo = rubyInfo
+		return setup, nil
+	}
+
+	// 6. Try Python detection.
+	pythonInfo, err := site.DetectPythonSite(sitePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for Python project: %w", err)
+	}
+	if pythonInfo != nil {
+		setup.isPython = true
+		setup.pythonInfo = pythonInfo
+		return setup, nil
+	}
+
+	// 7. Try bare Dockerfile detection.
+	dockerfileInfo, err := site.DetectDockerfileSite(sitePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for Dockerfile: %w", err)
+	}
+	if dockerfileInfo != nil {
+		setup.isDockerfile = true
+		setup.dockerfileInfo = dockerfileInfo
+		return setup, nil
+	}
+
+	// 8. Fall back to static site.
 	setup.isStatic = true
+	return setup, nil
+}
+
+// applyTypeOverride forces a specific site type, running detection only for that type.
+func applyTypeOverride(setup *siteSetup, sitePath, typeStr string) (*siteSetup, error) {
+	switch strings.ToLower(typeStr) {
+	case "php":
+		phpInfo, err := site.DetectPHPSite(sitePath)
+		if err != nil || phpInfo == nil {
+			phpInfo = site.RawPHPDefaults()
+		}
+		setup.isPHP = true
+		setup.phpInfo = phpInfo
+	case "node":
+		nodeInfo, err := site.DetectNodeSite(sitePath)
+		if err != nil || nodeInfo == nil {
+			nodeInfo = site.NodeDefaults()
+		}
+		setup.isNode = true
+		setup.nodeInfo = nodeInfo
+	case "ruby":
+		rubyInfo, err := site.DetectRubySite(sitePath)
+		if err != nil || rubyInfo == nil {
+			rubyInfo = &site.RubySiteInfo{
+				RubyVersion: constants.RubyVersionLatest,
+				Framework:   constants.RubyFrameworkGeneric,
+				Port:        constants.RubyDefaultPort,
+				StartCmd:    "sh -c 'bundle install && bundle exec ruby app.rb'",
+			}
+		}
+		setup.isRuby = true
+		setup.rubyInfo = rubyInfo
+	case "python":
+		pythonInfo, err := site.DetectPythonSite(sitePath)
+		if err != nil || pythonInfo == nil {
+			pythonInfo = &site.PythonSiteInfo{
+				PythonVersion: constants.PythonVersionLatest,
+				Framework:     constants.PythonFrameworkGeneric,
+				Port:          constants.PythonDefaultPort,
+				StartCmd:      "sh -c 'pip install -r requirements.txt && python app.py'",
+			}
+		}
+		setup.isPython = true
+		setup.pythonInfo = pythonInfo
+	case "dockerfile":
+		dockerfileInfo, err := site.DetectDockerfileSite(sitePath)
+		if err != nil || dockerfileInfo == nil {
+			dockerfileInfo = &site.DockerfileSiteInfo{Port: constants.DockerfileDefaultPort}
+		}
+		setup.isDockerfile = true
+		setup.dockerfileInfo = dockerfileInfo
+	case "static":
+		setup.isStatic = true
+	case "compose":
+		composePath, err := site.FindComposeFile(sitePath)
+		if err != nil {
+			return nil, fmt.Errorf("no docker-compose.yml found (required for --type compose)")
+		}
+		setup.composePath = composePath
+	default:
+		return nil, fmt.Errorf("unknown site type %q — valid types: php, node, ruby, python, dockerfile, static, compose", typeStr)
+	}
 	return setup, nil
 }
 
 // promptForMissingConfig prompts user for any missing configuration
 func promptForMissingConfig(setup *siteSetup) error {
 	// Get service name (only for compose sites)
-	if !setup.isStatic && !setup.isPHP {
+	if !setup.isStatic && !setup.isPHP && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile {
 		if err := promptForService(setup); err != nil {
 			return err
 		}
@@ -486,6 +604,12 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		ui.Info("Configuring PHP site: %s", setup.siteName)
 	case setup.isNode:
 		ui.Info("Configuring Node.js site: %s", setup.siteName)
+	case setup.isRuby:
+		ui.Info("Configuring Ruby site: %s", setup.siteName)
+	case setup.isPython:
+		ui.Info("Configuring Python site: %s", setup.siteName)
+	case setup.isDockerfile:
+		ui.Info("Configuring Dockerfile site: %s", setup.siteName)
 	case setup.isStatic:
 		ui.Info("Configuring static site: %s", setup.siteName)
 	default:
@@ -499,14 +623,27 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		siteType = site.SiteTypePHP
 	case setup.isNode:
 		siteType = site.SiteTypeNode
+	case setup.isRuby:
+		siteType = site.SiteTypeRuby
+	case setup.isPython:
+		siteType = site.SiteTypePython
+	case setup.isDockerfile:
+		siteType = site.SiteTypeDockerfile
 	case setup.isStatic:
 		siteType = site.SiteTypeStatic
 	}
 
 	// Determine canonical port for routing metadata.
 	port := setup.port
-	if setup.isNode && setup.nodeInfo != nil {
+	switch {
+	case setup.isNode && setup.nodeInfo != nil:
 		port = setup.nodeInfo.Port
+	case setup.isRuby && setup.rubyInfo != nil:
+		port = setup.rubyInfo.Port
+	case setup.isPython && setup.pythonInfo != nil:
+		port = setup.pythonInfo.Port
+	case setup.isDockerfile && setup.dockerfileInfo != nil:
+		port = setup.dockerfileInfo.Port
 	}
 
 	// Build base metadata.
@@ -543,6 +680,28 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		meta.ServiceName = "srv-" + setup.siteName + "-node"
 	}
 
+	// Add Ruby-specific fields to metadata.
+	if setup.isRuby && setup.rubyInfo != nil {
+		meta.RubyVersion = setup.rubyInfo.RubyVersion
+		meta.RubyFramework = setup.rubyInfo.Framework
+		meta.RubyStartCmd = setup.rubyInfo.StartCmd
+		meta.ServiceName = "srv-" + setup.siteName + "-app"
+	}
+
+	// Add Python-specific fields to metadata.
+	if setup.isPython && setup.pythonInfo != nil {
+		meta.PythonVersion = setup.pythonInfo.PythonVersion
+		meta.PythonFramework = setup.pythonInfo.Framework
+		meta.PythonStartCmd = setup.pythonInfo.StartCmd
+		meta.ServiceName = "srv-" + setup.siteName + "-app"
+	}
+
+	// Add Dockerfile-specific fields to metadata.
+	if setup.isDockerfile && setup.dockerfileInfo != nil {
+		meta.DockerfilePort = setup.dockerfileInfo.Port
+		meta.ServiceName = "srv-" + setup.siteName + "-app"
+	}
+
 	if err := site.WriteSiteMetadata(setup.siteName, meta); err != nil {
 		return fmt.Errorf("failed to write site metadata: %w", err)
 	}
@@ -557,6 +716,21 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		// Node.js site: generate docker-compose.yml.
 		if err := site.WriteNodeSiteConfig(setup.siteName, meta, setup.nodeInfo, addFlags.force); err != nil {
 			return fmt.Errorf("failed to write Node site config: %w", err)
+		}
+	case setup.isRuby:
+		// Ruby site: generate docker-compose.yml.
+		if err := site.WriteRubySiteConfig(setup.siteName, meta, setup.rubyInfo, addFlags.force); err != nil {
+			return fmt.Errorf("failed to write Ruby site config: %w", err)
+		}
+	case setup.isPython:
+		// Python site: generate docker-compose.yml.
+		if err := site.WritePythonSiteConfig(setup.siteName, meta, setup.pythonInfo, addFlags.force); err != nil {
+			return fmt.Errorf("failed to write Python site config: %w", err)
+		}
+	case setup.isDockerfile:
+		// Dockerfile site: generate docker-compose.yml that builds from project Dockerfile.
+		if err := site.WriteDockerfileSiteConfig(setup.siteName, meta, setup.dockerfileInfo, addFlags.force); err != nil {
+			return fmt.Errorf("failed to write Dockerfile site config: %w", err)
 		}
 	case setup.isStatic:
 		// Static site: generate docker-compose.yml and nginx.conf in config dir.
@@ -594,6 +768,12 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 		siteType = "php"
 	case setup.isNode:
 		siteType = "node"
+	case setup.isRuby:
+		siteType = "ruby"
+	case setup.isPython:
+		siteType = "python"
+	case setup.isDockerfile:
+		siteType = "dockerfile"
 	case setup.isStatic:
 		siteType = "static"
 	default:
@@ -608,7 +788,6 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 		ui.Blank()
 		ui.Dim("Laravel: ensure storage and bootstrap/cache are writable:")
 		ui.Dim("  chmod -R 777 %s/storage %s/bootstrap/cache", setup.sitePath, setup.sitePath)
-		ui.Dim("Then run: srv composer %s install", setup.siteName)
 	}
 
 	// Always start the site after adding
@@ -692,8 +871,8 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine the compose directory
 	var composeDir string
-	if setup.isStatic || setup.isPHP || setup.isNode {
-		// Static, PHP, and Node sites have their compose file in the srv config directory
+	if setup.isStatic || setup.isPHP || setup.isNode || setup.isRuby || setup.isPython || setup.isDockerfile {
+		// srv-managed sites have their compose file in the srv config directory
 		composeDir = site.SiteConfigDir(cfg, setup.siteName)
 	} else {
 		// Compose sites run from the project directory
@@ -714,14 +893,14 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 			ui.Info("Running composer install...")
 			if err := docker.ExecNonInteractive(containerName, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
 				ui.Warn("composer install failed: %v", err)
-				ui.Dim("Run manually: srv composer %s install", setup.siteName)
+				ui.Dim("Run manually: srv site shell %s", setup.siteName)
 			}
 		}
 	}
 
 	// For compose sites, connect service to traefik network.
 	// Static, PHP, and Node sites manage network membership via compose labels.
-	if !setup.isStatic && !setup.isPHP && !setup.isNode && setup.composeServiceName != "" {
+	if !setup.isStatic && !setup.isPHP && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile && setup.composeServiceName != "" {
 		if err := docker.ConnectServiceToNetwork(setup.sitePath, setup.composeServiceName, cfg.NetworkName); err != nil {
 			if errors.Is(err, docker.ErrServiceNotRunning) {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", setup.composeServiceName)
@@ -887,7 +1066,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getSiteTypeLabel returns the site type label (php/static/node/compose).
+// getSiteTypeLabel returns the site type label for the list view.
 func getSiteTypeLabel(s site.Site) string {
 	if s.IsBroken {
 		return ui.DimText("-")
@@ -899,6 +1078,12 @@ func getSiteTypeLabel(s site.Site) string {
 		return "php"
 	case site.SiteTypeNode:
 		return "node"
+	case site.SiteTypeRuby:
+		return "ruby"
+	case site.SiteTypePython:
+		return "python"
+	case site.SiteTypeDockerfile:
+		return "dockerfile"
 	default:
 		return "compose"
 	}
@@ -980,21 +1165,66 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	ui.Print("  SSL:     %s", ui.TypeColor(s.IsLocal))
 
 	// Site type info
+	meta, _ := site.ReadSiteMetadata(s.Name)
 	switch s.Type {
 	case site.SiteTypeStatic:
 		ui.Print("  Type:    %s", "static (nginx)")
 	case site.SiteTypePHP:
-		ui.Print("  Type:    %s", "php (nginx + php-fpm)")
+		typeLabel := "php (nginx + php-fpm)"
+		if meta != nil && meta.PHPVersion != "" && meta.PHPVersion != "latest" {
+			typeLabel = fmt.Sprintf("php %s (nginx + php-fpm)", meta.PHPVersion)
+		}
+		ui.Print("  Type:    %s", typeLabel)
+		if meta != nil && meta.PHPFramework != "" && meta.PHPFramework != "generic" {
+			ui.Print("  Framework: %s", meta.PHPFramework)
+		}
+		if meta != nil && len(meta.PHPExtensions) > 0 {
+			ui.Print("  Extensions: %d loaded", len(meta.PHPExtensions))
+		}
 	case site.SiteTypeNode:
-		meta, _ := site.ReadSiteMetadata(s.Name)
 		runtimeLabel := "node.js"
 		if meta != nil && meta.NodeRuntime != "" {
 			runtimeLabel = meta.NodeRuntime
 			if meta.NodePackageManager != "" && meta.NodePackageManager != meta.NodeRuntime && meta.NodePackageManager != constants.NodePMDeno {
 				runtimeLabel += " / " + meta.NodePackageManager
 			}
+			if meta.NodeVersion != "" && meta.NodeVersion != constants.NodeVersionLTS {
+				runtimeLabel += " " + meta.NodeVersion
+			}
 		}
 		ui.Print("  Type:    %s", runtimeLabel)
+		if meta != nil && meta.NodeFramework != "" && meta.NodeFramework != "generic" {
+			ui.Print("  Framework: %s", meta.NodeFramework)
+		}
+		if s.Port != 0 {
+			ui.Print("  Port:    %d", s.Port)
+		}
+	case site.SiteTypeRuby:
+		runtimeLabel := "ruby"
+		if meta != nil && meta.RubyVersion != "" && meta.RubyVersion != constants.RubyVersionLatest {
+			runtimeLabel = "ruby " + meta.RubyVersion
+		}
+		ui.Print("  Type:    %s", runtimeLabel)
+		if meta != nil && meta.RubyFramework != "" && meta.RubyFramework != "generic" {
+			ui.Print("  Framework: %s", meta.RubyFramework)
+		}
+		if s.Port != 0 {
+			ui.Print("  Port:    %d", s.Port)
+		}
+	case site.SiteTypePython:
+		runtimeLabel := "python"
+		if meta != nil && meta.PythonVersion != "" && meta.PythonVersion != constants.PythonVersionLatest {
+			runtimeLabel = "python " + meta.PythonVersion
+		}
+		ui.Print("  Type:    %s", runtimeLabel)
+		if meta != nil && meta.PythonFramework != "" && meta.PythonFramework != "generic" {
+			ui.Print("  Framework: %s", meta.PythonFramework)
+		}
+		if s.Port != 0 {
+			ui.Print("  Port:    %d", s.Port)
+		}
+	case site.SiteTypeDockerfile:
+		ui.Print("  Type:    %s", "dockerfile (custom build)")
 		if s.Port != 0 {
 			ui.Print("  Port:    %d", s.Port)
 		}
@@ -1006,6 +1236,11 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		if s.Port != 0 {
 			ui.Print("  Port:    %d", s.Port)
 		}
+	}
+
+	cfg, _ := config.Load()
+	if cfg != nil {
+		ui.Print("  Config:  %s/sites/%s/", cfg.Root, s.Name)
 	}
 
 	// Status
@@ -1579,11 +1814,18 @@ func runtimeUpdatePHP(cfg *config.Config, siteName string, meta *site.SiteMetada
 		return fmt.Errorf("specify at least --php-version or --php-extensions")
 	}
 
-	if runtimeFlags.phpVersion != "" {
+	// Show before/after diff.
+	if runtimeFlags.phpVersion != "" && runtimeFlags.phpVersion != meta.PHPVersion {
+		ui.Dim("  php version:  %s → %s", meta.PHPVersion, runtimeFlags.phpVersion)
 		meta.PHPVersion = runtimeFlags.phpVersion
 	}
 	if runtimeFlags.phpExtensions != "" {
+		before := len(meta.PHPExtensions)
 		meta.PHPExtensions = site.ParseExtensionOverrides(runtimeFlags.phpExtensions, meta.PHPExtensions)
+		after := len(meta.PHPExtensions)
+		if before != after {
+			ui.Dim("  extensions:   %d → %d", before, after)
+		}
 	}
 
 	phpInfo := &site.PHPSiteInfo{
@@ -1622,6 +1864,9 @@ func runtimeUpdateNode(cfg *config.Config, siteName string, meta *site.SiteMetad
 		return fmt.Errorf("--node-version only applies to Node.js sites (this site uses %s)", meta.NodeRuntime)
 	}
 
+	if runtimeFlags.nodeVersion != meta.NodeVersion {
+		ui.Dim("  node version:  %s → %s", meta.NodeVersion, runtimeFlags.nodeVersion)
+	}
 	meta.NodeVersion = runtimeFlags.nodeVersion
 
 	nodeInfo := &site.NodeSiteInfo{
@@ -1744,12 +1989,37 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 		if err := site.WriteNodeSiteConfig(siteName, *meta, nodeInfo, true); err != nil {
 			return fmt.Errorf("failed to regenerate Node config: %w", err)
 		}
+	case site.SiteTypeRuby:
+		rubyInfo := &site.RubySiteInfo{
+			RubyVersion: meta.RubyVersion,
+			Framework:   meta.RubyFramework,
+			StartCmd:    meta.RubyStartCmd,
+			Port:        meta.Port,
+		}
+		if err := site.WriteRubySiteConfig(siteName, *meta, rubyInfo, true); err != nil {
+			return fmt.Errorf("failed to regenerate Ruby config: %w", err)
+		}
+	case site.SiteTypePython:
+		pythonInfo := &site.PythonSiteInfo{
+			PythonVersion: meta.PythonVersion,
+			Framework:     meta.PythonFramework,
+			StartCmd:      meta.PythonStartCmd,
+			Port:          meta.Port,
+		}
+		if err := site.WritePythonSiteConfig(siteName, *meta, pythonInfo, true); err != nil {
+			return fmt.Errorf("failed to regenerate Python config: %w", err)
+		}
+	case site.SiteTypeDockerfile:
+		dockerfileInfo := &site.DockerfileSiteInfo{Port: meta.DockerfilePort}
+		if err := site.WriteDockerfileSiteConfig(siteName, *meta, dockerfileInfo, true); err != nil {
+			return fmt.Errorf("failed to regenerate Dockerfile config: %w", err)
+		}
 	case site.SiteTypeStatic:
 		if err := site.WriteStaticSiteConfig(siteName, *meta, true); err != nil {
 			return fmt.Errorf("failed to regenerate static config: %w", err)
 		}
 	default:
-		return fmt.Errorf("regenerate is only available for PHP, Node.js, and static sites")
+		return fmt.Errorf("regenerate is only available for PHP, Node.js, Ruby, Python, Dockerfile, and static sites")
 	}
 
 	composeDir := site.SiteConfigDir(cfg, siteName)
@@ -1837,4 +2107,206 @@ func runEdit(cmd *cobra.Command, args []string) error {
 
 	ui.Dim("Run 'srv site restart %s' for changes to take effect.", siteName)
 	return nil
+}
+
+// =============================================================================
+// shell command
+// =============================================================================
+
+var shellFlags struct {
+	service string
+}
+
+var shellCmd = &cobra.Command{
+	Use:   "shell SITE",
+	Short: "Open an interactive shell in a site's container",
+	Long: `Open an interactive shell (sh) in the primary container for a site.
+
+For PHP sites the default is the php-fpm container (srv-SITE-php).
+Use --service web to get a shell in the nginx container instead.
+
+For Node, Ruby, Python, and Dockerfile sites the single app container is used.
+
+For compose sites the first service container is used; use --service to pick one.
+
+Examples:
+  srv site shell mysite
+  srv site shell mysite --service web   # nginx container for PHP sites`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			cmd.Help()
+			return ui.UsageError("srv site shell SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv site shell SITE", "too many arguments — expected a single site name, got %d", len(args))
+		}
+		return nil
+	},
+	RunE: runShell,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+	},
+}
+
+func init() {
+	shellCmd.Flags().StringVar(&shellFlags.service, "service", "", "Container name or service to shell into")
+	shellCmd.GroupID = GroupSites
+	RootCmd.AddCommand(shellCmd)
+}
+
+func runShell(cmd *cobra.Command, args []string) error {
+	if err := docker.EnsureRunning(); err != nil {
+		return err
+	}
+
+	siteName := args[0]
+	s, err := site.GetByName(siteName)
+	if err != nil {
+		return err
+	}
+
+	if s.IsBroken {
+		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
+	}
+
+	// Determine the container to shell into.
+	containerName := shellFlags.service
+	if containerName == "" {
+		containerName = siteShellContainer(*s)
+	}
+
+	if containerName == "" {
+		return fmt.Errorf("cannot determine container for site '%s' — use --service to specify one", siteName)
+	}
+
+	ui.Dim("Connecting to container: %s", containerName)
+	c := exec.Command("docker", "exec", "-it", containerName, "sh") //nolint:gosec
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		// Exit code != 0 from the shell is normal (user typed exit N), don't wrap it as an error.
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
+			return nil
+		}
+		return fmt.Errorf("docker exec failed: %w", err)
+	}
+	return nil
+}
+
+// siteShellContainer returns the container name to shell into for a given site.
+func siteShellContainer(s site.Site) string {
+	switch s.Type {
+	case site.SiteTypePHP:
+		// Default to php-fpm container for PHP sites.
+		return "srv-" + s.Name + "-php"
+	case site.SiteTypeNode:
+		return "srv-" + s.Name + "-node"
+	case site.SiteTypeRuby, site.SiteTypePython, site.SiteTypeDockerfile:
+		return "srv-" + s.Name + "-app"
+	default:
+		// Compose sites: use the stored service name (container name).
+		return s.ServiceName
+	}
+}
+
+// =============================================================================
+// open command
+// =============================================================================
+
+var openCmd = &cobra.Command{
+	Use:   "open SITE",
+	Short: "Open a site in the default browser",
+	Long:  `Open the site's HTTPS URL in the system default browser using xdg-open.`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			cmd.Help()
+			return ui.UsageError("srv site open SITE", "a site name is required")
+		}
+		if len(args) > 1 {
+			return ui.UsageError("srv site open SITE", "too many arguments — expected a single site name, got %d", len(args))
+		}
+		return nil
+	},
+	RunE: runOpen,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+	},
+}
+
+func init() {
+	openCmd.GroupID = GroupSites
+	RootCmd.AddCommand(openCmd)
+}
+
+func runOpen(cmd *cobra.Command, args []string) error {
+	siteName := args[0]
+	s, err := site.GetByName(siteName)
+	if err != nil {
+		return err
+	}
+
+	if s.Domain == "" {
+		return fmt.Errorf("site '%s' has no domain configured", siteName)
+	}
+
+	url := "https://" + s.Domain
+	ui.Dim("Opening %s...", url)
+	c := exec.Command("xdg-open", url) //nolint:gosec
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("xdg-open failed: %w", err)
+	}
+	return nil
+}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+// detectionSummary returns a human-readable summary of what was detected for a site.
+func detectionSummary(setup *siteSetup) string {
+	switch {
+	case setup.composePath != "":
+		return "docker-compose project"
+	case setup.isPHP && setup.phpInfo != nil:
+		fw := setup.phpInfo.Framework
+		ver := setup.phpInfo.PHPVersion
+		ext := len(setup.phpInfo.Extensions)
+		if fw != "generic" {
+			return fmt.Sprintf("%s (PHP %s, %d extensions)", fw, ver, ext)
+		}
+		return fmt.Sprintf("php (PHP %s, %d extensions)", ver, ext)
+	case setup.isNode && setup.nodeInfo != nil:
+		info := setup.nodeInfo
+		runtime := info.Runtime
+		if info.PackageManager != info.Runtime && info.PackageManager != constants.NodePMDeno {
+			runtime += " / " + info.PackageManager
+		}
+		fw := info.Framework
+		ver := info.NodeVersion
+		if fw != "generic" {
+			return fmt.Sprintf("%s (%s %s)", fw, runtime, ver)
+		}
+		return fmt.Sprintf("%s %s", runtime, ver)
+	case setup.isRuby && setup.rubyInfo != nil:
+		info := setup.rubyInfo
+		if info.Framework != constants.RubyFrameworkGeneric {
+			return fmt.Sprintf("%s (ruby %s)", info.Framework, info.RubyVersion)
+		}
+		return fmt.Sprintf("ruby %s", info.RubyVersion)
+	case setup.isPython && setup.pythonInfo != nil:
+		info := setup.pythonInfo
+		if info.Framework != constants.PythonFrameworkGeneric {
+			return fmt.Sprintf("%s (python %s)", info.Framework, info.PythonVersion)
+		}
+		return fmt.Sprintf("python %s", info.PythonVersion)
+	case setup.isDockerfile && setup.dockerfileInfo != nil:
+		return fmt.Sprintf("Dockerfile (port %d)", setup.dockerfileInfo.Port)
+	case setup.isStatic:
+		return "static site"
+	default:
+		return "unknown"
+	}
 }
