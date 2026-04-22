@@ -94,6 +94,6 @@ func Available() bool {
 // Safe to call multiple times; intended for use in process shutdown hooks.
 func Cleanup() {
 	if extractedPath != "" {
-		os.RemoveAll(filepath.Dir(extractedPath))
+		_ = os.RemoveAll(filepath.Dir(extractedPath))
 	}
 }

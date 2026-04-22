@@ -187,7 +187,7 @@ func UpdateDynamicConfig() error {
 		return fmt.Errorf("failed to write dynamic config: %w", err)
 	}
 	if err := os.Rename(tmp, dynamicPath); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("failed to replace dynamic config: %w", err)
 	}
 

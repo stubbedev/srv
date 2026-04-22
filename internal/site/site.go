@@ -499,7 +499,7 @@ func loadEnvFile(path string, envVars map[string]string) {
 	if err != nil {
 		return // File doesn't exist or can't be read, skip silently
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

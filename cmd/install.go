@@ -202,7 +202,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 }
 
 func startSites(sites []site.Site) {
-	runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
+	_ = runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
 		return docker.ComposeUp(s.ComposeDir)
 	})
 }

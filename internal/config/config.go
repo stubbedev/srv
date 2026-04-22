@@ -193,7 +193,7 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		// Best-effort cleanup of temp file
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	return nil

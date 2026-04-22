@@ -36,7 +36,7 @@ func DetectDockerfileSite(dir string) (*DockerfileSiteInfo, error) {
 		}
 		return nil, fmt.Errorf("reading Dockerfile: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	port := parseDockerfileExposePort(f)
 	if port == 0 {

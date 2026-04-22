@@ -58,15 +58,15 @@ func EnsureRunning() error {
 
 	cli, err := newClient()
 	if err != nil {
-		return fmt.Errorf("Docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
+		return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	if _, err := cli.Ping(ctx); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("Docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
+			return fmt.Errorf("docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
 		}
-		return fmt.Errorf("Docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
+		return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
 	}
 	return nil
 }
@@ -89,7 +89,7 @@ func NetworkExists(name string) bool {
 	if err != nil {
 		return false
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	f := filters.NewArgs(filters.Arg("name", name))
 	networks, err := cli.NetworkList(ctx, network.ListOptions{Filters: f})
@@ -114,7 +114,7 @@ func CreateNetwork(name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	_, err = cli.NetworkCreate(ctx, name, network.CreateOptions{Driver: "bridge"})
 	if err != nil {
@@ -277,7 +277,7 @@ func ContainerStatusByName(containerName string) string {
 	if err != nil {
 		return constants.StatusStopped
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	info, err := cli.ContainerInspect(ctx, containerName)
 	if err != nil {
@@ -302,7 +302,7 @@ func ContainerStatusByComposeDir(dir string) string {
 		// Fall back to subprocess
 		return ContainerStatus(dir)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	f := filters.NewArgs(
 		filters.Arg("label", "com.docker.compose.project.working_dir="+dir),
@@ -342,7 +342,7 @@ func IsContainerRunning(name string) bool {
 	if err != nil {
 		return false
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	info, err := cli.ContainerInspect(ctx, name)
 	if err != nil {
@@ -357,7 +357,7 @@ func Pull(imageName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	// ImagePull returns a reader that must be consumed to drive the transfer.
 	// Copy it to stdout so the user sees progress, then discard cleanly.
@@ -368,7 +368,7 @@ func Pull(imageName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	_, err = io.Copy(os.Stdout, reader)
 	return err
@@ -409,7 +409,7 @@ func ContainerExists(name string) bool {
 	if err != nil {
 		return false
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	_, err = cli.ContainerInspect(ctx, name)
 	return err == nil
@@ -425,7 +425,7 @@ func GetContainerImageVersion(containerName string) string {
 	if err != nil {
 		return ""
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	info, err := cli.ContainerInspect(ctx, containerName)
 	if err != nil {
@@ -448,7 +448,7 @@ func RemoveNetwork(name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	return cli.NetworkRemove(ctx, name)
 }
@@ -468,7 +468,7 @@ func connectContainerByID(ctx context.Context, containerID, networkName, alias s
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	endpointCfg := &network.EndpointSettings{}
 	if alias != "" {

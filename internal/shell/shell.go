@@ -112,7 +112,7 @@ func CheckPortOnAddr(addr, port string) (bool, error) {
 		}
 		// Permission denied or other error — fall back to ss/netstat.
 	} else {
-		listener.Close()
+		_ = listener.Close()
 		return false, nil // Port is available
 	}
 

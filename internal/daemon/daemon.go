@@ -89,7 +89,7 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 	d.logFile = logFile
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	d.log("Daemon started, watching for container events on network %s", d.networkName)
 
@@ -117,7 +117,7 @@ func (d *Daemon) log(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	if d.logFile != nil {
-		fmt.Fprintf(d.logFile, "[%s] %s\n", timestamp, msg)
+		_, _ = fmt.Fprintf(d.logFile, "[%s] %s\n", timestamp, msg)
 	}
 }
 
@@ -145,7 +145,7 @@ func isDockerAvailable() bool {
 	if err != nil {
 		return false
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -219,7 +219,7 @@ func (d *Daemon) runEventLoop() error {
 	if err != nil {
 		return fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	f := dockerfilters.NewArgs(
 		dockerfilters.Arg("type", string(dockerevents.ContainerEventType)),
@@ -253,7 +253,7 @@ func (d *Daemon) handleContainerStart(event dockerevents.Message) {
 		// Refresh mappings in case a new site was added, but throttle to avoid
 		// hammering disk I/O on busy systems with many non-srv containers.
 		if time.Since(d.lastRefreshTime) >= refreshCooldown {
-			d.refreshContainerMapping()
+			_ = d.refreshContainerMapping()
 			d.lastRefreshTime = time.Now()
 		}
 		siteName, tracked = d.containers[containerName]

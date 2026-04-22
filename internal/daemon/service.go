@@ -182,7 +182,7 @@ WantedBy=default.target
 	// Enable lingering so user services run without login
 	currentUser, err := user.Current()
 	if err == nil {
-		exec.Command("loginctl", "enable-linger", currentUser.Username).Run()
+		_ = exec.Command("loginctl", "enable-linger", currentUser.Username).Run()
 	}
 
 	return nil
@@ -195,8 +195,8 @@ func uninstallSystemd() error {
 	}
 
 	// Stop and disable service (ignore errors if not running)
-	exec.Command("systemctl", "--user", "stop", SystemdServiceName).Run()
-	exec.Command("systemctl", "--user", "disable", SystemdServiceName).Run()
+	_ = exec.Command("systemctl", "--user", "stop", SystemdServiceName).Run()
+	_ = exec.Command("systemctl", "--user", "disable", SystemdServiceName).Run()
 
 	// Remove service file
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
@@ -204,7 +204,7 @@ func uninstallSystemd() error {
 	}
 
 	// Reload systemd
-	exec.Command("systemctl", "--user", "daemon-reload").Run()
+	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 
 	return nil
 }
@@ -276,7 +276,7 @@ func installLaunchd() error {
 	}
 
 	// Unload existing service first (ignore errors if not loaded)
-	exec.Command("launchctl", "unload", plistPath).Run()
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
 
 	logPath := LogPath(cfg)
 
@@ -333,7 +333,7 @@ func uninstallLaunchd() error {
 	}
 
 	// Unload service (ignore errors if not loaded)
-	exec.Command("launchctl", "unload", plistPath).Run()
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
 
 	// Remove plist file
 	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
@@ -350,7 +350,7 @@ func restartLaunchd() error {
 	}
 
 	// Unload and reload
-	exec.Command("launchctl", "unload", plistPath).Run()
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
 	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
 		return fmt.Errorf("failed to restart service: %w", err)
 	}

@@ -44,7 +44,7 @@ func generateTestCert(t *testing.T, path string, notAfter time.Time) {
 	if err != nil {
 		t.Fatalf("failed to create cert file: %v", err)
 	}
-	defer certOut.Close()
+	defer func() { _ = certOut.Close() }()
 
 	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
 		t.Fatalf("failed to write cert: %v", err)

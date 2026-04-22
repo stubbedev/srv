@@ -51,7 +51,7 @@ Examples:
   srv proxy add -d myapp.test -c postgres:5432`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if proxyAddFlags.domain == "" {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv proxy add --domain DOMAIN --port PORT", "--domain is required (e.g. --domain api.test)")
 		}
 		return nil
@@ -65,7 +65,7 @@ var proxyRemoveCmd = &cobra.Command{
 	Short:   "Remove a proxy",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv proxy remove NAME", "a proxy name is required")
 		}
 		if len(args) > 1 {
@@ -104,7 +104,7 @@ func init() {
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.container, "container", "c", "", "Docker container to proxy to (container:port)")
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.name, "name", "n", "", "Proxy name (default: derived from domain)")
 	proxyAddCmd.Flags().BoolVarP(&proxyAddFlags.force, "force", "f", false, "Overwrite existing proxy configuration")
-	proxyAddCmd.MarkFlagRequired("domain")
+	_ = proxyAddCmd.MarkFlagRequired("domain")
 
 	proxyCmd.GroupID = GroupProxy
 	RootCmd.AddCommand(proxyCmd)
@@ -237,7 +237,7 @@ func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error
 		if dialErr != nil {
 			ui.Warn("Nothing is listening on port %s — start your service before using the proxy", input.port)
 		} else {
-			conn.Close()
+			_ = conn.Close()
 		}
 
 		// On Linux, Traefik uses network_mode: host, so it can reach localhost directly.

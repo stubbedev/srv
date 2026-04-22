@@ -207,7 +207,7 @@ func readEnvFile(path string) map[string]string {
 	if err != nil {
 		return map[string]string{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	parsed, err := envparse.Parse(f)
 	if err != nil {
 		return map[string]string{}
@@ -236,7 +236,7 @@ func writeEnvFile(path string, envMap map[string]string) error {
 		return fmt.Errorf("failed to write env file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("failed to install env file: %w", err)
 	}
 	return nil
@@ -478,7 +478,7 @@ func GetEmail(prompt bool) (string, error) {
 	// Check for existing email using envparse for proper .env file parsing
 	envPath := cfg.EnvTraefikPath()
 	if file, err := os.Open(envPath); err == nil {
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		envMap, err := envparse.Parse(file)
 		if err == nil {
 			if email, ok := envMap[constants.EnvACMEEmail]; ok && email != "" {

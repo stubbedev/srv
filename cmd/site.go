@@ -69,7 +69,7 @@ Examples:
   srv add /path/to/static --domain site.test --local  # Static files with nginx`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv add PATH --domain DOMAIN", "a path to a directory is required")
 		}
 		if len(args) > 1 {
@@ -79,7 +79,7 @@ Examples:
 	},
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if addFlags.domain == "" {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv add PATH --domain DOMAIN", "--domain is required (e.g. --domain myapp.test or --domain example.com)")
 		}
 		return nil
@@ -944,7 +944,7 @@ var removeCmd = &cobra.Command{
 	Long:    `Stop a site's containers and remove it from srv.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv remove SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -1145,7 +1145,7 @@ var infoCmd = &cobra.Command{
   - SSL certificate status (for local sites)`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv info SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -1328,7 +1328,7 @@ var startCmd = &cobra.Command{
 Use --all to start all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && !startFlags.all {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv start SITE", "a site name is required (or use --all to start every site)")
 		}
 		return nil
@@ -1476,7 +1476,7 @@ var stopCmd = &cobra.Command{
 Use --all to stop all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && !stopFlags.all {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv stop SITE", "a site name is required (or use --all to stop every site)")
 		}
 		return nil
@@ -1559,7 +1559,7 @@ var restartCmd = &cobra.Command{
 Use --all to restart all registered sites in parallel.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && !restartFlags.all {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv restart SITE", "a site name is required (or use --all to restart every site)")
 		}
 		return nil
@@ -1713,7 +1713,7 @@ var logsCmd = &cobra.Command{
 	Short: "Show site logs",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv logs SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -1792,7 +1792,7 @@ Examples:
   srv site runtime mysite --node-version 22`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv site runtime SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -1945,7 +1945,7 @@ the domain / SSL type.
 The site will be restarted automatically after regeneration.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv site regenerate SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -2080,7 +2080,7 @@ If no editor is configured, the path is printed so you can open it manually.
 After editing, run "srv site restart SITE" for changes to take effect.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv site edit SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -2165,7 +2165,7 @@ Examples:
   srv site shell mysite --service web   # nginx container for PHP sites`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv site shell SITE", "a site name is required")
 		}
 		if len(args) > 1 {
@@ -2255,7 +2255,7 @@ var openCmd = &cobra.Command{
 	Long:  `Open the site's HTTPS URL in the system default browser using xdg-open.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			cmd.Help()
+			_ = cmd.Help()
 			return ui.UsageError("srv site open SITE", "a site name is required")
 		}
 		if len(args) > 1 {

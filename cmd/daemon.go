@@ -221,7 +221,7 @@ func runDaemonLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
 		return err
@@ -250,7 +250,7 @@ func printLastLines(path string, n int) error {
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Collect all lines then print the last n.
 	// For typical daemon log sizes this is fine; a ring-buffer approach

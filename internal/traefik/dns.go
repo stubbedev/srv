@@ -367,7 +367,7 @@ func LoadLocalDomains() ([]string, error) {
 		}
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var domains []string
 	scanner := bufio.NewScanner(file)
