@@ -19,8 +19,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Download mkcert binaries for embedding
-        run: make mkcert
+        run: just mkcert
 
       - name: Build
         run: go build ./...

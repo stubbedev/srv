@@ -101,10 +101,7 @@ install: build
 # Pre-release checks (clean working directory, on default branch)
 _release-checks:
     #!/usr/bin/env bash
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "Error: Working directory is not clean. Commit or stash changes first." >&2
-        exit 1
-    fi
+    set -euo pipefail
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|^origin/||' || git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
     if [ -z "$DEFAULT_BRANCH" ]; then
@@ -115,6 +112,12 @@ _release-checks:
         exit 1
     fi
     just check
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Changes detected from formatting. Staging and committing..."
+        git add -A
+        git commit -m "chore: format code for release"
+        echo "Committed formatting changes"
+    fi
 
 # Release a new major version (X.y.z -> X+1.0.0) with GitHub release
 release-major: _release-checks
