@@ -71,9 +71,9 @@ jobs:
             echo "Building ${output_name}..."
 
             # Build mkcert for this target platform, then srv.
-            env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOARM="$GOARM" \
+            (cd third_party/mkcert && env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOARM="$GOARM" \
               go build -ldflags "-X main.Version=${MKCERT_VERSION}" \
-              -o internal/mkcert/bin/mkcert ./third_party/mkcert
+              -o ../../internal/mkcert/bin/mkcert .)
 
             env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOARM="$GOARM" \
               go build -ldflags "$LDFLAGS" -trimpath -o "dist/${output_name}" .
