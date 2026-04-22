@@ -98,7 +98,7 @@ install: build
 # Release Commands
 # =============================================================================
 
-# Pre-release checks (clean working directory, on main branch)
+# Pre-release checks (clean working directory, on default branch)
 _release-checks:
     #!/usr/bin/env bash
     if [ -n "$(git status --porcelain)" ]; then
@@ -106,8 +106,12 @@ _release-checks:
         exit 1
     fi
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$BRANCH" != "main" ]; then
-        echo "Error: Not on main branch (currently on '$BRANCH')." >&2
+    DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|^origin/||' || git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
+    if [ -z "$DEFAULT_BRANCH" ]; then
+        DEFAULT_BRANCH="main"
+    fi
+    if [ "$BRANCH" != "$DEFAULT_BRANCH" ]; then
+        echo "Error: Not on default branch '$DEFAULT_BRANCH' (currently on '$BRANCH')." >&2
         exit 1
     fi
     just check
