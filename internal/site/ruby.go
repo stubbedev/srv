@@ -142,10 +142,10 @@ func RubyImageTag(version string) string {
 // =============================================================================
 
 type rubyServiceConfig struct {
-	ContainerName string            `yaml:"container_name"`
-	Image         string            `yaml:"image"`
-	Command       string            `yaml:"command"`
-	WorkingDir    string            `yaml:"working_dir"`
+	ContainerName string             `yaml:"container_name"`
+	Image         string             `yaml:"image"`
+	Command       string             `yaml:"command"`
+	WorkingDir    string             `yaml:"working_dir"`
 	Volumes       []nodeVolumeConfig `yaml:"volumes"`
 	Environment   map[string]string  `yaml:"environment,omitempty"`
 	Labels        map[string]string  `yaml:"labels,omitempty"`
@@ -155,7 +155,7 @@ type rubyServiceConfig struct {
 
 type rubyComposeConfig struct {
 	Services map[string]rubyServiceConfig `yaml:"services"`
-	Networks map[string]nodeNetworkConfig  `yaml:"networks"`
+	Networks map[string]nodeNetworkConfig `yaml:"networks"`
 }
 
 // WriteRubySiteConfig generates and writes docker-compose.yml for a Ruby site.
@@ -189,8 +189,8 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 					},
 				},
 				Environment: map[string]string{
-					"PORT":     fmt.Sprintf("%d", info.Port),
-					"RACK_ENV": "development",
+					"PORT":      fmt.Sprintf("%d", info.Port),
+					"RACK_ENV":  "development",
 					"RAILS_ENV": "development",
 				},
 				Labels:   labels,

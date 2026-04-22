@@ -158,10 +158,10 @@ func WritePythonSiteConfig(name string, meta SiteMetadata, info *PythonSiteInfo,
 	labels := buildAppTraefikLabels(name, meta.Domain, meta.IsLocal, info.Port)
 
 	env := map[string]string{
-		"PORT":        fmt.Sprintf("%d", info.Port),
-		"PYTHONPATH":  constants.PythonDockerWorkDir,
+		"PORT":                    fmt.Sprintf("%d", info.Port),
+		"PYTHONPATH":              constants.PythonDockerWorkDir,
 		"PYTHONDONTWRITEBYTECODE": "1",
-		"PYTHONUNBUFFERED": "1",
+		"PYTHONUNBUFFERED":        "1",
 	}
 	if info.Framework == constants.PythonFrameworkFlask {
 		env["FLASK_ENV"] = "development"

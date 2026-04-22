@@ -13,7 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-
 // Config holds the srv configuration.
 type Config struct {
 	Root        string // Base directory for all srv state
@@ -29,6 +28,7 @@ type UserConfig struct {
 	// Defaults to Google DNS (8.8.8.8, 8.8.4.4) when empty.
 	UpstreamDNS []string `yaml:"upstream_dns,omitempty"`
 }
+
 var (
 	configMu     sync.Mutex
 	configLoaded bool

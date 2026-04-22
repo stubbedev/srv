@@ -355,10 +355,10 @@ func NodeImageTag(version string) string {
 // =============================================================================
 
 type nodeServiceConfig struct {
-	ContainerName string            `yaml:"container_name"`
-	Image         string            `yaml:"image"`
-	Command       string            `yaml:"command"`
-	WorkingDir    string            `yaml:"working_dir"`
+	ContainerName string             `yaml:"container_name"`
+	Image         string             `yaml:"image"`
+	Command       string             `yaml:"command"`
+	WorkingDir    string             `yaml:"working_dir"`
 	Volumes       []nodeVolumeConfig `yaml:"volumes"`
 	Environment   map[string]string  `yaml:"environment,omitempty"`
 	Labels        map[string]string  `yaml:"labels,omitempty"`

@@ -87,7 +87,7 @@ type dockerfileBuild struct {
 
 type dockerfileComposeConfig struct {
 	Services map[string]dockerfileServiceConfig `yaml:"services"`
-	Networks map[string]nodeNetworkConfig        `yaml:"networks"`
+	Networks map[string]nodeNetworkConfig       `yaml:"networks"`
 }
 
 // WriteDockerfileSiteConfig generates and writes docker-compose.yml for a Dockerfile site.

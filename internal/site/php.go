@@ -887,7 +887,7 @@ func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) err
 			},
 		},
 		Networks: map[string]phpNetworkConfig{
-			"internal":             {Name: internalNetworkName},
+			"internal":              {Name: internalNetworkName},
 			constants.TraefikSubdir: {Name: meta.NetworkName, External: true},
 		},
 	}
