@@ -86,7 +86,7 @@ func checkFirewall() int {
 	if fwStatus.Firewall == firewall.FirewallNone {
 		ui.IndentedDim(1, "No active firewall detected")
 	} else {
-		ui.IndentedDim(1, "Firewall: %s", firewall.Name(fwStatus.Firewall))
+		ui.IndentedDim(1, "Firewall: %s", fwStatus.Firewall)
 		if fwStatus.HTTPOpen {
 			ui.IndentedSuccess(1, "Port 80 (HTTP) - open")
 		} else {

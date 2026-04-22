@@ -87,7 +87,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Step: Configure firewall if needed
 	if needFirewall {
-		steps.Next("Configuring firewall (%s)", firewall.Name(fwStatus.Firewall))
+		steps.Next("Configuring firewall (%s)", fwStatus.Firewall)
 		ui.Dim("Ports 80 and 443 need to be opened for HTTP/HTTPS traffic")
 
 		var openPorts bool

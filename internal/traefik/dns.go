@@ -196,12 +196,12 @@ func updateMacOSResolverConfig(domains []string) error {
 	nameserver := "nameserver " + constants.LocalhostIP + "\n"
 
 	// Build the full set of names that should have resolver files.
-	wanted := make(map[string]bool)
+	wanted := make(map[string]struct{})
 	for _, tld := range LocalDomains {
-		wanted[tld] = true
+		wanted[tld] = struct{}{}
 	}
 	for _, d := range domains {
-		wanted[d] = true
+		wanted[d] = struct{}{}
 	}
 
 	// Write a resolver file for each wanted name.
@@ -224,7 +224,7 @@ func updateMacOSResolverConfig(domains []string) error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if wanted[name] {
+		if _, ok := wanted[name]; ok {
 			continue
 		}
 		// Only remove files that contain our nameserver line — don't touch

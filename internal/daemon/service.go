@@ -275,9 +275,6 @@ func installLaunchd() error {
 		return fmt.Errorf("failed to create LaunchAgents directory: %w", err)
 	}
 
-	// Unload existing service first (ignore errors if not loaded)
-	_ = exec.Command("launchctl", "unload", plistPath).Run()
-
 	logPath := LogPath(cfg)
 
 	// Generate plist file
@@ -314,9 +311,13 @@ func installLaunchd() error {
 </plist>
 `, executable, logPath, logPath, filepath.Dir(executable))
 
+	// Write plist before unloading so a write failure leaves the old service intact.
 	if err := os.WriteFile(plistPath, []byte(plistContent), constants.FilePermACME); err != nil {
 		return fmt.Errorf("failed to write plist file: %w", err)
 	}
+
+	// Unload any previously running instance (ignore errors if not loaded)
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
 
 	// Load the service
 	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
@@ -363,10 +364,12 @@ func GetLaunchdStatus() (string, error) {
 	if err != nil {
 		return "not loaded", nil
 	}
-	if strings.Contains(string(output), "dev.stubbe.srv-daemon") {
+	// A loaded-but-stopped service appears in launchctl list without a PID entry.
+	// Only report "running" when the process is actually alive.
+	if strings.Contains(string(output), `"PID" = `) {
 		return "running", nil
 	}
-	return "not loaded", nil
+	return "loaded", nil
 }
 
 // ServicePath returns the path to the service file for the current OS.

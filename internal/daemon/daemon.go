@@ -101,11 +101,15 @@ func (d *Daemon) Run() error {
 	// Set up signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	go func() {
-		<-sigChan
-		d.log("Received shutdown signal")
-		d.cancel()
+		select {
+		case <-sigChan:
+			d.log("Received shutdown signal")
+			d.cancel()
+		case <-d.ctx.Done():
+		}
 	}()
 
 	// Watch Docker events

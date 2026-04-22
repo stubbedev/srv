@@ -46,9 +46,9 @@ func Detect() FirewallType {
 	return FirewallNone
 }
 
-// Name returns a human-readable name for the firewall type.
-func Name(fw FirewallType) string {
-	switch fw {
+// String returns a human-readable name for the firewall type, implementing fmt.Stringer.
+func (f FirewallType) String() string {
+	switch f {
 	case FirewallUFW:
 		return "ufw"
 	case FirewallFirewalld:

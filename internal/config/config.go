@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+
 // Config holds the srv configuration.
 type Config struct {
 	Root        string // Base directory for all srv state
@@ -28,31 +29,25 @@ type UserConfig struct {
 	// Defaults to Google DNS (8.8.8.8, 8.8.4.4) when empty.
 	UpstreamDNS []string `yaml:"upstream_dns,omitempty"`
 }
-
 var (
 	configMu     sync.Mutex
-	configOnce   sync.Once
+	configLoaded bool
 	cachedConfig *Config
 	configErr    error
 )
 
 // Load returns the srv configuration, creating directories as needed.
-// The result is cached after the first successful call. If the first call
-// fails, the cache is NOT populated so that the next call retries — this
-// prevents a transient startup error from locking the process out forever.
-// This is thread-safe.
+// The result is cached after the first successful call. Failed calls are not
+// cached — the next call retries, preventing a transient startup error from
+// locking the process out forever. This is thread-safe.
 func Load() (*Config, error) {
 	configMu.Lock()
 	defer configMu.Unlock()
-	configOnce.Do(func() {
+	if !configLoaded {
 		cachedConfig, configErr = load()
-	})
-	if configErr != nil {
-		// Reset so the next call retries instead of returning the cached
-		// error for the lifetime of the process.
-		// Must be done outside Do() to avoid re-entrant mutex panic.
-		configOnce = sync.Once{}
-		cachedConfig = nil
+		if configErr == nil {
+			configLoaded = true
+		}
 	}
 	return cachedConfig, configErr
 }
@@ -144,7 +139,7 @@ func (c *Config) SiteCertsDir(siteName string) string {
 func ResetCache() {
 	configMu.Lock()
 	defer configMu.Unlock()
-	configOnce = sync.Once{}
+	configLoaded = false
 	cachedConfig = nil
 	configErr = nil
 }

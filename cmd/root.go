@@ -100,7 +100,7 @@ func GetSiteFromArgsRequired(args []string) (*site.Site, error) {
 // getSiteFromArgsOrCwd is the internal implementation for site lookup.
 func getSiteFromArgsOrCwd(args []string, required bool) (*site.Site, error) {
 	if len(args) > 0 {
-		return site.Get(args[0])
+		return site.GetByName(args[0])
 	}
 
 	// Try to detect current directory site

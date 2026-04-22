@@ -3,6 +3,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -375,7 +376,7 @@ func Pull(imageName string) error {
 }
 
 // ErrServiceNotRunning indicates a compose service is not currently running.
-var ErrServiceNotRunning = fmt.Errorf("service not running")
+var ErrServiceNotRunning = errors.New("service not running")
 
 // ConnectServiceToNetwork connects a docker compose service's container(s) to a
 // network with a named alias so Traefik can route to the service by name.
