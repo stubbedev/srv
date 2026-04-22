@@ -19,6 +19,9 @@ var (
 	// Site name validation regex
 	// Site names should be alphanumeric with hyphens and underscores
 	siteNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+	// Container name regex: Docker allows alphanumeric, underscores, hyphens, periods.
+	containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 )
 
 // ValidateDomain validates a domain/hostname format.
@@ -89,6 +92,17 @@ func ValidateSiteName(name string) error {
 		return fmt.Errorf("site name is too long (max %d characters)", constants.MaxSiteNameLength)
 	}
 
+	return nil
+}
+
+// ValidateContainerName validates a Docker container or compose service name.
+func ValidateContainerName(name string) error {
+	if name == "" {
+		return fmt.Errorf("container name cannot be empty")
+	}
+	if !containerNameRegex.MatchString(name) {
+		return fmt.Errorf("invalid container name: %s (use alphanumeric characters, hyphens, underscores, and periods)", name)
+	}
 	return nil
 }
 

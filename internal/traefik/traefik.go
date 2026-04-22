@@ -127,15 +127,14 @@ networks:
 `
 
 // generateRandomString generates a cryptographically random hex string of the
-// specified length. It panics if the system's random source is unavailable,
-// which is the correct behaviour: silently downgrading to a predictable seed
-// (e.g. time + PID) would produce guessable credentials.
-func generateRandomString(length int) string {
+// specified length. Returns an error if the system's random source is unavailable
+// so the caller can fail the specific operation without crashing the process.
+func generateRandomString(length int) (string, error) {
 	b := make([]byte, length/2+1)
 	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("crypto/rand unavailable: %v", err))
+		return "", fmt.Errorf("crypto/rand unavailable: %w", err)
 	}
-	return hex.EncodeToString(b)[:length]
+	return hex.EncodeToString(b)[:length], nil
 }
 
 // DockerComposeTemplate returns the docker-compose template with variables substituted.
@@ -258,10 +257,16 @@ func loadOrGenerateDNSCredentials(envPath string) (user, pass string, err error)
 
 	// Generate missing values.
 	if user == "" {
-		user = generateRandomString(constants.DNSUserLength)
+		user, err = generateRandomString(constants.DNSUserLength)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate DNS user: %w", err)
+		}
 	}
 	if pass == "" {
-		pass = generateRandomString(constants.DNSPassLength)
+		pass, err = generateRandomString(constants.DNSPassLength)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate DNS password: %w", err)
+		}
 	}
 
 	// Persist all keys including the newly generated credentials.

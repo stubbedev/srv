@@ -24,6 +24,9 @@ type Config struct {
 // UserConfig holds user-configurable settings stored in config.yml.
 type UserConfig struct {
 	ParkedPaths []string `yaml:"parked_paths,omitempty"`
+	// UpstreamDNS lists upstream resolvers written into dnsmasq.conf.
+	// Defaults to Google DNS (8.8.8.8, 8.8.4.4) when empty.
+	UpstreamDNS []string `yaml:"upstream_dns,omitempty"`
 }
 
 var (

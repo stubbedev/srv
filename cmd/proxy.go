@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -229,6 +231,15 @@ func setupProxyCertificate(input *proxyInput) error {
 // Returns the target URL for the proxy.
 func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error) {
 	if !input.isContainer {
+		// Warn if nothing is listening on the port yet so the proxy isn't silently broken.
+		// Not a hard error: users often register a proxy before starting their dev server.
+		conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", input.port), 500*time.Millisecond)
+		if dialErr != nil {
+			ui.Warn("Nothing is listening on port %s — start your service before using the proxy", input.port)
+		} else {
+			conn.Close()
+		}
+
 		// On Linux, Traefik uses network_mode: host, so it can reach localhost directly.
 		// Use "localhost" rather than "127.0.0.1" so that services bound only to the
 		// IPv6 loopback (::1) — e.g. Nuxt, Vite — are also reachable.
@@ -240,11 +251,10 @@ func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error
 		return fmt.Sprintf("http://%s:%s", host, input.port), nil
 	}
 
-	// Connect container to Traefik network so it can be reached
-	if !docker.NetworkExists(cfg.NetworkName) {
-		if err := docker.CreateNetwork(cfg.NetworkName); err != nil {
-			return "", fmt.Errorf("failed to create network: %w", err)
-		}
+	// Connect container to Traefik network so it can be reached.
+	// CreateNetwork is idempotent — treats "already exists" as success.
+	if err := docker.CreateNetwork(cfg.NetworkName); err != nil {
+		return "", fmt.Errorf("failed to create network: %w", err)
 	}
 
 	if err := docker.ConnectContainerToNetwork(input.containerName, cfg.NetworkName, ""); err != nil {

@@ -121,6 +121,9 @@ func CreateNetwork(name string) error {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("docker network create timed out")
 		}
+		if strings.Contains(err.Error(), constants.ErrAlreadyExists) {
+			return nil
+		}
 		return err
 	}
 	return nil

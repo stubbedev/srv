@@ -521,8 +521,13 @@ func UpdateDnsmasqConfig() error {
 	}
 
 	content.WriteString("\n# Forward all other queries to upstream DNS\n")
-	fmt.Fprintf(&content, "server=%s\n", constants.GoogleDNS1)
-	fmt.Fprintf(&content, "server=%s\n", constants.GoogleDNS2)
+	upstreamDNS := []string{constants.GoogleDNS1, constants.GoogleDNS2}
+	if userCfg, ucErr := cfg.LoadUserConfig(); ucErr == nil && len(userCfg.UpstreamDNS) > 0 {
+		upstreamDNS = userCfg.UpstreamDNS
+	}
+	for _, server := range upstreamDNS {
+		fmt.Fprintf(&content, "server=%s\n", server)
+	}
 	content.WriteString("\n# Don't read /etc/resolv.conf\n")
 	content.WriteString("no-resolv\n")
 

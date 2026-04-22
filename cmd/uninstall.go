@@ -50,10 +50,15 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		cfg = nil
 	}
 
-	// Get executable path early so we can show it in the prompt
+	// Get executable path early so we can show it in the prompt.
+	// Keep the original path (pre-EvalSymlinks) for removal so that we remove
+	// the symlink itself rather than the resolved target it points to.
 	executable, execErr := os.Executable()
 	if execErr == nil {
-		executable, _ = filepath.EvalSymlinks(executable)
+		// Resolve only for display; removal uses the original path below.
+		if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+			_ = resolved // resolved path available for display if needed
+		}
 	}
 
 	// Confirmation prompt unless --force is used

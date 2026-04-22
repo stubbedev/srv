@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -149,17 +150,24 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Remove existing metadata before writing new files so --force never
-	// clobbers the freshly-written config (the old code removed it after).
 	if addFlags.force && site.Exists(setup.siteName) {
-		if err := site.RemoveSiteMetadata(setup.siteName); err != nil {
-			return fmt.Errorf("failed to remove existing site: %w", err)
+		// Back up old metadata so it can be restored if the new write fails.
+		oldDir := site.SiteConfigDir(cfg, setup.siteName)
+		backupDir := oldDir + ".bak"
+		_ = os.RemoveAll(backupDir)
+		if renameErr := os.Rename(oldDir, backupDir); renameErr != nil && !os.IsNotExist(renameErr) {
+			return fmt.Errorf("failed to back up existing site metadata: %w", renameErr)
 		}
-	}
-
-	// Write site configuration files
-	if err := setupSiteFiles(cfg, setup); err != nil {
-		return err
+		if err := setupSiteFiles(cfg, setup); err != nil {
+			_ = os.RemoveAll(oldDir)
+			_ = os.Rename(backupDir, oldDir)
+			return err
+		}
+		_ = os.RemoveAll(backupDir)
+	} else {
+		if err := setupSiteFiles(cfg, setup); err != nil {
+			return err
+		}
 	}
 
 	// Finalize setup (SSL, registration, start)
@@ -446,7 +454,13 @@ func promptForService(setup *siteSetup) error {
 	}
 
 	// Helper to set service info including discovered port
-	setServiceInfo := func(svc site.ServiceInfo) {
+	setServiceInfo := func(svc site.ServiceInfo) error {
+		if err := ValidateContainerName(svc.ContainerName); err != nil {
+			return fmt.Errorf("compose container name: %w", err)
+		}
+		if err := ValidateContainerName(svc.ServiceName); err != nil {
+			return fmt.Errorf("compose service name: %w", err)
+		}
 		setup.serviceName = svc.ContainerName
 		setup.composeServiceName = svc.ServiceName
 		// Use discovered port if user didn't explicitly set one
@@ -454,6 +468,7 @@ func promptForService(setup *siteSetup) error {
 			setup.port = svc.Port
 			ui.Info("Auto-discovered port: %d", svc.Port)
 		}
+		return nil
 	}
 
 	var selectedService *site.ServiceInfo
@@ -507,7 +522,9 @@ func promptForService(setup *siteSetup) error {
 	}
 
 	// Set the service info
-	setServiceInfo(*selectedService)
+	if err := setServiceInfo(*selectedService); err != nil {
+		return err
+	}
 
 	// Handle profile selection
 	if len(selectedService.Profiles) == 1 {
@@ -1420,7 +1437,7 @@ func startAllSites() error {
 	}
 
 	ui.Info("Starting %d site(s)...", len(sites))
-	runBatchSiteOperation(sites, "start", func(s *site.Site) error {
+	if err := runBatchSiteOperation(sites, "start", func(s *site.Site) error {
 		// Use ComposeDir for docker operations with profile if set
 		// Include --remove-orphans to clean up stale containers that may reference non-existent networks
 		if err := docker.ComposeQuietWithProfile(s.ComposeDir, s.Profile, "up", "-d", "--remove-orphans"); err != nil {
@@ -1436,7 +1453,9 @@ func startAllSites() error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
 	ui.Success("All sites started")
 	return nil
 }
@@ -1514,9 +1533,11 @@ func stopAllSites() error {
 	}
 
 	ui.Info("Stopping %d site(s)...", len(sites))
-	runBatchSiteOperation(sites, "stop", func(s *site.Site) error {
+	if err := runBatchSiteOperation(sites, "stop", func(s *site.Site) error {
 		return docker.ComposeStop(s.ComposeDir)
-	})
+	}); err != nil {
+		return err
+	}
 	ui.Success("All sites stopped")
 	return nil
 }
@@ -1610,9 +1631,11 @@ func restartAllSites() error {
 	}
 
 	ui.Info("Restarting %d site(s)...", len(sites))
-	runBatchSiteOperation(sites, "restart", func(s *site.Site) error {
+	if err := runBatchSiteOperation(sites, "restart", func(s *site.Site) error {
 		return docker.ComposeRestart(s.ComposeDir)
-	})
+	}); err != nil {
+		return err
+	}
 	ui.Success("All sites restarted")
 	return nil
 }
@@ -1621,8 +1644,9 @@ func restartAllSites() error {
 // Batch operations helper
 // =============================================================================
 
-// runBatchSiteOperation runs an operation on multiple sites in parallel
-func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site) error) {
+// runBatchSiteOperation runs an operation on multiple sites in parallel.
+// Returns an error if any site operation fails.
+func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site) error) error {
 	// Filter out broken sites
 	validSites := make([]site.Site, 0, len(sites))
 	for _, s := range sites {
@@ -1634,13 +1658,14 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 	}
 
 	if len(validSites) == 0 {
-		return
+		return nil
 	}
 
 	// Run operations in parallel with a worker pool
 	workers := min(constants.MaxWorkers, len(validSites))
 
 	var wg sync.WaitGroup
+	var failCount atomic.Int32
 	siteChan := make(chan site.Site, len(validSites))
 
 	// Start workers
@@ -1652,6 +1677,7 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 				ui.SafeIndentedDim(1, "%s %s...", opName, s.Name)
 				if err := op(&s); err != nil {
 					ui.SafeError("Failed to %s %s: %v", opName, s.Name, err)
+					failCount.Add(1)
 				}
 			}
 		}()
@@ -1665,6 +1691,11 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 
 	// Wait for all workers to complete
 	wg.Wait()
+
+	if n := failCount.Load(); n > 0 {
+		return fmt.Errorf("%d site(s) failed to %s", n, opName)
+	}
+	return nil
 }
 
 // =============================================================================
@@ -2177,6 +2208,10 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 	if containerName == "" {
 		return fmt.Errorf("cannot determine container for site '%s' — use --service to specify one", siteName)
+	}
+
+	if !docker.ContainerExists(containerName) {
+		return fmt.Errorf("container '%s' is not running — start the site first with: srv start %s", containerName, siteName)
 	}
 
 	ui.Dim("Connecting to container: %s", containerName)
