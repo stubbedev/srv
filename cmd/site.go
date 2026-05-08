@@ -833,12 +833,12 @@ func generateLocalCert(siteName, domain string) {
 	// Auto-install CA if not already installed
 	if !traefik.IsCAInstalled() {
 		ui.Dim("Installing mkcert CA...")
-		if err := traefik.InstallCA(); err != nil {
+		res, err := traefik.InstallCA()
+		if err != nil {
 			ui.Warn("Failed to install mkcert CA: %v", err)
 			ui.Dim("Local HTTPS may not work in browsers")
 		} else {
-			ui.Success("mkcert CA installed")
-			ui.Dim("Restart your browser for the CA to take effect")
+			reportCAInstall(res, false)
 		}
 	}
 

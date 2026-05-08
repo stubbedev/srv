@@ -3,11 +3,13 @@
 package mkcert
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -88,6 +90,73 @@ func Output(args ...string) ([]byte, error) {
 // platform.
 func Available() bool {
 	return len(binary) > 0
+}
+
+// InstallResult describes the outcome of running `mkcert -install`. mkcert
+// prints multiple status lines covering the local CA, system trust store, and
+// NSS (Firefox/Chrome) database. We parse these so the caller can render a
+// single clean message instead of leaking mkcert's raw output.
+type InstallResult struct {
+	CARootPath         string // Path to rootCA.pem (only set when known)
+	SystemTrustOK      bool   // CA installed in OS trust store
+	BrowserTrustOK     bool   // CA installed in NSS DB (Firefox/Chrome)
+	SystemUnsupported  bool   // System trust store install not supported on this platform
+	BrowserUnavailable bool   // Firefox/Chrome NSS support unavailable (no profiles or no certutil)
+	CertutilMissing    bool   // certutil binary not found, needed for browser trust
+	NewCA              bool   // A fresh local CA was created during this run
+	RawOutput          string // Captured combined output (for debugging)
+}
+
+// Install runs `mkcert -install` and parses its output into an InstallResult.
+// stdout/stderr are captured rather than streamed to the user.
+func Install() (InstallResult, error) {
+	path, err := extractBinary()
+	if err != nil {
+		return InstallResult{}, err
+	}
+	cmd := exec.Command(path, "-install")
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	runErr := cmd.Run()
+	out := buf.String()
+
+	res := InstallResult{RawOutput: out}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, "Created a new local CA"):
+			res.NewCA = true
+		case strings.Contains(line, "now installed in the system trust store"):
+			res.SystemTrustOK = true
+		case strings.Contains(line, "Installing to the system store is not yet supported"):
+			res.SystemUnsupported = true
+		case strings.Contains(line, "support is not available on your platform"):
+			res.BrowserUnavailable = true
+		case strings.Contains(line, "now installed in the Firefox") ||
+			strings.Contains(line, "now installed in the Chrome") ||
+			(strings.Contains(line, "trust store") && strings.Contains(line, "browser restart")):
+			res.BrowserTrustOK = true
+		case strings.Contains(line, "no \"certutil\" tool") ||
+			strings.Contains(line, "warning: \"certutil\" is not available"):
+			res.CertutilMissing = true
+		}
+	}
+
+	if caRoot, cerr := caRootDir(); cerr == nil {
+		res.CARootPath = filepath.Join(caRoot, "rootCA.pem")
+	}
+
+	return res, runErr
+}
+
+// caRootDir returns the mkcert CAROOT directory by invoking the embedded
+// binary. Falls back to the empty string on error.
+func caRootDir() (string, error) {
+	out, err := Output("-CAROOT")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Cleanup removes the extracted binary from the temp directory.

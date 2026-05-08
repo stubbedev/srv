@@ -162,8 +162,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		ui.Dim("Install mkcert to enable %s", traefik.DashboardLocalURL())
 	} else {
 		if !traefik.IsCAInstalled() {
-			if err := traefik.InstallCA(); err != nil {
+			res, err := traefik.InstallCA()
+			if err != nil {
 				ui.Warn("Failed to install mkcert CA: %v", err)
+			} else {
+				reportCAInstall(res, true)
 			}
 		}
 		if err := traefik.SetupDashboardProxy(); err != nil {

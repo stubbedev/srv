@@ -202,11 +202,11 @@ func setupProxyCertificate(input *proxyInput) error {
 	// Auto-install CA if not already installed
 	if !traefik.IsCAInstalled() {
 		ui.Dim("Installing mkcert CA...")
-		if err := traefik.InstallCA(); err != nil {
+		res, err := traefik.InstallCA()
+		if err != nil {
 			return fmt.Errorf("failed to install mkcert CA: %w", err)
 		}
-		ui.Success("mkcert CA installed")
-		ui.Dim("Restart your browser for the CA to take effect")
+		reportCAInstall(res, false)
 	}
 
 	// Generate certificate (or renew if expiring)

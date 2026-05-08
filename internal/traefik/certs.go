@@ -36,12 +36,15 @@ func IsCAInstalled() bool {
 	return err == nil
 }
 
-// InstallCA installs the mkcert CA certificate.
-func InstallCA() error {
-	if err := mkcert.Run("-install"); err != nil {
-		return fmt.Errorf("failed to install mkcert CA: %w", err)
+// InstallCA installs the mkcert CA certificate. mkcert's output is captured
+// and returned as a parsed result so callers can render a clean message rather
+// than leaking mkcert's raw multi-line warnings.
+func InstallCA() (mkcert.InstallResult, error) {
+	res, err := mkcert.Install()
+	if err != nil {
+		return res, fmt.Errorf("failed to install mkcert CA: %w", err)
 	}
-	return nil
+	return res, nil
 }
 
 // LocalCertsExist checks if local SSL certificates exist for a site.
