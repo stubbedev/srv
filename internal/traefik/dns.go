@@ -76,7 +76,7 @@ func CheckDNS(domain string) bool {
 // CheckSystemDNS tests if the system's default resolver resolves the given
 // domain to localhost.
 func CheckSystemDNS(domain string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	addrs, err := net.DefaultResolver.LookupHost(ctx, domain)
