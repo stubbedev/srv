@@ -92,6 +92,7 @@ var proxyAddFlags struct {
 	container string
 	name      string
 	force     bool
+	wildcard  bool
 }
 
 func init() {
@@ -104,6 +105,7 @@ func init() {
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.container, "container", "c", "", "Docker container to proxy to (container:port)")
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.name, "name", "n", "", "Proxy name (default: derived from domain)")
 	proxyAddCmd.Flags().BoolVarP(&proxyAddFlags.force, "force", "f", false, "Overwrite existing proxy configuration")
+	proxyAddCmd.Flags().BoolVar(&proxyAddFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test)")
 	_ = proxyAddCmd.MarkFlagRequired("domain")
 
 	proxyCmd.GroupID = GroupProxy
@@ -122,6 +124,7 @@ type proxyInput struct {
 	containerName string
 	containerPort string
 	isContainer   bool
+	wildcard      bool
 }
 
 // validateProxyInput validates and parses proxy add command inputs.
@@ -144,7 +147,8 @@ func validateProxyInput() (*proxyInput, error) {
 	}
 
 	input := &proxyInput{
-		domain: domain,
+		domain:   domain,
+		wildcard: proxyAddFlags.wildcard,
 	}
 
 	// Parse container flag (format: container_name:port)
@@ -212,7 +216,7 @@ func setupProxyCertificate(input *proxyInput) error {
 	// Generate certificate (or renew if expiring)
 	// Use "_proxy-{name}" as the site name for cert storage
 	proxySiteName := "_proxy-" + input.name
-	renewed, err := traefik.EnsureLocalCert(proxySiteName, input.domain)
+	renewed, err := traefik.EnsureLocalCert(proxySiteName, input.domain, input.wildcard)
 	if err != nil {
 		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
@@ -293,7 +297,7 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Register domain for local DNS
-	if err := traefik.RegisterLocalDomain(input.domain); err != nil {
+	if err := traefik.RegisterLocalDomain(input.domain, input.wildcard); err != nil {
 		ui.Warn("Failed to register DNS for %s: %v", input.domain, err)
 	}
 
@@ -304,7 +308,7 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create proxy config file
-	if err := writeProxyConfig(cfg, input.name, input.domain, targetURL, input.containerName); err != nil {
+	if err := writeProxyConfig(cfg, input.name, input.domain, targetURL, input.containerName, input.wildcard); err != nil {
 		return err
 	}
 
@@ -458,7 +462,7 @@ func getProxyNames() []string {
 // Proxy Config File Operations
 // =============================================================================
 
-func writeProxyConfig(cfg *config.Config, name, domain, targetURL, containerName string) error {
+func writeProxyConfig(cfg *config.Config, name, domain, targetURL, containerName string, wildcard bool) error {
 	// Build the config using proper types to avoid YAML injection
 	type Server struct {
 		URL string `yaml:"url"`
@@ -484,7 +488,7 @@ func writeProxyConfig(cfg *config.Config, name, domain, targetURL, containerName
 	}
 
 	router := Router{
-		Rule:        fmt.Sprintf("Host(`%s`)", domain),
+		Rule:        traefik.BuildHostRule(domain, wildcard),
 		EntryPoints: []string{constants.EntryPointWebsecure},
 		Service:     constants.ProxyConfigPrefix + name,
 		TLS:         &struct{}{},

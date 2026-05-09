@@ -12,6 +12,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/traefik"
 )
 
 // =============================================================================
@@ -397,7 +398,7 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 
 	containerName := "srv-" + name + "-node"
 	image := nodeDockerImage(info)
-	labels := buildNodeTraefikLabels(name, meta.Domain, meta.IsLocal, info.Port)
+	labels := buildNodeTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard, info.Port)
 	cmd := nodeWrappedCommand(info)
 
 	env := map[string]string{
@@ -469,10 +470,10 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 
 // buildNodeTraefikLabels builds Traefik Docker labels for a Node.js site.
 // Traefik routes directly to the app container (no nginx intermediary).
-func buildNodeTraefikLabels(name, domain string, isLocal bool, port int) map[string]string {
+func buildNodeTraefikLabels(name, domain string, isLocal, wildcard bool, port int) map[string]string {
 	labels := map[string]string{
 		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      fmt.Sprintf("Host(`%s`)", domain),
+		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domain, wildcard),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): fmt.Sprintf("%d", port),

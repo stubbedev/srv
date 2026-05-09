@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -12,6 +13,16 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 )
 
+// BuildHostRule returns the Traefik router rule for a domain. With wildcard=true,
+// the rule matches the apex domain plus any single-level subdomain — mirroring
+// the SAN coverage of mkcert's `*.domain` wildcard certificates.
+func BuildHostRule(domain string, wildcard bool) string {
+	if !wildcard {
+		return fmt.Sprintf("Host(`%s`)", domain)
+	}
+	return fmt.Sprintf("Host(`%s`) || HostRegexp(`^[^.]+\\.%s$`)", domain, regexp.QuoteMeta(domain))
+}
+
 // SiteRouteConfig holds the configuration for a site's Traefik routing.
 type SiteRouteConfig struct {
 	Name        string // Site name (used for router/service names)
@@ -19,6 +30,7 @@ type SiteRouteConfig struct {
 	ServiceName string // Container name to route to
 	Port        int    // Port the service listens on
 	IsLocal     bool   // Whether to use local SSL (mkcert) or Let's Encrypt
+	Wildcard    bool   // Match apex + one-level subdomains (apex only when false)
 }
 
 // WriteSiteRouteConfig creates a Traefik file provider config for a site.
@@ -61,7 +73,7 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 	serviceURL := fmt.Sprintf("http://%s:%d", route.ServiceName, route.Port)
 
 	router := Router{
-		Rule:        fmt.Sprintf("Host(`%s`)", route.Domain),
+		Rule:        BuildHostRule(route.Domain, route.Wildcard),
 		EntryPoints: []string{constants.EntryPointWebsecure},
 		Service:     serviceName,
 	}

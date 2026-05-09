@@ -104,7 +104,7 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	}
 
 	containerName := "srv-" + name + "-app"
-	labels := buildAppTraefikLabels(name, meta.Domain, meta.IsLocal, info.Port)
+	labels := buildAppTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard, info.Port)
 
 	composeConfig := dockerfileComposeConfig{
 		Services: map[string]dockerfileServiceConfig{

@@ -22,6 +22,20 @@ import (
 // LocalDomains are the TLDs used for local development.
 var LocalDomains = []string{"test", "local", "localhost"}
 
+// WildcardPrefix marks a registry entry as a wildcard domain (apex + one-level subdomains).
+const WildcardPrefix = "*."
+
+// BareDomain strips the wildcard prefix from a registry entry, returning the
+// apex domain. Returns the input unchanged for non-wildcard entries.
+func BareDomain(entry string) string {
+	return strings.TrimPrefix(entry, WildcardPrefix)
+}
+
+// IsWildcardEntry reports whether a registry entry is a wildcard.
+func IsWildcardEntry(entry string) bool {
+	return strings.HasPrefix(entry, WildcardPrefix)
+}
+
 // DNSResolverType represents the type of DNS resolver on the system.
 type DNSResolverType int
 
@@ -129,7 +143,7 @@ func updateSystemdResolvedConfig(domains []string) error {
 		routingDomains = append(routingDomains, "~"+tld)
 	}
 	for _, d := range domains {
-		routingDomains = append(routingDomains, "~"+d)
+		routingDomains = append(routingDomains, "~"+BareDomain(d))
 	}
 
 	content := fmt.Sprintf("[Resolve]\nDNS=%s\nDomains=%s\n",
@@ -201,7 +215,7 @@ func updateMacOSResolverConfig(domains []string) error {
 		wanted[tld] = struct{}{}
 	}
 	for _, d := range domains {
-		wanted[d] = struct{}{}
+		wanted[BareDomain(d)] = struct{}{}
 	}
 
 	// Write a resolver file for each wanted name.
@@ -263,7 +277,7 @@ func updateNetworkManagerConfig(domains []string) error {
 		fmt.Fprintf(&content, "server=/%s/%s\n", tld, constants.LocalhostIP)
 	}
 	for _, d := range domains {
-		fmt.Fprintf(&content, "server=/%s/%s\n", d, constants.LocalhostIP)
+		fmt.Fprintf(&content, "server=/%s/%s\n", BareDomain(d), constants.LocalhostIP)
 	}
 
 	if err := shell.SudoMkdir(configDir); err != nil {
@@ -412,21 +426,40 @@ func SaveLocalDomains(domains []string) error {
 
 // RegisterLocalDomain adds a domain to the local DNS registry and updates dnsmasq.
 // Automatically configures system DNS when the first local domain is added.
-func RegisterLocalDomain(domain string) error {
+// When wildcard is true, the entry is stored as "*.<domain>" so that dnsmasq
+// emits an `address=` directive matching the apex and one-level subdomains.
+// Registering the same bare domain with a different wildcard setting upgrades
+// or downgrades the existing entry.
+func RegisterLocalDomain(domain string, wildcard bool) error {
 	domains, err := LoadLocalDomains()
 	if err != nil {
 		return err
 	}
 
-	// Check if already registered
-	if slices.Contains(domains, domain) {
+	entry := domain
+	if wildcard {
+		entry = WildcardPrefix + domain
+	}
+
+	// Check if already registered with the same wildcard mode.
+	if slices.Contains(domains, entry) {
 		return nil // Already registered
 	}
 
-	// Check if this is the first local domain being added
-	isFirstDomain := len(domains) == 0
+	// Drop any conflicting alternate-form entry for the same bare domain
+	// (registering wildcard supersedes apex-only and vice versa).
+	filtered := make([]string, 0, len(domains)+1)
+	for _, d := range domains {
+		if BareDomain(d) == domain {
+			continue
+		}
+		filtered = append(filtered, d)
+	}
 
-	domains = append(domains, domain)
+	// Check if this is the first local domain being added
+	isFirstDomain := len(filtered) == 0
+
+	domains = append(filtered, entry)
 	if err := SaveLocalDomains(domains); err != nil {
 		return err
 	}
@@ -450,17 +483,19 @@ func RegisterLocalDomain(domain string) error {
 
 // UnregisterLocalDomain removes a domain from the local DNS registry and updates dnsmasq.
 // Automatically removes system DNS configuration when the last local domain is removed.
+// Matches both the bare and the wildcard form ("*.<domain>") so callers don't
+// need to know how the entry was originally registered.
 func UnregisterLocalDomain(domain string) error {
 	domains, err := LoadLocalDomains()
 	if err != nil {
 		return err
 	}
 
-	// Filter out the domain
+	// Filter out the domain (matching either the bare or wildcard form).
 	filtered := make([]string, 0, len(domains))
 	found := false
 	for _, d := range domains {
-		if d == domain {
+		if BareDomain(d) == domain {
 			found = true
 		} else {
 			filtered = append(filtered, d)
@@ -512,11 +547,15 @@ func UpdateDnsmasqConfig() error {
 		content.WriteString("# No local domains registered\n")
 	} else {
 		for _, domain := range domains {
-			// Use host-record instead of address= so that only the exact
-			// domain resolves to 127.0.0.1.  The address= directive matches
-			// the domain AND all subdomains; host-record creates an A record
-			// for the precise name only (like an /etc/hosts entry).
-			fmt.Fprintf(&content, "host-record=%s,127.0.0.1\n", domain)
+			if IsWildcardEntry(domain) {
+				// address= matches the apex AND every subdomain — what
+				// users opt into via --wildcard.
+				fmt.Fprintf(&content, "address=/%s/127.0.0.1\n", BareDomain(domain))
+			} else {
+				// host-record creates an A record for the precise name only
+				// (like an /etc/hosts entry); subdomains are not matched.
+				fmt.Fprintf(&content, "host-record=%s,127.0.0.1\n", domain)
+			}
 		}
 	}
 

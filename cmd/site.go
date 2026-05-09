@@ -31,6 +31,7 @@ var addFlags struct {
 	name           string
 	service        string
 	local          bool
+	wildcard       bool
 	force          bool
 	skipValidation bool
 	typeOverride   string // Force site type: php/node/ruby/python/dockerfile/static/compose
@@ -93,6 +94,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addFlags.name, "name", "n", "", "Site name (default: directory name)")
 	addCmd.Flags().StringVar(&addFlags.service, "service", "", "Container name to route to")
 	addCmd.Flags().BoolVarP(&addFlags.local, "local", "l", false, "Use local SSL via mkcert (otherwise Let's Encrypt)")
+	addCmd.Flags().BoolVar(&addFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test); local sites only")
 	addCmd.Flags().BoolVarP(&addFlags.force, "force", "f", false, "Overwrite existing configuration")
 	addCmd.Flags().BoolVar(&addFlags.skipValidation, "skip-validation", false, "Skip compose file validation")
 	// Static site options
@@ -185,6 +187,7 @@ type siteSetup struct {
 	domain             string
 	port               int
 	isLocal            bool
+	wildcard           bool // true if wildcard subdomain matching is enabled
 	isStatic           bool // true if serving static files (no docker-compose.yml)
 	isPHP              bool // true if serving a PHP/FPM site
 	isNode             bool // true if serving a Node.js site
@@ -402,6 +405,10 @@ func promptForMissingConfig(setup *siteSetup) error {
 
 	// Determine if local - require --local flag explicitly, don't auto-detect from domain
 	setup.isLocal = addFlags.local
+	setup.wildcard = addFlags.wildcard
+	if setup.wildcard && !setup.isLocal {
+		return fmt.Errorf("--wildcard requires --local (Let's Encrypt cannot issue local wildcard certs)")
+	}
 
 	// Static site options
 	setup.spa = addFlags.spa
@@ -673,6 +680,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		Profile:            setup.profile,
 		Port:               port,
 		IsLocal:            setup.isLocal,
+		Wildcard:           setup.wildcard,
 		NetworkName:        cfg.NetworkName,
 		SPA:                setup.spa,
 		Cache:              setup.cache,
@@ -762,6 +770,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 			ServiceName: setup.serviceName,
 			Port:        setup.port,
 			IsLocal:     setup.isLocal,
+			Wildcard:    setup.wildcard,
 		}
 		if err := traefik.WriteSiteRouteConfig(cfg, routeConfig); err != nil {
 			return fmt.Errorf("failed to write traefik config: %w", err)
@@ -775,7 +784,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	// Generate SSL certificate for local domains
 	if setup.isLocal {
-		generateLocalCert(setup.siteName, setup.domain)
+		generateLocalCert(setup.siteName, setup.domain, setup.wildcard)
 	}
 
 	// Determine site type label
@@ -814,9 +823,9 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 // generateLocalCert generates SSL certificate for local domains and registers DNS.
 // DNS registration always runs regardless of whether mkcert is available —
 // TLS and DNS are independent concerns.
-func generateLocalCert(siteName, domain string) {
+func generateLocalCert(siteName, domain string, wildcard bool) {
 	// Always register DNS — this must happen even if mkcert is missing.
-	if err := traefik.RegisterLocalDomain(domain); err != nil {
+	if err := traefik.RegisterLocalDomain(domain, wildcard); err != nil {
 		ui.Warn("Failed to register DNS for %s: %v", domain, err)
 	} else {
 		ui.Dim("If %s doesn't resolve, clear your browser DNS cache:", domain)
@@ -842,7 +851,7 @@ func generateLocalCert(siteName, domain string) {
 		}
 	}
 
-	renewed, err := traefik.EnsureLocalCert(siteName, domain)
+	renewed, err := traefik.EnsureLocalCert(siteName, domain, wildcard)
 	if err != nil {
 		ui.Warn("Failed to generate certificate: %v", err)
 		return
@@ -857,7 +866,7 @@ func generateLocalCert(siteName, domain string) {
 }
 
 // renewLocalCertIfNeeded checks if a local cert needs renewal and renews it
-func renewLocalCertIfNeeded(siteName, domain string) {
+func renewLocalCertIfNeeded(siteName, domain string, wildcard bool) {
 	cert := traefik.GetLocalCertInfo(siteName, domain)
 	if !cert.Exists || cert.IsExpired || cert.DaysLeft <= traefik.RenewThresholdDays {
 		if cert.IsExpired {
@@ -866,7 +875,7 @@ func renewLocalCertIfNeeded(siteName, domain string) {
 			ui.Dim("Renewing SSL certificate for %s (expires in %d days)...", domain, cert.DaysLeft)
 		}
 
-		if err := traefik.GenerateLocalCert(siteName, domain); err != nil {
+		if err := traefik.GenerateLocalCert(siteName, domain, wildcard); err != nil {
 			ui.Warn("Failed to renew certificate: %v", err)
 			return
 		}
@@ -1374,7 +1383,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	// Renew local SSL cert if needed
 	if s.IsLocal && s.Domain != "" {
-		renewLocalCertIfNeeded(s.Name, s.Domain)
+		renewLocalCertIfNeeded(s.Name, s.Domain, s.Wildcard)
 	}
 
 	ui.Info("Starting %s...", s.Name)
@@ -1432,7 +1441,7 @@ func startAllSites() error {
 	// Renew any expiring local certs before starting
 	for _, s := range sites {
 		if s.IsLocal && s.Domain != "" && !s.IsBroken {
-			renewLocalCertIfNeeded(s.Name, s.Domain)
+			renewLocalCertIfNeeded(s.Name, s.Domain, s.Wildcard)
 		}
 	}
 

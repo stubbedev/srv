@@ -29,6 +29,7 @@ type Site struct {
 	Dir                string   // Resolved directory path (project directory)
 	Domain             string   // Domain from metadata
 	IsLocal            bool     // Whether it uses local SSL
+	Wildcard           bool     // Match apex + one-level subdomains
 	Type               SiteType // compose or static
 	IsBroken           bool     // Whether the project directory exists
 	Status             string   // Container status
@@ -162,6 +163,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 
 	s.Domain = meta.Domain
 	s.IsLocal = meta.IsLocal
+	s.Wildcard = meta.Wildcard
 	s.Type = meta.Type
 	s.ServiceName = meta.ServiceName
 	s.ComposeServiceName = meta.ComposeServiceName
@@ -846,6 +848,7 @@ type SiteMetadata struct {
 	Profile            string   `yaml:"profile,omitempty"`              // Docker Compose profile (if service uses profiles)
 	Port               int      `yaml:"port"`                           // Port the service listens on
 	IsLocal            bool     `yaml:"is_local"`                       // Whether to use local SSL
+	Wildcard           bool     `yaml:"wildcard,omitempty"`             // Match apex + one-level subdomains
 	NetworkName        string   `yaml:"network_name"`                   // Docker network name
 	// Static site options
 	SPA   bool `yaml:"spa,omitempty"`   // Enable SPA mode
@@ -997,10 +1000,10 @@ type staticComposeConfig struct {
 }
 
 // buildStaticTraefikLabels builds Traefik labels for a static site.
-func buildStaticTraefikLabels(name, domain string, isLocal bool) map[string]string {
+func buildStaticTraefikLabels(name, domain string, isLocal, wildcard bool) map[string]string {
 	labels := map[string]string{
 		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      fmt.Sprintf("Host(`%s`)", domain),
+		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domain, wildcard),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): "80",
@@ -1083,7 +1086,7 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) error {
 
 	// Build and write docker-compose.yml
 	containerName := generateStaticContainerName(name)
-	labels := buildStaticTraefikLabels(name, meta.Domain, meta.IsLocal)
+	labels := buildStaticTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard)
 	composeConfig := buildStaticComposeConfig(containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
 
 	data, err := yaml.Marshal(&composeConfig)

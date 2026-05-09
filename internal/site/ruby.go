@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/traefik"
 )
 
 // =============================================================================
@@ -172,7 +173,7 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 
 	containerName := "srv-" + name + "-app"
 	image := RubyImageTag(info.RubyVersion)
-	labels := buildAppTraefikLabels(name, meta.Domain, meta.IsLocal, info.Port)
+	labels := buildAppTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard, info.Port)
 
 	composeConfig := rubyComposeConfig{
 		Services: map[string]rubyServiceConfig{
@@ -229,10 +230,10 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 }
 
 // buildAppTraefikLabels builds Traefik labels for app container sites (Ruby, Python, Dockerfile).
-func buildAppTraefikLabels(name, domain string, isLocal bool, port int) map[string]string {
+func buildAppTraefikLabels(name, domain string, isLocal, wildcard bool, port int) map[string]string {
 	labels := map[string]string{
 		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      fmt.Sprintf("Host(`%s`)", domain),
+		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domain, wildcard),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): fmt.Sprintf("%d", port),

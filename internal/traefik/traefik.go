@@ -566,12 +566,12 @@ func SetupDashboardProxy() error {
 	proxySiteName := "_proxy-" + name
 
 	// Generate (or renew) the mkcert certificate.
-	if _, err := EnsureLocalCert(proxySiteName, domain); err != nil {
+	if _, err := EnsureLocalCert(proxySiteName, domain, false); err != nil {
 		return fmt.Errorf("failed to generate certificate for %s: %w", domain, err)
 	}
 
 	// Register domain with the local dnsmasq DNS server.
-	if err := RegisterLocalDomain(domain); err != nil {
+	if err := RegisterLocalDomain(domain, false); err != nil {
 		return fmt.Errorf("failed to register DNS for %s: %w", domain, err)
 	}
 
