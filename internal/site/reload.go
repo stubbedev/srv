@@ -8,8 +8,14 @@
 package site
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
@@ -19,11 +25,46 @@ import (
 // ReloadResult describes the work Reload performed for a single site.
 type ReloadResult struct {
 	Name              string
+	Skipped           bool // true when metadata hash matches last-applied; no work was done
 	NeedsRestart      bool // true when label-based artifacts changed and a container restart is required
 	RegeneratedCert   bool
 	CertCovered       bool // false when local cert could not be issued (e.g. mkcert missing)
 	DNSRegistered     int  // count of domains registered with the local resolver
 	Warnings          []string
+}
+
+// reloadStateFile is the hidden file inside each site's config dir that
+// remembers the hash of the last successfully-applied metadata.yml. Used
+// by Reload to short-circuit no-op reapply attempts.
+const reloadStateFile = ".reload-state"
+
+func reloadStatePath(cfg *config.Config, name string) string {
+	return filepath.Join(SiteConfigDir(cfg, name), reloadStateFile)
+}
+
+func computeMetadataHash(meta *SiteMetadata) string {
+	// Marshal via yaml to capture every field (including pointers) without
+	// pulling in reflect.DeepEqual. The hash is stable as long as the YAML
+	// encoder produces deterministic output for our schema, which yaml.v3
+	// does for non-map fields (maps are stable when keys are strings).
+	data, err := yaml.Marshal(meta)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func readLastReloadHash(cfg *config.Config, name string) string {
+	b, err := os.ReadFile(reloadStatePath(cfg, name))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func writeLastReloadHash(cfg *config.Config, name, hash string) {
+	_ = os.WriteFile(reloadStatePath(cfg, name), []byte(hash), constants.FilePermDefault)
 }
 
 // Reload reads the site's metadata.yml and re-applies every artifact derivable
@@ -49,6 +90,15 @@ func Reload(name string) (*ReloadResult, error) {
 	}
 
 	res := &ReloadResult{Name: name}
+
+	// Short-circuit when nothing changed since the last apply. Daemon-driven
+	// reloads on the same site fire repeatedly during editor saves; this is
+	// the cheapest possible no-op for those.
+	currentHash := computeMetadataHash(meta)
+	if currentHash != "" && currentHash == readLastReloadHash(cfg, name) {
+		res.Skipped = true
+		return res, nil
+	}
 
 	// Regenerate generated artifacts (with force=true) so the on-disk view
 	// matches the current metadata. For srv-managed types this also implies
@@ -121,6 +171,11 @@ func Reload(name string) (*ReloadResult, error) {
 		}
 	}
 
+	// Persist the hash so the next Reload can short-circuit. Failures here
+	// only cost us an extra regen next time — never block the caller.
+	if currentHash != "" {
+		writeLastReloadHash(cfg, name, currentHash)
+	}
 	return res, nil
 }
 

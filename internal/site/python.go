@@ -138,6 +138,7 @@ type pythonServiceConfig struct {
 }
 
 type pythonComposeConfig struct {
+	Name     string                         `yaml:"name,omitempty"`
 	Services map[string]pythonServiceConfig `yaml:"services"`
 	Networks map[string]nodeNetworkConfig   `yaml:"networks"`
 }
@@ -173,6 +174,7 @@ func WritePythonSiteConfig(name string, meta SiteMetadata, info *PythonSiteInfo,
 	}
 
 	composeConfig := pythonComposeConfig{
+		Name:     constants.ComposeProjectName,
 		Services: map[string]pythonServiceConfig{
 			"app": {
 				ContainerName: containerName,

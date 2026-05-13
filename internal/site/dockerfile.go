@@ -87,6 +87,7 @@ type dockerfileBuild struct {
 }
 
 type dockerfileComposeConfig struct {
+	Name     string                             `yaml:"name,omitempty"`
 	Services map[string]dockerfileServiceConfig `yaml:"services"`
 	Networks map[string]nodeNetworkConfig       `yaml:"networks"`
 }
@@ -111,6 +112,7 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	}
 
 	composeConfig := dockerfileComposeConfig{
+		Name:     constants.ComposeProjectName,
 		Services: map[string]dockerfileServiceConfig{
 			"app": {
 				ContainerName: containerName,

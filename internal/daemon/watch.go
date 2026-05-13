@@ -14,6 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -165,11 +166,28 @@ func (d *Daemon) reloadSite(state *watchState, siteName string) {
 		d.log("Reload %s: %v", siteName, err)
 		return
 	}
+	if res.Skipped {
+		// metadata.yml content hash matched last apply → nothing changed.
+		return
+	}
 	for _, w := range res.Warnings {
 		d.log("Reload %s warning: %s", siteName, w)
 	}
+
+	// Auto-restart on label/compose changes. `docker compose up -d` is
+	// idempotent: only services whose compose-derived hash actually changed
+	// get recreated, so this is safe to call after every reload.
 	if res.NeedsRestart {
-		d.log("Reload %s: artifacts regenerated; container restart required (`srv restart %s`)", siteName, siteName)
+		s, err := site.GetByName(siteName)
+		if err != nil || s == nil || s.IsBroken {
+			d.log("Reload %s: container restart skipped (site missing or broken)", siteName)
+			return
+		}
+		if err := docker.ComposeUpWithProfile(s.ComposeDir, s.Profile); err != nil {
+			d.log("Reload %s: docker compose up failed: %v", siteName, err)
+			return
+		}
+		d.log("Reload %s: artifacts regenerated and applied via compose up", siteName)
 	} else {
 		d.log("Reload %s: routing refreshed", siteName)
 	}

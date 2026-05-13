@@ -1843,17 +1843,21 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 
 var logsFlags struct {
 	follow bool
+	all    bool
 	tail   string
 	since  string
 }
 
 var logsCmd = &cobra.Command{
-	Use:   "logs SITE",
+	Use:   "logs [SITE]",
 	Short: "Show site logs",
 	Args: func(cmd *cobra.Command, args []string) error {
+		if logsFlags.all {
+			return cobra.NoArgs(cmd, args)
+		}
 		if len(args) == 0 {
 			_ = cmd.Help()
-			return ui.UsageError("srv logs SITE", "a site name is required")
+			return ui.UsageError("srv logs SITE", "a site name is required (or pass --all)")
 		}
 		if len(args) > 1 {
 			return ui.UsageError("srv logs SITE", "too many arguments — expected a single site name, got %d", len(args))
@@ -1868,6 +1872,7 @@ var logsCmd = &cobra.Command{
 
 func init() {
 	logsCmd.Flags().BoolVarP(&logsFlags.follow, "follow", "f", false, "Follow log output")
+	logsCmd.Flags().BoolVarP(&logsFlags.all, "all", "a", false, "Multiplex logs from every running site (colour-prefixed)")
 	logsCmd.Flags().StringVar(&logsFlags.tail, "tail", "", "Number of lines to show from the end")
 	logsCmd.Flags().StringVar(&logsFlags.since, "since", "", "Show logs since timestamp (e.g., 10m, 1h)")
 	logsCmd.GroupID = GroupSites
@@ -1877,6 +1882,10 @@ func init() {
 func runLogs(cmd *cobra.Command, args []string) error {
 	if err := docker.EnsureRunning(); err != nil {
 		return err
+	}
+
+	if logsFlags.all {
+		return runLogsAll()
 	}
 
 	s, err := site.GetByName(args[0])
@@ -1901,6 +1910,53 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	return docker.Compose(s.ComposeDir, composeArgs...)
+}
+
+// runLogsAll multiplexes `docker compose logs` for every non-broken site,
+// prefixing each output line with the site name. Stops when stdin closes
+// (Ctrl-C) or when --follow is off and every per-site tail completes.
+func runLogsAll() error {
+	sites, err := site.List()
+	if err != nil {
+		return err
+	}
+	var running []site.Site
+	for _, s := range sites {
+		if !s.IsBroken {
+			running = append(running, s)
+		}
+	}
+	if len(running) == 0 {
+		ui.Dim("No sites registered")
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	for _, s := range running {
+		s := s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			composeArgs := []string{"logs"}
+			if logsFlags.follow {
+				composeArgs = append(composeArgs, "-f")
+			}
+			if logsFlags.tail != "" {
+				composeArgs = append(composeArgs, "--tail", logsFlags.tail)
+			}
+			if logsFlags.since != "" {
+				composeArgs = append(composeArgs, "--since", logsFlags.since)
+			}
+			// Prefix every line with the site name. ComposePrefixed shells out
+			// to `docker compose logs` and streams output through a writer that
+			// stamps each line.
+			if err := docker.ComposePrefixed(s.ComposeDir, s.Name, composeArgs...); err != nil {
+				ui.Warn("[%s] log stream ended: %v", s.Name, err)
+			}
+		}()
+	}
+	wg.Wait()
+	return nil
 }
 
 // =============================================================================

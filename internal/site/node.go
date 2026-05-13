@@ -381,6 +381,7 @@ type nodeNetworkConfig struct {
 }
 
 type nodeComposeConfig struct {
+	Name     string                       `yaml:"name,omitempty"`
 	Services map[string]nodeServiceConfig `yaml:"services"`
 	Networks map[string]nodeNetworkConfig `yaml:"networks"`
 }
@@ -417,6 +418,7 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 	}
 
 	composeConfig := nodeComposeConfig{
+		Name:     constants.ComposeProjectName,
 		Services: map[string]nodeServiceConfig{
 			"node": {
 				ContainerName: containerName,

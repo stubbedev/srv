@@ -195,6 +195,13 @@ const (
 	ProxyConfigPrefix = "proxy-"
 	// RoutesConfigPrefix is the prefix for per-site extra route configuration files.
 	RoutesConfigPrefix = "routes-"
+	// ComposeProjectName groups every srv-managed compose project under one
+	// umbrella so `docker compose ls` aggregates them into a single row.
+	ComposeProjectName = "srv"
+	// LabelSrvSite is the Docker label attached to every srv-managed container.
+	LabelSrvSite = "dev.srv.site"
+	// LabelSrvType is the Docker label identifying the site type.
+	LabelSrvType = "dev.srv.type"
 	// TraefikDashboardDomain is the local domain used to expose the Traefik dashboard over HTTPS.
 	TraefikDashboardDomain = "traefik.local"
 	// TraefikDashboardProxyName is the proxy name used for the dashboard proxy.

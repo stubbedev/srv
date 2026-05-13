@@ -156,6 +156,7 @@ type rubyServiceConfig struct {
 }
 
 type rubyComposeConfig struct {
+	Name     string                       `yaml:"name,omitempty"`
 	Services map[string]rubyServiceConfig `yaml:"services"`
 	Networks map[string]nodeNetworkConfig `yaml:"networks"`
 }
@@ -180,6 +181,7 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 	}
 
 	composeConfig := rubyComposeConfig{
+		Name:     constants.ComposeProjectName,
 		Services: map[string]rubyServiceConfig{
 			"app": {
 				ContainerName: containerName,

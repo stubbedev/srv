@@ -167,6 +167,56 @@ func ComposeDown(dir string) error {
 	return Compose(dir, "down", "--remove-orphans")
 }
 
+// ComposePrefixed runs `docker compose <args...>` in dir and pipes stdout +
+// stderr through a writer that prefixes every line with `[prefix] `. Used by
+// `srv logs --all` to multiplex many sites into one terminal.
+func ComposePrefixed(dir, prefix string, args ...string) error {
+	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
+	cmd.Dir = dir
+	cmd.Stdout = newPrefixWriter(os.Stdout, prefix)
+	cmd.Stderr = newPrefixWriter(os.Stderr, prefix)
+	return cmd.Run()
+}
+
+// prefixWriter prefixes every newline-terminated chunk it sees with "[name] ".
+// Partial lines are buffered until the terminating \n arrives so each prefix
+// lands at the start of a real line.
+type prefixWriter struct {
+	w      io.Writer
+	prefix []byte
+	buf    []byte
+}
+
+func newPrefixWriter(w io.Writer, prefix string) *prefixWriter {
+	return &prefixWriter{w: w, prefix: []byte("[" + prefix + "] ")}
+}
+
+func (p *prefixWriter) Write(b []byte) (int, error) {
+	n := len(b)
+	p.buf = append(p.buf, b...)
+	for {
+		idx := indexByte(p.buf, '\n')
+		if idx < 0 {
+			return n, nil
+		}
+		line := append([]byte{}, p.prefix...)
+		line = append(line, p.buf[:idx+1]...)
+		if _, err := p.w.Write(line); err != nil {
+			return n, err
+		}
+		p.buf = p.buf[idx+1:]
+	}
+}
+
+func indexByte(b []byte, c byte) int {
+	for i, x := range b {
+		if x == c {
+			return i
+		}
+	}
+	return -1
+}
+
 // ComposeStop runs docker compose stop in the specified directory.
 func ComposeStop(dir string) error {
 	return Compose(dir, "stop")

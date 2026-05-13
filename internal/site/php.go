@@ -803,7 +803,10 @@ type phpNetworkConfig struct {
 }
 
 // phpComposeConfig is the top-level generated docker-compose structure.
+// `name` groups every srv-managed compose project under the same umbrella so
+// `docker compose ls` aggregates them in one row.
 type phpComposeConfig struct {
+	Name     string                      `yaml:"name,omitempty"`
 	Services map[string]phpServiceConfig `yaml:"services"`
 	Networks map[string]phpNetworkConfig `yaml:"networks"`
 }
@@ -864,6 +867,7 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 	// The project is always mounted to /var/www/html; nginx's root directive
 	// inside the config already appends the sub-directory when needed.
 	composeConfig := phpComposeConfig{
+		Name:     constants.ComposeProjectName,
 		Services: map[string]phpServiceConfig{
 			constants.PHPFPMServiceName: {
 				Build: &phpBuildConfig{
@@ -983,6 +987,7 @@ func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) err
 	}
 
 	composeConfig := phpComposeConfig{
+		Name:     constants.ComposeProjectName,
 		Services: map[string]phpServiceConfig{
 			constants.PHPFPMServiceName: {
 				Build: &phpBuildConfig{

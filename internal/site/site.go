@@ -1123,6 +1123,7 @@ type staticNetworkConfig struct {
 
 // staticComposeConfig represents a docker-compose.yml for static sites.
 type staticComposeConfig struct {
+	Name     string                         `yaml:"name,omitempty"`
 	Services map[string]staticServiceConfig `yaml:"services"`
 	Networks map[string]staticNetworkConfig `yaml:"networks"`
 }
@@ -1166,6 +1167,7 @@ func addInternalListenerLabels(labels map[string]string, name string, domains []
 // buildStaticComposeConfig builds the docker-compose configuration for a static site.
 func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) staticComposeConfig {
 	return staticComposeConfig{
+		Name: constants.ComposeProjectName,
 		Services: map[string]staticServiceConfig{
 			"web": {
 				ContainerName: containerName,
