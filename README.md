@@ -59,17 +59,29 @@ srv add /var/www/myapp --domain example.com
 | `srv start SITE` | Start a site's containers |
 | `srv stop SITE` | Stop a site's containers |
 | `srv restart SITE` | Restart a site's containers |
+| `srv reload SITE` | Re-apply metadata.yml without restarting (`--restart` to also restart) |
+| `srv validate SITE` | Validate a site's metadata.yml without applying |
 | `srv list` | List all registered sites |
 | `srv info SITE` | Show detailed site information |
-| `srv logs SITE` | View site container logs |
+| `srv logs SITE` | View site container logs (`--all` to multiplex every site) |
+| `srv shell SITE` | Open an interactive shell in the site's container |
+| `srv alias add|remove|list SITE` | Manage extra hostnames mapped to the same site |
+| `srv internal enable|disable|list SITE` | Toggle the plain-HTTP `:88` listener for a site |
+| `srv route add|remove|list SITE` | Attach path-prefix / regex-rewrite routers to a site |
 
 ### Proxy Management
 
 | Command | Description |
 |---------|-------------|
-| `srv proxy add` | Create a proxy to localhost port or container |
+| `srv proxy add` | Create a proxy to localhost port or container (`--fallback` for 5xx remote failover) |
 | `srv proxy remove NAME` | Remove a proxy |
 | `srv proxy list` | List all proxies |
+
+### Import
+
+| Command | Description |
+|---------|-------------|
+| `srv import valet` | Translate `~/.config/valet/Nginx/*` (or `~/.valet/Nginx/*`) into srv commands (`--apply` to execute) |
 
 ### Daemon Management
 
@@ -94,6 +106,7 @@ srv add /var/www/myapp --domain example.com
 | `srv version` | Show version information |
 | `srv uninstall` | Completely remove srv from the system |
 | `srv completion` | Generate shell autocompletion script |
+| `srv metrics enable|disable|status` | Opt-in Prometheus + Grafana stack scraping Traefik |
 
 ## Command Reference
 
@@ -115,7 +128,10 @@ srv add PATH [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--domain` | `-d` | | Domain name (required) |
+| `--domain` | `-d` | | Canonical hostname (required) |
+| `--alias` | | | Extra hostname mapped to the same site (repeatable) |
+| `--wildcard` | | `false` | Also match one-level subdomains (`*.foo.test`); local sites only |
+| `--internal-http` | | `false` | Also expose on the plain-HTTP `:88` listener (for in-cluster calls that skip TLS) |
 | `--local` | `-l` | `false` | Use local SSL via mkcert (otherwise Let's Encrypt) |
 | `--name` | `-n` | domain name | Custom site name |
 | `--port` | `-p` | `80` | Container port to route traffic to |
@@ -125,6 +141,10 @@ srv add PATH [flags]
 | `--cache` | | `true` | Enable caching headers for static assets |
 | `--cors` | | `false` | Enable CORS headers (allow all origins) |
 | `--skip-validation` | | `false` | Skip compose file validation |
+| `--max-body` | | `2G` | Max request body size (e.g. `128M`, `2G`) |
+| `--read-timeout` | | | Upstream read timeout (e.g. `300s`) |
+| `--send-timeout` | | | Upstream send timeout |
+| `--connect-timeout` | | | Upstream connect timeout |
 | `--php-version` | | auto-detected | PHP version (e.g., `8.3`, or `latest`) |
 | `--document-root` | | auto-detected | Document root relative to project |
 | `--php-extensions` | | auto-detected | PHP extensions: full list, or `+ext,-ext` to add/remove from defaults |
@@ -356,16 +376,27 @@ srv add ./assets --domain cdn.example.com --cors
 
 ### PHP Sites
 
-For directories containing a `composer.json` or `.php`/`.phtml` files (without a `docker-compose.yml`), srv generates an nginx + php-fpm container setup that:
+For directories containing a `composer.json` or `.php`/`.phtml` files (without a `docker-compose.yml`), srv generates an nginx web container per site plus a **shared PHP-FPM pool** that serves every site with a matching `(php_version, extension_set)` fingerprint.
 
-- Auto-detects PHP version from `composer.json` requirements
-- Auto-detects framework (Laravel, Symfony, WordPress, or generic)
-- Auto-detects document root (`public/`, `web/`, etc.)
-- Extracts required PHP extensions from `composer.json`
-- Generates a Dockerfile with all necessary system packages and extensions
-- Generates an nginx config with proper FastCGI routing
-- Blocks access to sensitive files and directories (`.env`, `.git`, `vendor/`, `node_modules/`)
-- Adds security headers and gzip compression
+What you get:
+
+- Auto-detected PHP version from `composer.json` requirements
+- Auto-detected framework (Laravel, Symfony, WordPress, or generic)
+- Auto-detected document root (`public/`, `web/`, etc.)
+- Required extensions extracted from `composer.json`
+- Pool Dockerfile uses BuildKit cache mounts so adding/removing one extension reuses the apk cache and IPE tarball cache across sites
+- `pm=ondemand` on local-mode sites so idle pools cost zero workers
+- nginx config with FastCGI routing pointing at the shared pool container
+- Sensitive paths blocked (`.env`, `.git`, `vendor/`, `node_modules/`)
+- Security headers + gzip
+- Healthcheck on the web container (busybox `nc -z`)
+- macOS bind mounts get `consistency: cached` automatically
+
+**Container layout for N sites with the same fingerprint:**
+- N nginx web containers (`srv-<sitename>-web`, label `dev.srv.type=php`)
+- 1 shared FPM container (`srv-fpm-<hash>`, label `dev.srv.type=php-fpm-pool`)
+
+Each site is mounted at `/var/www/<sitename>` inside the pool; `srv shell <site>` exec's into the pool container with the working directory set to your site's mount.
 
 ```bash
 # Laravel project (auto-detects framework, PHP version, and extensions)
@@ -424,6 +455,11 @@ srv proxy add --domain api.test --port 3000
 # Proxy to a running Docker container
 srv proxy add --domain db.test --container postgres:5432
 
+# Proxy with a 5xx fallback to a remote URL (spins up an nginx sidecar that
+# re-proxies to the fallback when the primary upstream returns 5xx)
+srv proxy add --domain kontainer.com --port 3001 \
+  --fallback https://kontainer.com --fallback-timeout 2s
+
 # List all proxies
 srv proxy list
 
@@ -432,6 +468,142 @@ srv proxy remove api.test
 ```
 
 All proxies use local SSL (mkcert) and automatically register with the local DNS server.
+
+## Multi-Domain Aliases
+
+Run one container under many hostnames — handy for multi-tenant Laravel apps where every tenant maps to the same project:
+
+```bash
+srv add ~/git/work/kontainer \
+  --domain kontainer.test \
+  --alias  cms-kontainer.test \
+  --alias  jira.konform.com.test \
+  --local --wildcard
+
+# Add an alias after the fact
+srv alias add kontainer jira-staging.test
+
+# Drop one
+srv alias remove kontainer jira-staging.test
+
+# Inspect
+srv alias list kontainer
+```
+
+A single mkcert certificate covers every alias; all hostnames register with dnsmasq; the Traefik router OR-joins every Host rule.
+
+## Internal Plain-HTTP Listener
+
+Container-to-host calls often want to reach `https://kontainer.test` from another container, but the in-container client doesn't trust the mkcert CA. srv exposes a second Traefik entrypoint on `:88` that serves the same routers without TLS. Sites opt in:
+
+```bash
+# At add time
+srv add ./laravel-app --domain app.test --local --internal-http
+
+# Post-hoc
+srv internal enable app.test
+srv internal disable app.test
+srv internal list
+```
+
+Result: `https://app.test` (port 443, mkcert TLS) and `http://app.test:88` (plain) both reach the same backend.
+
+## Per-Site Routes
+
+Attach additional Traefik routers to a site so different paths hit different upstreams (e.g. WebSocket on `/app`, S3 gateway on `/videos/...`):
+
+```bash
+# Path-prefix split (e.g. Laravel Reverb on port 6001)
+srv route add kontainer.test --path /app --port 6001
+
+# Regex rewrite (e.g. rewrite /videos/{token}/{rest} → /abs/videos/{token}/{rest})
+srv route add kontainer.test \
+  --path-regex '^/videos/([^/]+)/(.+)$' \
+  --rewrite     '/abs/videos/$1/$2' \
+  --port 9080 --preserve-host
+
+# Upstream targets: localhost port, container[:port], or http(s):// URL
+srv route add api.test --path /v2 --container backend-v2:3000
+srv route add docs.test --path /sdk --url https://sdk.example.com
+
+# Inspect / remove
+srv route list kontainer.test
+srv route remove kontainer.test app
+```
+
+Routes are persisted in the site's `metadata.yml` under `routes:` and emitted as a per-site Traefik file-provider config at `~/.config/srv/traefik/conf/routes-<name>.yml`.
+
+## Hot-Reload on Metadata Edits
+
+The srv daemon watches every `~/.config/srv/sites/<name>/metadata.yml` and re-applies changes within ~300ms (debounced across editor saves). Hand-edits the YAML file → certs refresh, DNS updates, routing config regenerates, `docker compose up -d` runs to pick up label changes. No restart command needed.
+
+Manual triggers:
+
+```bash
+srv reload SITE             # re-apply one site's metadata
+srv reload --all            # all sites
+srv reload SITE --restart   # also force container restart
+srv validate SITE           # check metadata.yml without applying
+srv validate --all
+```
+
+Opt out of automatic file watching:
+
+```bash
+srv daemon start --no-watch
+```
+
+## Importing from Laravel Valet
+
+Migrate an existing Valet rig (works against `~/.config/valet` or legacy `~/.valet`):
+
+```bash
+# Print equivalent srv commands without running them
+srv import valet
+
+# Execute them
+srv import valet --apply
+```
+
+The importer:
+
+- Reads `config.json` for parked paths
+- Resolves each host's project directory by peeling hyphenated subdomain prefixes against `Sites/` symlinks and parked paths
+- Folds hosts that share a project root into one `srv add --alias …` call
+- Maps `proxy_pass http://localhost:N` blocks to `srv proxy add`
+- Captures `--wildcard`, `--internal-http` (when a `listen 88` block is present), and `--fallback URL` (when an `error_page 5xx = @name` block re-proxies)
+- Surfaces per-path location splits as `srv route add` hints
+- Captures `client_max_body_size` and `fastcgi_*_timeout` as `--max-body` / `--*-timeout`
+
+## Metrics (Prometheus + Grafana)
+
+Opt-in observability stack scraping Traefik's existing `/metrics` endpoint:
+
+```bash
+srv metrics enable
+# https://grafana.local      (admin / admin)
+# https://prometheus.local
+srv metrics status
+srv metrics disable
+```
+
+Both UIs are routed through Traefik with mkcert-signed TLS; loopback ports are not exposed. Grafana ships with a pre-wired Prometheus datasource. Import dashboard ID 17347 for a per-router Traefik overview.
+
+## Daemon Hot-Reload Details
+
+`srv daemon` already watches Docker container start events to keep new containers connected to the srv network. The same daemon now also:
+
+- Watches `~/.config/srv/sites/` recursively via fsnotify
+- Debounces per-site edits over a 300ms quiet period to coalesce editor save patterns (rename + chmod + write)
+- Short-circuits Reload when a SHA-256 of the metadata.yml matches the last-applied hash (kept in `<site>/.reload-state`)
+- Auto-runs `docker compose up -d` after a regen so label / compose changes take effect without `srv restart`
+- Surfaces validation errors per site in `srv doctor` and the daemon log
+
+Per-site state file:
+
+```
+~/.config/srv/sites/<name>/.reload-state    # hex SHA-256 of last-applied metadata.yml
+```
 
 ## How It Works
 
@@ -452,13 +624,19 @@ All configuration is stored in `~/.config/srv/` - srv never writes files to your
 | `~/.config/srv/config.yml` | Global configuration (parked paths) |
 | `~/.config/srv/traefik/` | Traefik docker-compose and static config |
 | `~/.config/srv/traefik/conf/` | Dynamic Traefik routing configs |
+| `~/.config/srv/traefik/conf/site-<name>.yml` | Compose-site Traefik file-provider config |
+| `~/.config/srv/traefik/conf/routes-<name>.yml` | Per-site extra routes (`srv route`) |
+| `~/.config/srv/traefik/conf/proxy-<name>.yml` | Proxy file-provider config (`srv proxy`) |
+| `~/.config/srv/traefik/conf/proxy-metrics.yml` | grafana.local / prometheus.local routers |
 | `~/.config/srv/traefik/certs/` | Let's Encrypt certificates (acme.json) |
 | `~/.config/srv/sites/` | Site configurations |
-| `~/.config/srv/sites/{name}/metadata.yml` | Site metadata |
+| `~/.config/srv/sites/{name}/metadata.yml` | Site metadata (canonical source of truth) |
+| `~/.config/srv/sites/{name}/.reload-state` | Hash of last-applied metadata (daemon short-circuit) |
 | `~/.config/srv/sites/{name}/certs/` | Local SSL certificates (mkcert) |
-| `~/.config/srv/sites/{name}/docker-compose.yml` | Generated compose for static and PHP sites |
-| `~/.config/srv/sites/{name}/nginx.conf` | Generated nginx config for static and PHP sites |
-| `~/.config/srv/sites/{name}/Dockerfile` | Generated Dockerfile for PHP sites |
+| `~/.config/srv/sites/{name}/docker-compose.yml` | Generated compose (nginx web for PHP, full stack for others) |
+| `~/.config/srv/sites/{name}/nginx.conf` | Generated nginx config |
+| `~/.config/srv/fpm/<hash>/` | Shared PHP-FPM pool (Dockerfile + compose + php.ini + php-fpm.conf) |
+| `~/.config/srv/metrics/` | Prometheus + Grafana compose stack |
 
 ## Global Flags
 
