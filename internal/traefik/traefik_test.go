@@ -212,3 +212,84 @@ func TestExtractDomainFromRule(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ExtractDomainsFromRule
+// ---------------------------------------------------------------------------
+
+func TestExtractDomainsFromRule(t *testing.T) {
+	tests := []struct {
+		rule string
+		want []string
+	}{
+		{"Host(`a.test`)", []string{"a.test"}},
+		{"Host(`a.test`) || Host(`b.test`)", []string{"a.test", "b.test"}},
+		{
+			"Host(`a.test`) || HostRegexp(`^[^.]+\\.a.test$`) || Host(`b.test`)",
+			[]string{"a.test", "b.test"},
+		},
+		{"PathPrefix(`/x`)", nil},
+		{"", nil},
+	}
+	for _, tc := range tests {
+		got := ExtractDomainsFromRule(tc.rule)
+		if len(got) != len(tc.want) {
+			t.Errorf("ExtractDomainsFromRule(%q) = %v, want %v", tc.rule, got, tc.want)
+			continue
+		}
+		for i, v := range got {
+			if v != tc.want[i] {
+				t.Errorf("ExtractDomainsFromRule(%q)[%d] = %q, want %q", tc.rule, i, v, tc.want[i])
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BuildHostRule
+// ---------------------------------------------------------------------------
+
+func TestBuildHostRule(t *testing.T) {
+	tests := []struct {
+		name     string
+		domains  []string
+		wildcard bool
+		want     string
+	}{
+		{
+			name:    "single domain, no wildcard",
+			domains: []string{"a.test"},
+			want:    "Host(`a.test`)",
+		},
+		{
+			name:    "two domains, no wildcard",
+			domains: []string{"a.test", "b.test"},
+			want:    "Host(`a.test`) || Host(`b.test`)",
+		},
+		{
+			name:     "single domain, wildcard",
+			domains:  []string{"a.test"},
+			wildcard: true,
+			want:     "Host(`a.test`) || HostRegexp(`^[^.]+\\.a\\.test$`)",
+		},
+		{
+			name:     "two domains, wildcard",
+			domains:  []string{"a.test", "b.test"},
+			wildcard: true,
+			want:     "Host(`a.test`) || HostRegexp(`^[^.]+\\.a\\.test$`) || Host(`b.test`) || HostRegexp(`^[^.]+\\.b\\.test$`)",
+		},
+		{
+			name:    "skip empty",
+			domains: []string{"a.test", "", "b.test"},
+			want:    "Host(`a.test`) || Host(`b.test`)",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildHostRule(tc.domains, tc.wildcard)
+			if got != tc.want {
+				t.Errorf("BuildHostRule(%v, %v) = %q\nwant %q", tc.domains, tc.wildcard, got, tc.want)
+			}
+		})
+	}
+}

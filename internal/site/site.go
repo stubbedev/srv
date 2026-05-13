@@ -27,7 +27,7 @@ import (
 type Site struct {
 	Name               string   // Name of the site (directory name in sites/)
 	Dir                string   // Resolved directory path (project directory)
-	Domain             string   // Domain from metadata
+	Domains            []string // All hostnames; Domains[0] is canonical
 	IsLocal            bool     // Whether it uses local SSL
 	Wildcard           bool     // Match apex + one-level subdomains
 	Type               SiteType // compose or static
@@ -38,6 +38,14 @@ type Site struct {
 	Profile            string   // Docker Compose profile (if service uses profiles)
 	Port               int      // Port (for compose sites)
 	ComposeDir         string   // Directory containing docker-compose.yml (may differ from Dir for static sites)
+}
+
+// Domain returns the canonical (first) hostname for the site, or "" if none.
+func (s *Site) Domain() string {
+	if s == nil || len(s.Domains) == 0 {
+		return ""
+	}
+	return s.Domains[0]
 }
 
 // ComposeFile represents a docker-compose.yml structure.
@@ -161,7 +169,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 		return s, false
 	}
 
-	s.Domain = meta.Domain
+	s.Domains = append([]string(nil), meta.Domains...)
 	s.IsLocal = meta.IsLocal
 	s.Wildcard = meta.Wildcard
 	s.Type = meta.Type
@@ -837,11 +845,57 @@ const (
 	SiteTypeDockerfile SiteType = constants.SiteTypeDockerfile // Dockerfile site
 )
 
+// Limits holds optional per-site/per-route timeout and request-body limits.
+// All fields use string forms ("2G", "300s") so YAML stays human-readable and
+// the values pass through to nginx/Traefik in their native syntax.
+type Limits struct {
+	MaxBody        string `yaml:"max_body,omitempty"`        // e.g. "2G", "128M"
+	ReadTimeout    string `yaml:"read_timeout,omitempty"`    // e.g. "300s"
+	SendTimeout    string `yaml:"send_timeout,omitempty"`
+	ConnectTimeout string `yaml:"connect_timeout,omitempty"`
+}
+
+// Upstream points a route or proxy at a backend. Exactly one of Port/Container/URL
+// is set per Kind.
+type Upstream struct {
+	Kind      string `yaml:"kind"`                // "localhost" | "container" | "url"
+	Port      int    `yaml:"port,omitempty"`      // when kind=localhost or kind=container
+	Container string `yaml:"container,omitempty"` // when kind=container
+	URL       string `yaml:"url,omitempty"`       // when kind=url
+}
+
+// Route attaches an extra Traefik router to a site, used for path-prefix splits
+// (e.g. /app → WebSocket on :6001) or regex rewrites (e.g. /videos/...).
+type Route struct {
+	ID               string   `yaml:"id"`                            // stable handle for CLI
+	Path             string   `yaml:"path,omitempty"`                // PathPrefix
+	PathRegex        string   `yaml:"path_regex,omitempty"`          // PathRegexp
+	Rewrite          string   `yaml:"rewrite,omitempty"`             // ReplacePathRegex replacement
+	Upstream         Upstream `yaml:"upstream"`
+	PreserveHost     *bool    `yaml:"preserve_host,omitempty"`       // tri-state; nil = default true
+	PassRangeHeaders bool     `yaml:"pass_range_headers,omitempty"`
+	Priority         int      `yaml:"priority,omitempty"`            // optional Traefik priority override
+	Limits           *Limits  `yaml:"limits,omitempty"`              // per-route override
+}
+
+// Fallback configures a remote upstream that takes over when the primary
+// upstream returns a 5xx response. Implemented via a small nginx sidecar in
+// front of the main upstream.
+type Fallback struct {
+	URL     string `yaml:"url"`
+	Timeout string `yaml:"timeout,omitempty"` // e.g. "2s"
+}
+
+// CurrentMetadataSchema is the version written to new metadata.yml files. Bump
+// when introducing a breaking, non-additive change.
+const CurrentMetadataSchema = 1
+
 // SiteMetadata holds all configuration for a site.
 // This is stored in ~/.config/srv/sites/{name}/metadata.yml
 type SiteMetadata struct {
+	SchemaVersion      int      `yaml:"schema_version,omitempty"`       // metadata.yml schema (1 = current)
 	Type               SiteType `yaml:"type"`                           // compose or static
-	Domain             string   `yaml:"domain"`                         // Domain to serve on
+	Domains            []string `yaml:"domains,omitempty"`              // All hostnames; Domains[0] is canonical
 	ProjectPath        string   `yaml:"project_path"`                   // Absolute path to the project
 	ServiceName        string   `yaml:"service_name,omitempty"`         // Container name (for Traefik routing)
 	ComposeServiceName string   `yaml:"compose_service_name,omitempty"` // Docker Compose service name (for compose commands)
@@ -850,6 +904,16 @@ type SiteMetadata struct {
 	IsLocal            bool     `yaml:"is_local"`                       // Whether to use local SSL
 	Wildcard           bool     `yaml:"wildcard,omitempty"`             // Match apex + one-level subdomains
 	NetworkName        string   `yaml:"network_name"`                   // Docker network name
+	// Listeners enables extra entrypoints for this site (e.g. ["internal"] for :88 plain HTTP).
+	Listeners []string `yaml:"listeners,omitempty"`
+	// Limits applies request-body and timeout overrides.
+	Limits *Limits `yaml:"limits,omitempty"`
+	// Routes are extra Traefik routers attached to this host (path-prefix / regex-rewrite splits).
+	Routes []Route `yaml:"routes,omitempty"`
+	// Upstream is set on proxy-type sites to describe the primary backend.
+	Upstream *Upstream `yaml:"upstream,omitempty"`
+	// Fallback (optional) describes a remote 5xx-fallback target for proxy sites.
+	Fallback *Fallback `yaml:"fallback,omitempty"`
 	// Static site options
 	SPA   bool `yaml:"spa,omitempty"`   // Enable SPA mode
 	Cache bool `yaml:"cache,omitempty"` // Enable caching headers
@@ -877,6 +941,15 @@ type SiteMetadata struct {
 	DockerfilePort int `yaml:"dockerfile_port,omitempty"` // Port from EXPOSE directive
 }
 
+// PrimaryDomain returns the canonical (first) domain registered for the site,
+// or "" if none is configured.
+func (m *SiteMetadata) PrimaryDomain() string {
+	if m == nil || len(m.Domains) == 0 {
+		return ""
+	}
+	return m.Domains[0]
+}
+
 // SiteConfigDir returns the path to a site's configuration directory.
 func SiteConfigDir(cfg *config.Config, name string) string {
 	return filepath.Join(cfg.SitesDir, name)
@@ -897,11 +970,16 @@ func SiteNginxConfPath(cfg *config.Config, name string) string {
 	return filepath.Join(SiteConfigDir(cfg, name), constants.NginxConfFile)
 }
 
-// WriteSiteMetadata writes metadata for a site.
+// WriteSiteMetadata writes metadata for a site. SchemaVersion is stamped to the
+// current schema if not already set.
 func WriteSiteMetadata(name string, meta SiteMetadata) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+
+	if meta.SchemaVersion == 0 {
+		meta.SchemaVersion = CurrentMetadataSchema
 	}
 
 	// Ensure site config directory exists
@@ -923,6 +1001,10 @@ func WriteSiteMetadata(name string, meta SiteMetadata) error {
 
 // ReadSiteMetadata reads metadata for a site.
 // Returns nil if the metadata file doesn't exist.
+//
+// Older metadata.yml files used a scalar `domain:` field. They are migrated
+// transparently in-memory; the on-disk file is only rewritten on the next
+// mutation. Unknown keys are ignored (lenient parsing).
 func ReadSiteMetadata(name string) (*SiteMetadata, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -940,6 +1022,17 @@ func ReadSiteMetadata(name string) (*SiteMetadata, error) {
 	var meta SiteMetadata
 	if err := yaml.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("failed to parse metadata: %w", err)
+	}
+
+	// Legacy migration: pre-schema-1 metadata had `domain: foo` instead of
+	// `domains: [foo]`. Detect via a second pass and populate Domains.
+	if len(meta.Domains) == 0 {
+		var legacy struct {
+			Domain string `yaml:"domain"`
+		}
+		if err := yaml.Unmarshal(data, &legacy); err == nil && legacy.Domain != "" {
+			meta.Domains = []string{legacy.Domain}
+		}
 	}
 
 	return &meta, nil
@@ -1000,10 +1093,10 @@ type staticComposeConfig struct {
 }
 
 // buildStaticTraefikLabels builds Traefik labels for a static site.
-func buildStaticTraefikLabels(name, domain string, isLocal, wildcard bool) map[string]string {
+func buildStaticTraefikLabels(name string, domains []string, isLocal, wildcard bool) map[string]string {
 	labels := map[string]string{
 		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domain, wildcard),
+		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domains, wildcard),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): "80",
@@ -1086,7 +1179,7 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) error {
 
 	// Build and write docker-compose.yml
 	containerName := generateStaticContainerName(name)
-	labels := buildStaticTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard)
+	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
 	composeConfig := buildStaticComposeConfig(containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
 
 	data, err := yaml.Marshal(&composeConfig)

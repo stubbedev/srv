@@ -85,6 +85,19 @@ func GetSiteNames() []string {
 	return names
 }
 
+// GetSiteAliases returns the alias hostnames (Domains[1:]) for a site, used to
+// drive shell completion for `srv alias remove`.
+func GetSiteAliases(name string) []string {
+	meta, err := site.ReadSiteMetadata(name)
+	if err != nil || meta == nil {
+		return nil
+	}
+	if len(meta.Domains) <= 1 {
+		return nil
+	}
+	return append([]string(nil), meta.Domains[1:]...)
+}
+
 // GetSiteFromArgs returns a site from args or detects from current directory.
 // Returns nil, nil if no site is specified and cwd is not a registered site.
 func GetSiteFromArgs(args []string) (*site.Site, error) {

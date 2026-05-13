@@ -216,7 +216,7 @@ func setupProxyCertificate(input *proxyInput) error {
 	// Generate certificate (or renew if expiring)
 	// Use "_proxy-{name}" as the site name for cert storage
 	proxySiteName := "_proxy-" + input.name
-	renewed, err := traefik.EnsureLocalCert(proxySiteName, input.domain, input.wildcard)
+	renewed, err := traefik.EnsureLocalCert(proxySiteName, []string{input.domain}, input.wildcard)
 	if err != nil {
 		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
@@ -488,7 +488,7 @@ func writeProxyConfig(cfg *config.Config, name, domain, targetURL, containerName
 	}
 
 	router := Router{
-		Rule:        traefik.BuildHostRule(domain, wildcard),
+		Rule:        traefik.BuildHostRule([]string{domain}, wildcard),
 		EntryPoints: []string{constants.EntryPointWebsecure},
 		Service:     constants.ProxyConfigPrefix + name,
 		TLS:         &struct{}{},

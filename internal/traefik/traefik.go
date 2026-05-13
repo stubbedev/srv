@@ -566,7 +566,7 @@ func SetupDashboardProxy() error {
 	proxySiteName := "_proxy-" + name
 
 	// Generate (or renew) the mkcert certificate.
-	if _, err := EnsureLocalCert(proxySiteName, domain, false); err != nil {
+	if _, err := EnsureLocalCert(proxySiteName, []string{domain}, false); err != nil {
 		return fmt.Errorf("failed to generate certificate for %s: %w", domain, err)
 	}
 

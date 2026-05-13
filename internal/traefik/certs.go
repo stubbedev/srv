@@ -84,10 +84,14 @@ func RemoveLocalCerts(siteName, domain string) error {
 	return nil
 }
 
-// GenerateLocalCert generates an SSL certificate for a specific site using mkcert.
-// When wildcard is true, the cert is issued for both the apex domain and
-// "*.<domain>" so it covers one-level subdomains as well.
-func GenerateLocalCert(siteName, domain string, wildcard bool) error {
+// GenerateLocalCert generates an SSL certificate for a site using mkcert.
+// The first element of domains is the primary (used to name the cert files on
+// disk); all elements are added as SANs. When wildcard is true, each domain
+// also gets a "*.<domain>" SAN so single-level subdomains are covered.
+func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
+	if len(domains) == 0 {
+		return fmt.Errorf("no domains supplied for cert generation")
+	}
 	if err := CheckMkcert(); err != nil {
 		return err
 	}
@@ -102,23 +106,26 @@ func GenerateLocalCert(siteName, domain string, wildcard bool) error {
 		return fmt.Errorf("failed to create certs directory: %w", err)
 	}
 
-	certFile := filepath.Join(certDir, domain+constants.ExtCert)
-	keyFile := filepath.Join(certDir, domain+constants.ExtKey)
+	primary := domains[0]
+	certFile := filepath.Join(certDir, primary+constants.ExtCert)
+	keyFile := filepath.Join(certDir, primary+constants.ExtKey)
 
 	args := []string{
 		"-cert-file", certFile,
 		"-key-file", keyFile,
-		domain,
 	}
-	if wildcard {
-		args = append(args, "*."+domain)
+	for _, d := range domains {
+		args = append(args, d)
+		if wildcard {
+			args = append(args, "*."+d)
+		}
 	}
 
 	// RunQuiet suppresses mkcert's advisory stderr warnings (e.g. the "not
 	// installed in system trust store" note that fires immediately after
 	// install due to mkcert's cached cert pool — see FiloSottile/mkcert#234).
 	if err := mkcert.RunQuiet(args...); err != nil {
-		return fmt.Errorf("failed to generate certificate for %s: %w", domain, err)
+		return fmt.Errorf("failed to generate certificate for %s: %w", primary, err)
 	}
 
 	return nil
@@ -128,36 +135,41 @@ func GenerateLocalCert(siteName, domain string, wildcard bool) error {
 const RenewThresholdDays = constants.CertExpiryWarningDays
 
 // EnsureLocalCert generates an SSL certificate for a site if it doesn't exist
-// or if the existing certificate is expired, expiring soon, or missing the
-// requested wildcard SAN (when wildcard is true).
+// or if the existing certificate is expired, expiring soon, missing the
+// requested wildcard SAN, or missing one of the requested domains.
 // Returns (renewed bool, err error) where renewed indicates if a cert was regenerated.
-func EnsureLocalCert(siteName, domain string, wildcard bool) (bool, error) {
-	if !LocalCertsExist(siteName, domain) {
-		return true, GenerateLocalCert(siteName, domain, wildcard)
+func EnsureLocalCert(siteName string, domains []string, wildcard bool) (bool, error) {
+	if len(domains) == 0 {
+		return false, fmt.Errorf("no domains supplied")
+	}
+	primary := domains[0]
+
+	if !LocalCertsExist(siteName, primary) {
+		return true, GenerateLocalCert(siteName, domains, wildcard)
 	}
 
 	// Check if cert needs renewal
-	cert := GetLocalCertInfo(siteName, domain)
+	cert := GetLocalCertInfo(siteName, primary)
 	if cert.IsExpired || cert.DaysLeft <= RenewThresholdDays {
-		return true, GenerateLocalCert(siteName, domain, wildcard)
+		return true, GenerateLocalCert(siteName, domains, wildcard)
 	}
 
-	// Upgrade an apex-only cert if the caller now wants wildcard coverage.
-	if wildcard && !certHasWildcardSAN(siteName, domain) {
-		return true, GenerateLocalCert(siteName, domain, wildcard)
+	// Upgrade if SAN coverage is incomplete (missing wildcard or any extra domain).
+	if !certCoversDomains(siteName, primary, domains, wildcard) {
+		return true, GenerateLocalCert(siteName, domains, wildcard)
 	}
 
 	return false, nil
 }
 
-// certHasWildcardSAN reports whether the on-disk cert for the site already
-// covers "*.<domain>" as a SAN.
-func certHasWildcardSAN(siteName, domain string) bool {
+// certCoversDomains reports whether the on-disk cert (named after primary)
+// includes every required domain (and `*.<d>` if wildcard) as a SAN.
+func certCoversDomains(siteName, primary string, domains []string, wildcard bool) bool {
 	cfg, err := config.Load()
 	if err != nil {
 		return false
 	}
-	certPath := filepath.Join(cfg.SiteCertsDir(siteName), domain+constants.ExtCert)
+	certPath := filepath.Join(cfg.SiteCertsDir(siteName), primary+constants.ExtCert)
 	data, err := os.ReadFile(certPath)
 	if err != nil {
 		return false
@@ -170,13 +182,19 @@ func certHasWildcardSAN(siteName, domain string) bool {
 	if err != nil {
 		return false
 	}
-	wildcard := "*." + domain
-	for _, name := range parsed.DNSNames {
-		if name == wildcard {
-			return true
+	have := make(map[string]bool, len(parsed.DNSNames))
+	for _, n := range parsed.DNSNames {
+		have[n] = true
+	}
+	for _, d := range domains {
+		if !have[d] {
+			return false
+		}
+		if wildcard && !have["*."+d] {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // UpdateDynamicConfig regenerates the Traefik dynamic config with all local domain certs.

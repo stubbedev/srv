@@ -27,6 +27,7 @@ import (
 
 var addFlags struct {
 	domain         string
+	aliases        []string
 	port           int
 	name           string
 	service        string
@@ -39,6 +40,11 @@ var addFlags struct {
 	spa   bool
 	cache bool
 	cors  bool
+	// Limits
+	maxBody        string
+	readTimeout    string
+	sendTimeout    string
+	connectTimeout string
 	// PHP site options
 	phpVersion    string
 	documentRoot  string
@@ -90,6 +96,10 @@ Examples:
 
 func init() {
 	addCmd.Flags().StringVarP(&addFlags.domain, "domain", "d", "", "Domain/hostname (e.g., example.com or myapp.test)")
+	addCmd.Flags().StringSliceVar(&addFlags.aliases, "alias", nil, "Additional hostname mapped to the same site (repeatable)")
+	_ = addCmd.RegisterFlagCompletionFunc("alias", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
 	addCmd.Flags().IntVarP(&addFlags.port, "port", "p", constants.DefaultContainerPort, "Container port")
 	addCmd.Flags().StringVarP(&addFlags.name, "name", "n", "", "Site name (default: directory name)")
 	addCmd.Flags().StringVar(&addFlags.service, "service", "", "Container name to route to")
@@ -101,6 +111,19 @@ func init() {
 	addCmd.Flags().BoolVar(&addFlags.spa, "spa", true, "Enable SPA mode (fallback to index.html)")
 	addCmd.Flags().BoolVar(&addFlags.cache, "cache", true, "Enable caching headers for static assets")
 	addCmd.Flags().BoolVar(&addFlags.cors, "cors", false, "Enable CORS headers (allow all origins)")
+	// Limits
+	addCmd.Flags().StringVar(&addFlags.maxBody, "max-body", "", "Maximum request body size (e.g. 128M, 2G)")
+	_ = addCmd.RegisterFlagCompletionFunc("max-body", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"1M", "10M", "100M", "128M", "1G", "2G"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	addCmd.Flags().StringVar(&addFlags.readTimeout, "read-timeout", "", "Upstream read timeout (e.g. 30s, 300s)")
+	addCmd.Flags().StringVar(&addFlags.sendTimeout, "send-timeout", "", "Upstream send timeout (e.g. 30s, 300s)")
+	addCmd.Flags().StringVar(&addFlags.connectTimeout, "connect-timeout", "", "Upstream connect timeout (e.g. 5s)")
+	for _, name := range []string{"read-timeout", "send-timeout", "connect-timeout"} {
+		_ = addCmd.RegisterFlagCompletionFunc(name, func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return []string{"1s", "5s", "10s", "30s", "60s", "300s"}, cobra.ShellCompDirectiveNoFileComp
+		})
+	}
 	// PHP site options
 	addCmd.Flags().StringVar(&addFlags.phpVersion, "php-version", "", "PHP version (auto-detected; use 'latest' for newest)")
 	addCmd.Flags().StringVar(&addFlags.documentRoot, "document-root", "", "Document root relative to project (auto-detected)")
@@ -184,7 +207,9 @@ type siteSetup struct {
 	composeServiceName string // Docker Compose service name for compose commands
 	profile            string // Docker Compose profile (if service uses profiles)
 	siteName           string
-	domain             string
+	domain             string   // canonical/primary domain
+	aliases            []string // extra hostnames mapped to the same site
+	limits             *site.Limits
 	port               int
 	isLocal            bool
 	wildcard           bool // true if wildcard subdomain matching is enabled
@@ -408,6 +433,18 @@ func promptForMissingConfig(setup *siteSetup) error {
 	setup.wildcard = addFlags.wildcard
 	if setup.wildcard && !setup.isLocal {
 		return fmt.Errorf("--wildcard requires --local (Let's Encrypt cannot issue local wildcard certs)")
+	}
+
+	// Aliases: validate each, ensure no clash with the canonical domain, dedupe.
+	if aliases, err := normalizeAliases(setup.domain, addFlags.aliases); err != nil {
+		return err
+	} else {
+		setup.aliases = aliases
+	}
+
+	// Limits: collect any user-supplied overrides. Empty values are omitted.
+	if l := limitsFromFlags(); l != nil {
+		setup.limits = l
 	}
 
 	// Static site options
@@ -673,7 +710,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	// Build base metadata.
 	meta := site.SiteMetadata{
 		Type:               siteType,
-		Domain:             setup.domain,
+		Domains:            setup.allDomains(),
 		ProjectPath:        setup.sitePath,
 		ServiceName:        setup.serviceName,
 		ComposeServiceName: setup.composeServiceName,
@@ -682,6 +719,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		IsLocal:            setup.isLocal,
 		Wildcard:           setup.wildcard,
 		NetworkName:        cfg.NetworkName,
+		Limits:             setup.limits,
 		SPA:                setup.spa,
 		Cache:              setup.cache,
 		CORS:               setup.cors,
@@ -766,7 +804,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		// Docker-compose site: generate Traefik file provider config.
 		routeConfig := traefik.SiteRouteConfig{
 			Name:        setup.siteName,
-			Domain:      setup.domain,
+			Domains:     setup.allDomains(),
 			ServiceName: setup.serviceName,
 			Port:        setup.port,
 			IsLocal:     setup.isLocal,
@@ -784,7 +822,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	// Generate SSL certificate for local domains
 	if setup.isLocal {
-		generateLocalCert(setup.siteName, setup.domain, setup.wildcard)
+		generateLocalCert(setup.siteName, setup.allDomains(), setup.wildcard)
 	}
 
 	// Determine site type label
@@ -820,18 +858,71 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	return startSiteAfterAdd(cfg, setup)
 }
 
-// generateLocalCert generates SSL certificate for local domains and registers DNS.
-// DNS registration always runs regardless of whether mkcert is available —
-// TLS and DNS are independent concerns.
-func generateLocalCert(siteName, domain string, wildcard bool) {
-	// Always register DNS — this must happen even if mkcert is missing.
-	if err := traefik.RegisterLocalDomain(domain, wildcard); err != nil {
-		ui.Warn("Failed to register DNS for %s: %v", domain, err)
-	} else {
-		ui.Dim("If %s doesn't resolve, clear your browser DNS cache:", domain)
-		ui.Dim("  Chrome: chrome://net-internals/#dns  →  Clear host cache")
-		ui.Dim("  Firefox: about:networking#dns  →  Clear DNS Cache")
+// normalizeAliases validates the supplied alias list, lowercases entries, drops
+// duplicates, and rejects any alias equal to the canonical domain.
+func normalizeAliases(canonical string, aliases []string) ([]string, error) {
+	canonical = strings.ToLower(strings.TrimSpace(canonical))
+	seen := map[string]bool{canonical: true}
+	out := make([]string, 0, len(aliases))
+	for _, raw := range aliases {
+		a := strings.ToLower(strings.TrimSpace(raw))
+		if a == "" {
+			continue
+		}
+		if err := ValidateDomain(a); err != nil {
+			return nil, fmt.Errorf("invalid alias %q: %w", raw, err)
+		}
+		if seen[a] {
+			continue
+		}
+		seen[a] = true
+		out = append(out, a)
 	}
+	return out, nil
+}
+
+// limitsFromFlags returns a *site.Limits populated from any non-empty
+// --max-body / --*-timeout flags, or nil if none were supplied.
+func limitsFromFlags() *site.Limits {
+	if addFlags.maxBody == "" && addFlags.readTimeout == "" && addFlags.sendTimeout == "" && addFlags.connectTimeout == "" {
+		return nil
+	}
+	return &site.Limits{
+		MaxBody:        addFlags.maxBody,
+		ReadTimeout:    addFlags.readTimeout,
+		SendTimeout:    addFlags.sendTimeout,
+		ConnectTimeout: addFlags.connectTimeout,
+	}
+}
+
+// allDomains returns the canonical domain followed by any aliases.
+func (s *siteSetup) allDomains() []string {
+	out := make([]string, 0, 1+len(s.aliases))
+	if s.domain != "" {
+		out = append(out, s.domain)
+	}
+	out = append(out, s.aliases...)
+	return out
+}
+
+// generateLocalCert generates SSL certificate for local domains and registers DNS
+// for every supplied domain. DNS registration always runs regardless of whether
+// mkcert is available — TLS and DNS are independent concerns.
+func generateLocalCert(siteName string, domains []string, wildcard bool) {
+	if len(domains) == 0 {
+		return
+	}
+	primary := domains[0]
+
+	// Always register DNS — this must happen even if mkcert is missing.
+	for _, d := range domains {
+		if err := traefik.RegisterLocalDomain(d, wildcard); err != nil {
+			ui.Warn("Failed to register DNS for %s: %v", d, err)
+		}
+	}
+	ui.Dim("If a domain doesn't resolve, clear your browser DNS cache:")
+	ui.Dim("  Chrome: chrome://net-internals/#dns  →  Clear host cache")
+	ui.Dim("  Firefox: about:networking#dns  →  Clear DNS Cache")
 
 	if err := traefik.CheckMkcert(); err != nil {
 		ui.Warn("%v", err)
@@ -851,31 +942,36 @@ func generateLocalCert(siteName, domain string, wildcard bool) {
 		}
 	}
 
-	renewed, err := traefik.EnsureLocalCert(siteName, domain, wildcard)
+	renewed, err := traefik.EnsureLocalCert(siteName, domains, wildcard)
 	if err != nil {
 		ui.Warn("Failed to generate certificate: %v", err)
 		return
 	}
 
 	if renewed {
-		ui.Dim("Generated SSL certificate for %s", domain)
+		ui.Dim("Generated SSL certificate for %s", primary)
 		if err := traefik.UpdateDynamicConfig(); err != nil {
 			ui.Warn("Failed to update Traefik config: %v", err)
 		}
 	}
 }
 
-// renewLocalCertIfNeeded checks if a local cert needs renewal and renews it
-func renewLocalCertIfNeeded(siteName, domain string, wildcard bool) {
-	cert := traefik.GetLocalCertInfo(siteName, domain)
+// renewLocalCertIfNeeded checks if a local cert needs renewal and renews it.
+// The cert is named after the primary (first) domain on disk.
+func renewLocalCertIfNeeded(siteName string, domains []string, wildcard bool) {
+	if len(domains) == 0 {
+		return
+	}
+	primary := domains[0]
+	cert := traefik.GetLocalCertInfo(siteName, primary)
 	if !cert.Exists || cert.IsExpired || cert.DaysLeft <= traefik.RenewThresholdDays {
 		if cert.IsExpired {
-			ui.Dim("Renewing expired SSL certificate for %s...", domain)
+			ui.Dim("Renewing expired SSL certificate for %s...", primary)
 		} else if cert.Exists && cert.DaysLeft <= traefik.RenewThresholdDays {
-			ui.Dim("Renewing SSL certificate for %s (expires in %d days)...", domain, cert.DaysLeft)
+			ui.Dim("Renewing SSL certificate for %s (expires in %d days)...", primary, cert.DaysLeft)
 		}
 
-		if err := traefik.GenerateLocalCert(siteName, domain, wildcard); err != nil {
+		if err := traefik.GenerateLocalCert(siteName, domains, wildcard); err != nil {
 			ui.Warn("Failed to renew certificate: %v", err)
 			return
 		}
@@ -1004,17 +1100,20 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Remove SSL certificate and DNS for local domains
-	if s.IsLocal && s.Domain != "" {
-		if err := traefik.RemoveLocalCerts(siteName, s.Domain); err != nil {
+	if s.IsLocal && len(s.Domains) > 0 {
+		primary := s.Domains[0]
+		if err := traefik.RemoveLocalCerts(siteName, primary); err != nil {
 			ui.Warn("Failed to remove certificate: %v", err)
 		}
 		// Update Traefik dynamic config
 		if err := traefik.UpdateDynamicConfig(); err != nil {
 			ui.Warn("Failed to update Traefik config: %v", err)
 		}
-		// Unregister domain from local DNS
-		if err := traefik.UnregisterLocalDomain(s.Domain); err != nil {
-			ui.Warn("Failed to unregister DNS for %s: %v", s.Domain, err)
+		// Unregister all domains from local DNS
+		for _, d := range s.Domains {
+			if err := traefik.UnregisterLocalDomain(d); err != nil {
+				ui.Warn("Failed to unregister DNS for %s: %v", d, err)
+			}
 		}
 	}
 
@@ -1080,7 +1179,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 		rows = append(rows, []string{
 			s.Name,
-			s.Domain,
+			formatDomainsForList(s.Domains),
 			target,
 			getSiteTypeLabel(s),
 			sslStatus,
@@ -1090,6 +1189,20 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	ui.PrintTable(headers, rows)
 	return nil
+}
+
+// formatDomainsForList renders a site's domains for the `srv list` table.
+// Returns the primary alone if only one is set; otherwise primary plus a
+// "+N" indicator so the table stays narrow.
+func formatDomainsForList(domains []string) string {
+	switch len(domains) {
+	case 0:
+		return ""
+	case 1:
+		return domains[0]
+	default:
+		return fmt.Sprintf("%s (+%d)", domains[0], len(domains)-1)
+	}
 }
 
 // getSiteTypeLabel returns the site type label for the list view.
@@ -1122,8 +1235,8 @@ func getSSLStatus(s site.Site) string {
 	}
 
 	if s.IsLocal {
-		// Local site - check mkcert certificate
-		cert := traefik.GetLocalCertInfo(s.Name, s.Domain)
+		// Local site - check mkcert certificate (named after the primary domain)
+		cert := traefik.GetLocalCertInfo(s.Name, s.Domain())
 		if !cert.Exists {
 			return ui.StatusColor("missing")
 		}
@@ -1185,8 +1298,11 @@ func runInfo(cmd *cobra.Command, args []string) error {
 
 	// Basic info
 	ui.Print("  Path:    %s", s.Dir)
-	if s.Domain != "" {
-		ui.Print("  Domain:  %s", s.Domain)
+	if len(s.Domains) > 0 {
+		ui.Print("  Domain:  %s", s.Domains[0])
+		for _, alias := range s.Domains[1:] {
+			ui.Print("  Alias:   %s", alias)
+		}
 	}
 	ui.Print("  SSL:     %s", ui.TypeColor(s.IsLocal))
 
@@ -1280,14 +1396,14 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	ui.Blank()
 
 	// SSL certificate info for local sites
-	if s.IsLocal && s.Domain != "" {
-		showCertInfo(s.Domain)
+	if s.IsLocal && s.Domain() != "" {
+		showCertInfo(s.Domain())
 	}
 
 	// Show URL if running
-	if s.Status == constants.StatusRunning && s.Domain != "" {
+	if s.Status == constants.StatusRunning && s.Domain() != "" {
 		ui.Blank()
-		ui.Info("URL: https://%s", s.Domain)
+		ui.Info("URL: https://%s", s.Domain())
 	}
 
 	ui.Blank()
@@ -1382,8 +1498,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Renew local SSL cert if needed
-	if s.IsLocal && s.Domain != "" {
-		renewLocalCertIfNeeded(s.Name, s.Domain, s.Wildcard)
+	if s.IsLocal && len(s.Domains) > 0 {
+		renewLocalCertIfNeeded(s.Name, s.Domains, s.Wildcard)
 	}
 
 	ui.Info("Starting %s...", s.Name)
@@ -1415,8 +1531,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Success("Site '%s' started", s.Name)
-	if s.Domain != "" {
-		ui.Info("https://%s", s.Domain)
+	if d := s.Domain(); d != "" {
+		ui.Info("https://%s", d)
 	}
 	return nil
 }
@@ -1440,8 +1556,8 @@ func startAllSites() error {
 
 	// Renew any expiring local certs before starting
 	for _, s := range sites {
-		if s.IsLocal && s.Domain != "" && !s.IsBroken {
-			renewLocalCertIfNeeded(s.Name, s.Domain, s.Wildcard)
+		if s.IsLocal && len(s.Domains) > 0 && !s.IsBroken {
+			renewLocalCertIfNeeded(s.Name, s.Domains, s.Wildcard)
 		}
 	}
 
@@ -2290,11 +2406,12 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if s.Domain == "" {
+	primary := s.Domain()
+	if primary == "" {
 		return fmt.Errorf("site '%s' has no domain configured", siteName)
 	}
 
-	url := "https://" + s.Domain
+	url := "https://" + primary
 	ui.Dim("Opening %s...", url)
 	c := exec.Command("xdg-open", url) //nolint:gosec
 	c.Stdout = os.Stdout

@@ -452,7 +452,9 @@ session.gc_maxlifetime = 86400
 }
 
 // generatePHPNginxConf generates an nginx configuration for a PHP site.
-func generatePHPNginxConf(info *PHPSiteInfo) string {
+// limits, if non-nil, overrides default client_max_body_size and fastcgi_*_timeout
+// directives. Empty fields keep defaults.
+func generatePHPNginxConf(info *PHPSiteInfo, limits *Limits) string {
 	// Determine the document root path inside the container.
 	docRoot := constants.PHPDockerRootPath
 	if info.DocumentRoot != "" {
@@ -497,7 +499,11 @@ func generatePHPNginxConf(info *PHPSiteInfo) string {
 	sb.WriteString("\n")
 	// Match php.ini upload_max_filesize / post_max_size so nginx doesn't
 	// reject large requests before PHP even sees them.
-	sb.WriteString("    client_max_body_size 2G;\n")
+	maxBody := "2G"
+	if limits != nil && limits.MaxBody != "" {
+		maxBody = limits.MaxBody
+	}
+	fmt.Fprintf(&sb, "    client_max_body_size %s;\n", maxBody)
 	sb.WriteString("\n")
 
 	// Gzip
@@ -555,6 +561,17 @@ func generatePHPNginxConf(info *PHPSiteInfo) string {
 	sb.WriteString("        fastcgi_index index.php;\n")
 	sb.WriteString("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n")
 	sb.WriteString("        include fastcgi_params;\n")
+	if limits != nil {
+		if limits.ConnectTimeout != "" {
+			fmt.Fprintf(&sb, "        fastcgi_connect_timeout %s;\n", limits.ConnectTimeout)
+		}
+		if limits.SendTimeout != "" {
+			fmt.Fprintf(&sb, "        fastcgi_send_timeout %s;\n", limits.SendTimeout)
+		}
+		if limits.ReadTimeout != "" {
+			fmt.Fprintf(&sb, "        fastcgi_read_timeout %s;\n", limits.ReadTimeout)
+		}
+	}
 	sb.WriteString("    }\n")
 	sb.WriteString("}\n")
 
@@ -743,7 +760,7 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 	}
 
 	// Write nginx.conf.
-	nginxConf := generatePHPNginxConf(info)
+	nginxConf := generatePHPNginxConf(info, meta.Limits)
 	nginxConfPath := SiteNginxConfPath(cfg, name)
 	if err := writeFile(nginxConfPath, []byte(nginxConf), force); err != nil {
 		return fmt.Errorf("failed to write nginx.conf: %w", err)
@@ -754,7 +771,7 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 	webContainerName := "srv-" + name + "-web"
 	internalNetworkName := "srv-" + name + "-internal"
 
-	labels := buildStaticTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard)
+	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
 
 	// Determine the nginx document root mount target.
 	// The project is always mounted to /var/www/html; nginx's root directive
@@ -856,7 +873,7 @@ func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) err
 	webContainerName := "srv-" + name + "-web"
 	internalNetworkName := "srv-" + name + "-internal"
 
-	labels := buildStaticTraefikLabels(name, meta.Domain, meta.IsLocal, meta.Wildcard)
+	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
 
 	composeConfig := phpComposeConfig{
 		Services: map[string]phpServiceConfig{

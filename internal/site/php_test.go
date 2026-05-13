@@ -618,7 +618,7 @@ func TestGeneratePHPNginxConf_ContainsKeyDirectives(t *testing.T) {
 		Framework:    constants.PHPFrameworkGeneric,
 		DocumentRoot: "",
 	}
-	conf := generatePHPNginxConf(info)
+	conf := generatePHPNginxConf(info, nil)
 
 	checks := []string{
 		"listen 80",
@@ -640,7 +640,7 @@ func TestGeneratePHPNginxConf_LaravelDocRoot(t *testing.T) {
 		Framework:    constants.PHPFrameworkLaravel,
 		DocumentRoot: "public",
 	}
-	conf := generatePHPNginxConf(info)
+	conf := generatePHPNginxConf(info, nil)
 
 	if !strings.Contains(conf, "/var/www/html/public") {
 		t.Errorf("expected root to include /public, got:\n%s", conf)
@@ -655,7 +655,7 @@ func TestGeneratePHPNginxConf_SymfonyOldDocRoot(t *testing.T) {
 		Framework:    constants.PHPFrameworkSymfony,
 		DocumentRoot: "web",
 	}
-	conf := generatePHPNginxConf(info)
+	conf := generatePHPNginxConf(info, nil)
 
 	if !strings.Contains(conf, "app.php") {
 		t.Errorf("expected app.php entry point for old Symfony, got:\n%s", conf)
@@ -667,7 +667,7 @@ func TestGeneratePHPNginxConf_WordPressArgs(t *testing.T) {
 		Framework:    constants.PHPFrameworkWordPress,
 		DocumentRoot: "",
 	}
-	conf := generatePHPNginxConf(info)
+	conf := generatePHPNginxConf(info, nil)
 
 	if !strings.Contains(conf, "$args") {
 		t.Errorf("expected $args in WordPress try_files, got:\n%s", conf)

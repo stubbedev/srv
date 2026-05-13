@@ -316,3 +316,29 @@ func TestGetServiceInfos(t *testing.T) {
 		t.Error("db service not found")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Metadata: SiteMetadata.PrimaryDomain + legacy domain migration on read
+// ---------------------------------------------------------------------------
+
+func TestSiteMetadata_PrimaryDomain(t *testing.T) {
+	m := &SiteMetadata{}
+	if got := m.PrimaryDomain(); got != "" {
+		t.Errorf("empty Domains: got %q, want \"\"", got)
+	}
+	m.Domains = []string{"a.test", "b.test"}
+	if got := m.PrimaryDomain(); got != "a.test" {
+		t.Errorf("PrimaryDomain() = %q, want %q", got, "a.test")
+	}
+}
+
+func TestSite_Domain(t *testing.T) {
+	s := &Site{Domains: []string{"x.test", "y.test"}}
+	if got := s.Domain(); got != "x.test" {
+		t.Errorf("Site.Domain() = %q, want %q", got, "x.test")
+	}
+	empty := &Site{}
+	if got := empty.Domain(); got != "" {
+		t.Errorf("empty Site.Domain() = %q, want \"\"", got)
+	}
+}
