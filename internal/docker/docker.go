@@ -241,7 +241,20 @@ func Exec(container string, args ...string) error {
 // streaming its output to stdout/stderr. Use this for automated steps where
 // there is no terminal attached (e.g. running composer install after srv add).
 func ExecNonInteractive(container string, args ...string) error {
-	cmd := exec.Command("docker", append([]string{"exec", container}, args...)...)
+	return ExecNonInteractiveAt(container, "", args...)
+}
+
+// ExecNonInteractiveAt is like ExecNonInteractive but runs the command with
+// the supplied working directory (`-w`) inside the container. Empty workDir
+// uses the image's default WORKDIR.
+func ExecNonInteractiveAt(container, workDir string, args ...string) error {
+	full := []string{"exec"}
+	if workDir != "" {
+		full = append(full, "-w", workDir)
+	}
+	full = append(full, container)
+	full = append(full, args...)
+	cmd := exec.Command("docker", full...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

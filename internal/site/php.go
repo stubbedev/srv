@@ -15,6 +15,8 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/pool"
 )
 
 // =============================================================================
@@ -476,12 +478,17 @@ session.gc_maxlifetime = 86400
 
 // generatePHPNginxConf generates an nginx configuration for a PHP site.
 // limits, if non-nil, overrides default client_max_body_size and fastcgi_*_timeout
-// directives. Empty fields keep defaults.
-func generatePHPNginxConf(info *PHPSiteInfo, limits *Limits) string {
-	// Determine the document root path inside the container.
-	docRoot := constants.PHPDockerRootPath
+// directives. siteName + fpmHost together set the SCRIPT_FILENAME prefix and
+// the upstream FPM container that lives in the shared pool.
+func generatePHPNginxConf(info *PHPSiteInfo, limits *Limits, siteName, fpmHost string) string {
+	// Determine the document root path inside the container. With the shared
+	// FPM pool each site is mounted at /var/www/<sitename>, and both nginx
+	// and FPM containers see the same path so SCRIPT_FILENAME resolves on
+	// both ends.
+	siteRoot := constants.PHPSiteDocRootRoot + "/" + siteName
+	docRoot := siteRoot
 	if info.DocumentRoot != "" {
-		docRoot = constants.PHPDockerRootPath + "/" + info.DocumentRoot
+		docRoot = siteRoot + "/" + info.DocumentRoot
 	}
 
 	// Determine entry point based on framework.
@@ -580,7 +587,7 @@ func generatePHPNginxConf(info *PHPSiteInfo, limits *Limits) string {
 	// PHP/PHTML processing via FastCGI.
 	sb.WriteString("    # PHP and PHTML processing via PHP-FPM\n")
 	sb.WriteString("    location ~ \\.(php|phtml)$ {\n")
-	fmt.Fprintf(&sb, "        fastcgi_pass %s:%d;\n", constants.PHPFPMServiceName, constants.PHPFPMPort)
+	fmt.Fprintf(&sb, "        fastcgi_pass %s:%d;\n", fpmHost, constants.PHPFPMPort)
 	sb.WriteString("        fastcgi_index index.php;\n")
 	sb.WriteString("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n")
 	sb.WriteString("        include fastcgi_params;\n")
@@ -811,8 +818,15 @@ type phpComposeConfig struct {
 	Networks map[string]phpNetworkConfig `yaml:"networks"`
 }
 
-// WritePHPSiteConfig generates and writes the Dockerfile, nginx.conf, and
-// docker-compose.yml for a PHP site into the srv config directory.
+// WritePHPSiteConfig generates and writes the nginx.conf and docker-compose.yml
+// for a PHP site into the srv config directory, AND ensures the shared FPM pool
+// for this site's (php_version, extensions) fingerprint exists with this site
+// listed as a member.
+//
+// Dockerfile / php.ini / php-fpm.conf are NOT written into the per-site dir
+// any more; they live with the pool. The per-site compose declares only the
+// nginx web container, which talks to the pool's FPM container by name.
+//
 // If force is false, existing files are left untouched so user edits are preserved.
 func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force bool) error {
 	cfg, err := config.Load()
@@ -825,81 +839,31 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 		return fmt.Errorf("failed to create site config directory: %w", err)
 	}
 
-	// Write Dockerfile.
-	dockerfile := generatePHPDockerfile(info)
-	dockerfilePath := filepath.Join(siteDir, constants.PHPDockerfileFile)
-	if err := writeFile(dockerfilePath, []byte(dockerfile), force); err != nil {
-		return fmt.Errorf("failed to write Dockerfile: %w", err)
-	}
-
-	// Write php.ini overrides.
-	phpIni := generatePHPIni()
-	phpIniPath := filepath.Join(siteDir, constants.PHPIniFile)
-	if err := writeFile(phpIniPath, []byte(phpIni), force); err != nil {
-		return fmt.Errorf("failed to write php.ini: %w", err)
-	}
-
-	// Write FPM pool override (controls pm=ondemand for local sites).
-	fpmConf := generatePHPFPMConf(meta.IsLocal)
-	fpmConfPath := filepath.Join(siteDir, constants.PHPFPMConfFile)
-	if err := writeFile(fpmConfPath, []byte(fpmConf), force); err != nil {
-		return fmt.Errorf("failed to write php-fpm.conf: %w", err)
+	// Ensure the shared FPM pool is configured before generating the site's
+	// nginx.conf — we need the pool's container name for fastcgi_pass.
+	fpmContainer, err := ensurePoolForSite(cfg, name, meta, info)
+	if err != nil {
+		return fmt.Errorf("ensure FPM pool: %w", err)
 	}
 
 	// Write nginx.conf.
-	nginxConf := generatePHPNginxConf(info, meta.Limits)
+	nginxConf := generatePHPNginxConf(info, meta.Limits, name, fpmContainer)
 	nginxConfPath := SiteNginxConfPath(cfg, name)
 	if err := writeFile(nginxConfPath, []byte(nginxConf), force); err != nil {
 		return fmt.Errorf("failed to write nginx.conf: %w", err)
 	}
 
-	// Build docker-compose.yml.
-	phpContainerName := "srv-" + name + "-php"
+	// Build site docker-compose.yml — only the nginx web container.
 	webContainerName := "srv-" + name + "-web"
-	internalNetworkName := "srv-" + name + "-internal"
-
 	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
 
-	// Determine the nginx document root mount target.
-	// The project is always mounted to /var/www/html; nginx's root directive
-	// inside the config already appends the sub-directory when needed.
+	siteMount := constants.PHPSiteDocRootRoot + "/" + name
 	composeConfig := phpComposeConfig{
-		Name:     constants.ComposeProjectName,
+		Name: constants.ComposeProjectName,
 		Services: map[string]phpServiceConfig{
-			constants.PHPFPMServiceName: {
-				Build: &phpBuildConfig{
-					Context:    siteDir,
-					Dockerfile: constants.PHPDockerfileFile,
-				},
-				Image:         PHPImageFingerprint(info),
-				PullPolicy:    "missing",
-				ContainerName: phpContainerName,
-				Volumes: []phpVolumeConfig{
-					{
-						Type:        "bind",
-						Source:      meta.ProjectPath,
-						Target:      constants.PHPDockerRootPath,
-						Consistency: volumeConsistencyForHost(),
-					},
-					{
-						Type:     "bind",
-						Source:   phpIniPath,
-						Target:   constants.PHPIniContainerPath,
-						ReadOnly: true,
-					},
-					{
-						Type:     "bind",
-						Source:   fpmConfPath,
-						Target:   constants.PHPFPMConfContainerPath,
-						ReadOnly: true,
-					},
-				},
-				Networks: []string{"internal"},
-				Restart:  constants.RestartUnlessStopped,
-			},
 			constants.PHPWebServiceName: {
 				ContainerName: webContainerName,
 				Image:         constants.ImageNginxAlpine,
@@ -907,7 +871,7 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 					{
 						Type:        "bind",
 						Source:      meta.ProjectPath,
-						Target:      constants.PHPDockerRootPath,
+						Target:      siteMount,
 						ReadOnly:    true,
 						Consistency: volumeConsistencyForHost(),
 					},
@@ -919,16 +883,12 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 					},
 				},
 				Labels:      labels,
-				Networks:    []string{"internal", constants.TraefikSubdir},
+				Networks:    []string{constants.TraefikSubdir},
 				Restart:     constants.RestartUnlessStopped,
-				DependsOn:   []string{constants.PHPFPMServiceName},
 				HealthCheck: makeHealthCheck(80),
 			},
 		},
 		Networks: map[string]phpNetworkConfig{
-			"internal": {
-				Name: internalNetworkName,
-			},
 			constants.TraefikSubdir: {
 				Name:     meta.NetworkName,
 				External: true,
@@ -941,86 +901,197 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 		return fmt.Errorf("failed to marshal compose config: %w", err)
 	}
 
-	header := fmt.Sprintf("# Generated by srv - PHP site (%s)\n# Project: %s\n#\n# This file is yours to edit. Changes take effect on next restart.\n\n",
-		info.Framework, meta.ProjectPath)
+	header := fmt.Sprintf("# Generated by srv - PHP site (%s)\n# Project: %s\n#\n# FPM lives in the shared pool container %s.\n# This file is yours to edit. Changes take effect on next restart.\n\n",
+		info.Framework, meta.ProjectPath, fpmContainer)
 	content := header + string(data)
 
 	composePath := SiteComposePath(cfg, name)
 	return writeFile(composePath, []byte(content), force)
 }
 
-// WritePHPDockerConfig regenerates only the Dockerfile and docker-compose.yml for a PHP
-// site, always overwriting. Use this after changing PHP version or extensions via
-// "srv site runtime". User-editable files (php.ini, nginx.conf) are left untouched.
+// ensurePoolForSite resolves the FPM pool fingerprint for this site, writes
+// (or refreshes) the pool's compose file with every PHP site that shares the
+// fingerprint, starts the pool container, and returns the pool container name.
+// Callers must invoke this before generating the site's nginx.conf because
+// fastcgi_pass needs the pool container name.
+func ensurePoolForSite(cfg *config.Config, siteName string, meta SiteMetadata, info *PHPSiteInfo) (string, error) {
+	exts := nonBuiltinExtensions(info.Extensions)
+	fp := pool.Fingerprint(info.PHPVersion, exts)
+
+	// Collect every other PHP site that belongs to the same pool.
+	members, err := collectPoolMembers(fp, siteName, meta.ProjectPath)
+	if err != nil {
+		return "", err
+	}
+
+	spec := pool.Spec{
+		PHPVersion: info.PHPVersion,
+		Extensions: exts,
+		Members:    members,
+	}
+
+	dockerfile := generatePHPDockerfile(info)
+	phpIni := generatePHPIni()
+	fpmConf := generatePHPFPMConf(meta.IsLocal)
+
+	if err := pool.WriteFiles(cfg, spec, dockerfile, phpIni, fpmConf); err != nil {
+		return "", err
+	}
+	if err := docker.ComposeUp(pool.Dir(cfg, fp)); err != nil {
+		return "", fmt.Errorf("start FPM pool: %w", err)
+	}
+	return pool.ContainerName(fp), nil
+}
+
+// collectPoolMembers builds the full member list for a pool: this site plus
+// every other PHP site whose metadata yields the same fingerprint.
+func collectPoolMembers(fp, siteName, projectPath string) ([]pool.Member, error) {
+	members := []pool.Member{{SiteName: siteName, ProjectPath: projectPath}}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(cfg.SitesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return members, nil
+		}
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == siteName || strings.HasPrefix(entry.Name(), "_") {
+			continue
+		}
+		other, err := ReadSiteMetadata(entry.Name())
+		if err != nil || other == nil || other.Type != SiteTypePHP {
+			continue
+		}
+		// Reconstruct the fingerprint from the other site's metadata. Reuse
+		// the same hash function so it matches even after extensions reorder.
+		otherInfo := &PHPSiteInfo{
+			PHPVersion: other.PHPVersion,
+			Extensions: other.PHPExtensions,
+		}
+		otherFP := pool.Fingerprint(otherInfo.PHPVersion, nonBuiltinExtensions(otherInfo.Extensions))
+		if otherFP != fp {
+			continue
+		}
+		members = append(members, pool.Member{SiteName: entry.Name(), ProjectPath: other.ProjectPath})
+	}
+	return members, nil
+}
+
+// RemoveSiteFromPool removes a PHP site from its FPM pool and regenerates the
+// pool's compose file. If the pool's member set becomes empty, the pool's
+// containers are torn down and its directory is deleted. Called from the
+// `srv remove` flow before site metadata is wiped.
+func RemoveSiteFromPool(siteName string) error {
+	meta, err := ReadSiteMetadata(siteName)
+	if err != nil || meta == nil || meta.Type != SiteTypePHP {
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	info := &PHPSiteInfo{PHPVersion: meta.PHPVersion, Extensions: meta.PHPExtensions}
+	exts := nonBuiltinExtensions(info.Extensions)
+	fp := pool.Fingerprint(info.PHPVersion, exts)
+
+	// Members minus this site.
+	members, err := collectPoolMembers(fp, siteName, meta.ProjectPath)
+	if err != nil {
+		return err
+	}
+	filtered := members[:0]
+	for _, m := range members {
+		if m.SiteName == siteName {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+
+	// Empty pool → tear it down completely.
+	if len(filtered) == 0 {
+		_ = docker.ComposeDown(pool.Dir(cfg, fp))
+		return pool.Remove(cfg, fp)
+	}
+
+	// Otherwise rewrite the pool compose without this site and recreate.
+	spec := pool.Spec{
+		PHPVersion: info.PHPVersion,
+		Extensions: exts,
+		Members:    filtered,
+	}
+	if err := pool.WriteFiles(cfg, spec, generatePHPDockerfile(info), generatePHPIni(), generatePHPFPMConf(meta.IsLocal)); err != nil {
+		return err
+	}
+	return docker.ComposeUp(pool.Dir(cfg, fp))
+}
+
+// IsBuiltinPHPExtension reports whether ext ships pre-compiled into the base
+// php:*-fpm-alpine image (and therefore does not contribute to the pool
+// fingerprint).
+func IsBuiltinPHPExtension(ext string) bool {
+	return builtinExtensions[ext]
+}
+
+// nonBuiltinExtensions returns the input list filtered to extensions that
+// install-php-extensions actually needs to install (built-ins are part of
+// the base image).
+func nonBuiltinExtensions(exts []string) []string {
+	out := make([]string, 0, len(exts))
+	for _, e := range exts {
+		if !builtinExtensions[e] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// WritePHPDockerConfig regenerates the pool's Dockerfile + the site's
+// docker-compose.yml after a PHP version or extension change. User-editable
+// files (php.ini, nginx.conf) are left untouched.
 func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	siteDir := SiteConfigDir(cfg, name)
-	phpIniPath := filepath.Join(siteDir, constants.PHPIniFile)
-	fpmConfPath := filepath.Join(siteDir, constants.PHPFPMConfFile)
 	nginxConfPath := SiteNginxConfPath(cfg, name)
 
-	// Regenerate Dockerfile (always force — this is what changed).
-	dockerfile := generatePHPDockerfile(info)
-	dockerfilePath := filepath.Join(siteDir, constants.PHPDockerfileFile)
-	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), constants.FilePermDefault); err != nil {
-		return fmt.Errorf("failed to write Dockerfile: %w", err)
+	// Refresh the pool (the Dockerfile now lives there) for the new fingerprint.
+	fpmContainer, err := ensurePoolForSite(cfg, name, meta, info)
+	if err != nil {
+		return fmt.Errorf("ensure FPM pool: %w", err)
 	}
 
-	// Regenerate FPM pool override so pm=ondemand toggle tracks IsLocal.
-	if err := os.WriteFile(fpmConfPath, []byte(generatePHPFPMConf(meta.IsLocal)), constants.FilePermDefault); err != nil {
-		return fmt.Errorf("failed to write php-fpm.conf: %w", err)
-	}
-
-	// Regenerate docker-compose.yml. The compose file references paths on the host
-	// (siteDir, phpIniPath, nginxConfPath) that must stay consistent.
-	phpContainerName := "srv-" + name + "-php"
 	webContainerName := "srv-" + name + "-web"
-	internalNetworkName := "srv-" + name + "-internal"
 
 	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
 
+	siteMount := constants.PHPSiteDocRootRoot + "/" + name
 	composeConfig := phpComposeConfig{
-		Name:     constants.ComposeProjectName,
+		Name: constants.ComposeProjectName,
 		Services: map[string]phpServiceConfig{
-			constants.PHPFPMServiceName: {
-				Build: &phpBuildConfig{
-					Context:    siteDir,
-					Dockerfile: constants.PHPDockerfileFile,
-				},
-				Image:         PHPImageFingerprint(info),
-				PullPolicy:    "missing",
-				ContainerName: phpContainerName,
-				Volumes: []phpVolumeConfig{
-					{Type: "bind", Source: meta.ProjectPath, Target: constants.PHPDockerRootPath, Consistency: volumeConsistencyForHost()},
-					{Type: "bind", Source: phpIniPath, Target: constants.PHPIniContainerPath, ReadOnly: true},
-					{Type: "bind", Source: fpmConfPath, Target: constants.PHPFPMConfContainerPath, ReadOnly: true},
-				},
-				Networks: []string{"internal"},
-				Restart:  constants.RestartUnlessStopped,
-			},
 			constants.PHPWebServiceName: {
 				ContainerName: webContainerName,
 				Image:         constants.ImageNginxAlpine,
 				Volumes: []phpVolumeConfig{
-					{Type: "bind", Source: meta.ProjectPath, Target: constants.PHPDockerRootPath, ReadOnly: true, Consistency: volumeConsistencyForHost()},
+					{Type: "bind", Source: meta.ProjectPath, Target: siteMount, ReadOnly: true, Consistency: volumeConsistencyForHost()},
 					{Type: "bind", Source: nginxConfPath, Target: constants.NginxDefaultConfPath, ReadOnly: true},
 				},
 				Labels:      labels,
-				Networks:    []string{"internal", constants.TraefikSubdir},
+				Networks:    []string{constants.TraefikSubdir},
 				Restart:     constants.RestartUnlessStopped,
-				DependsOn:   []string{constants.PHPFPMServiceName},
 				HealthCheck: makeHealthCheck(80),
 			},
 		},
 		Networks: map[string]phpNetworkConfig{
-			"internal":              {Name: internalNetworkName},
 			constants.TraefikSubdir: {Name: meta.NetworkName, External: true},
 		},
 	}
@@ -1030,8 +1101,8 @@ func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) err
 		return fmt.Errorf("failed to marshal compose config: %w", err)
 	}
 
-	header := fmt.Sprintf("# Generated by srv - PHP site (%s)\n# Project: %s\n#\n# This file is yours to edit. Changes take effect on next restart.\n\n",
-		info.Framework, meta.ProjectPath)
+	header := fmt.Sprintf("# Generated by srv - PHP site (%s)\n# Project: %s\n#\n# FPM lives in the shared pool container %s.\n# This file is yours to edit. Changes take effect on next restart.\n\n",
+		info.Framework, meta.ProjectPath, fpmContainer)
 	content := header + string(data)
 
 	composePath := SiteComposePath(cfg, name)

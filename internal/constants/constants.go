@@ -397,7 +397,15 @@ const (
 	// after the base image's www.conf and overrides it.
 	PHPFPMConfContainerPath = "/usr/local/etc/php-fpm.d/zz-srv.conf"
 	// PHPDockerRootPath is the working directory inside PHP/nginx containers.
+	// With the shared FPM pool, each site is mounted at /var/www/<sitename>
+	// rather than the legacy single-site /var/www/html. The constant is kept
+	// for code paths that still hard-code the directory; new code uses
+	// PHPSiteDocRootRoot + "/" + <sitename>.
 	PHPDockerRootPath = "/var/www/html"
+	// PHPSiteDocRootRoot is the parent directory inside the shared FPM
+	// container under which each member site's project is mounted at its
+	// site name (e.g. /var/www/kontainer).
+	PHPSiteDocRootRoot = "/var/www"
 	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".
 	PHPVersionLatest = "latest"
 )

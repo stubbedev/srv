@@ -618,11 +618,11 @@ func TestGeneratePHPNginxConf_ContainsKeyDirectives(t *testing.T) {
 		Framework:    constants.PHPFrameworkGeneric,
 		DocumentRoot: "",
 	}
-	conf := generatePHPNginxConf(info, nil)
+	conf := generatePHPNginxConf(info, nil, "site", "srv-fpm-test")
 
 	checks := []string{
 		"listen 80",
-		"fastcgi_pass php:9000",
+		"fastcgi_pass srv-fpm-test:9000",
 		"fastcgi_param SCRIPT_FILENAME",
 		"include fastcgi_params",
 		`\.(php|phtml)$`,
@@ -640,10 +640,10 @@ func TestGeneratePHPNginxConf_LaravelDocRoot(t *testing.T) {
 		Framework:    constants.PHPFrameworkLaravel,
 		DocumentRoot: "public",
 	}
-	conf := generatePHPNginxConf(info, nil)
+	conf := generatePHPNginxConf(info, nil, "site", "srv-fpm-test")
 
-	if !strings.Contains(conf, "/var/www/html/public") {
-		t.Errorf("expected root to include /public, got:\n%s", conf)
+	if !strings.Contains(conf, "/var/www/site/public") {
+		t.Errorf("expected root to include /var/www/site/public, got:\n%s", conf)
 	}
 	if !strings.Contains(conf, ".env") {
 		t.Errorf("expected .env deny block in Laravel config, got:\n%s", conf)
@@ -655,7 +655,7 @@ func TestGeneratePHPNginxConf_SymfonyOldDocRoot(t *testing.T) {
 		Framework:    constants.PHPFrameworkSymfony,
 		DocumentRoot: "web",
 	}
-	conf := generatePHPNginxConf(info, nil)
+	conf := generatePHPNginxConf(info, nil, "site", "srv-fpm-test")
 
 	if !strings.Contains(conf, "app.php") {
 		t.Errorf("expected app.php entry point for old Symfony, got:\n%s", conf)
@@ -667,7 +667,7 @@ func TestGeneratePHPNginxConf_WordPressArgs(t *testing.T) {
 		Framework:    constants.PHPFrameworkWordPress,
 		DocumentRoot: "",
 	}
-	conf := generatePHPNginxConf(info, nil)
+	conf := generatePHPNginxConf(info, nil, "site", "srv-fpm-test")
 
 	if !strings.Contains(conf, "$args") {
 		t.Errorf("expected $args in WordPress try_files, got:\n%s", conf)

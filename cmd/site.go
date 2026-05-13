@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/pool"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
@@ -1020,9 +1021,10 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 	if setup.isPHP {
 		vendorDir := setup.sitePath + "/vendor"
 		if _, err := os.Stat(vendorDir); os.IsNotExist(err) {
-			containerName := "srv-" + setup.siteName + "-php"
+			containerName := phpFPMContainerForSite(setup.siteName)
 			ui.Info("Running composer install...")
-			if err := docker.ExecNonInteractive(containerName, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
+			workDir := "/var/www/" + setup.siteName
+			if err := docker.ExecNonInteractiveAt(containerName, workDir, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
 				ui.Warn("composer install failed: %v", err)
 				ui.Dim("Run manually: srv site shell %s", setup.siteName)
 			}
@@ -1110,6 +1112,14 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		// Remove per-site extra-routes file if present.
 		if err := traefik.RemoveRoutesConfig(cfg, siteName); err != nil {
 			ui.Warn("Could not remove routes config: %v", err)
+		}
+
+		// Drop this site from its shared FPM pool. Tears the pool down if no
+		// members remain.
+		if s.Type == site.SiteTypePHP {
+			if err := site.RemoveSiteFromPool(siteName); err != nil {
+				ui.Warn("Could not refresh FPM pool: %v", err)
+			}
 		}
 	}
 
@@ -2410,7 +2420,14 @@ func runShell(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Dim("Connecting to container: %s", containerName)
-	c := exec.Command("docker", "exec", "-it", containerName, "sh") //nolint:gosec
+	execArgs := []string{"exec", "-it"}
+	// For PHP sites the shell lands in the shared pool container; set the
+	// working directory to this site's mount so paths feel per-site.
+	if s.Type == site.SiteTypePHP {
+		execArgs = append(execArgs, "-w", "/var/www/"+siteName)
+	}
+	execArgs = append(execArgs, containerName, "sh")
+	c := exec.Command("docker", execArgs...) //nolint:gosec
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -2425,11 +2442,12 @@ func runShell(cmd *cobra.Command, args []string) error {
 }
 
 // siteShellContainer returns the container name to shell into for a given site.
+// For PHP sites this is the shared pool container; the caller is expected to
+// set the working directory to /var/www/<sitename> when execing.
 func siteShellContainer(s site.Site) string {
 	switch s.Type {
 	case site.SiteTypePHP:
-		// Default to php-fpm container for PHP sites.
-		return "srv-" + s.Name + "-php"
+		return phpFPMContainerForSite(s.Name)
 	case site.SiteTypeNode:
 		return "srv-" + s.Name + "-node"
 	case site.SiteTypeRuby, site.SiteTypePython, site.SiteTypeDockerfile:
@@ -2438,6 +2456,23 @@ func siteShellContainer(s site.Site) string {
 		// Compose sites: use the stored service name (container name).
 		return s.ServiceName
 	}
+}
+
+// phpFPMContainerForSite resolves a PHP site to its shared FPM container name
+// by reading the site's metadata and computing the pool fingerprint. Falls
+// back to the legacy per-site container name if metadata is missing.
+func phpFPMContainerForSite(siteName string) string {
+	meta, err := site.ReadSiteMetadata(siteName)
+	if err != nil || meta == nil {
+		return "srv-" + siteName + "-php"
+	}
+	exts := make([]string, 0, len(meta.PHPExtensions))
+	for _, e := range meta.PHPExtensions {
+		if !site.IsBuiltinPHPExtension(e) {
+			exts = append(exts, e)
+		}
+	}
+	return "srv-fpm-" + pool.Fingerprint(meta.PHPVersion, exts)
 }
 
 // =============================================================================
