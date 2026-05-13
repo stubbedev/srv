@@ -72,12 +72,13 @@ func parseDockerfileExposePort(f io.Reader) int {
 // =============================================================================
 
 type dockerfileServiceConfig struct {
-	ContainerName string            `yaml:"container_name"`
-	Build         dockerfileBuild   `yaml:"build"`
-	WorkingDir    string            `yaml:"working_dir,omitempty"`
-	Labels        map[string]string `yaml:"labels,omitempty"`
-	Networks      []string          `yaml:"networks"`
-	Restart       string            `yaml:"restart"`
+	ContainerName string             `yaml:"container_name"`
+	Build         dockerfileBuild    `yaml:"build"`
+	WorkingDir    string             `yaml:"working_dir,omitempty"`
+	Labels        map[string]string  `yaml:"labels,omitempty"`
+	Networks      []string           `yaml:"networks"`
+	Restart       string             `yaml:"restart"`
+	HealthCheck   *staticHealthCheck `yaml:"healthcheck,omitempty"`
 }
 
 type dockerfileBuild struct {
@@ -117,9 +118,10 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 					Context:    meta.ProjectPath,
 					Dockerfile: constants.DockerfileFile,
 				},
-				Labels:   labels,
-				Networks: []string{constants.TraefikSubdir},
-				Restart:  constants.RestartUnlessStopped,
+				Labels:      labels,
+				Networks:    []string{constants.TraefikSubdir},
+				Restart:     constants.RestartUnlessStopped,
+				HealthCheck: makeStaticHealthCheck(info.Port),
 			},
 		},
 		Networks: map[string]nodeNetworkConfig{

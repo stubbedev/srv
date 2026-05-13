@@ -152,6 +152,7 @@ type rubyServiceConfig struct {
 	Labels        map[string]string  `yaml:"labels,omitempty"`
 	Networks      []string           `yaml:"networks"`
 	Restart       string             `yaml:"restart"`
+	HealthCheck   *staticHealthCheck `yaml:"healthcheck,omitempty"`
 }
 
 type rubyComposeConfig struct {
@@ -187,9 +188,10 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 				WorkingDir:    constants.RubyDockerWorkDir,
 				Volumes: []nodeVolumeConfig{
 					{
-						Type:   "bind",
-						Source: meta.ProjectPath,
-						Target: constants.RubyDockerWorkDir,
+						Type:        "bind",
+						Source:      meta.ProjectPath,
+						Target:      constants.RubyDockerWorkDir,
+						Consistency: volumeConsistencyForHost(),
 					},
 				},
 				Environment: map[string]string{
@@ -197,9 +199,10 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 					"RACK_ENV":  "development",
 					"RAILS_ENV": "development",
 				},
-				Labels:   labels,
-				Networks: []string{constants.TraefikSubdir},
-				Restart:  constants.RestartUnlessStopped,
+				Labels:      labels,
+				Networks:    []string{constants.TraefikSubdir},
+				Restart:     constants.RestartUnlessStopped,
+				HealthCheck: makeStaticHealthCheck(info.Port),
 			},
 		},
 		Networks: map[string]nodeNetworkConfig{

@@ -383,6 +383,12 @@ const (
 	PHPIniFile = "php.ini"
 	// PHPIniContainerPath is the path inside the PHP container where php.ini is mounted.
 	PHPIniContainerPath = "/usr/local/etc/php/conf.d/srv-overrides.ini"
+	// PHPFPMConfFile is the FPM pool config filename generated for PHP sites.
+	PHPFPMConfFile = "php-fpm.conf"
+	// PHPFPMConfContainerPath is the path inside the PHP container where the
+	// FPM pool override is mounted. Filename starts with "zz-" so it sorts
+	// after the base image's www.conf and overrides it.
+	PHPFPMConfContainerPath = "/usr/local/etc/php-fpm.d/zz-srv.conf"
 	// PHPDockerRootPath is the working directory inside PHP/nginx containers.
 	PHPDockerRootPath = "/var/www/html"
 	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".

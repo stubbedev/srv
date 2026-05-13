@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1062,12 +1063,23 @@ func HasSiteMetadata(name string) bool {
 // Static Site Configuration Types
 // =============================================================================
 
+// volumeConsistencyForHost returns "cached" on macOS so bind mounts trade
+// strict host→container consistency for far better I/O throughput. Empty
+// elsewhere (Docker ignores the field outside of Docker Desktop).
+func volumeConsistencyForHost() string {
+	if runtime.GOOS == "darwin" {
+		return "cached"
+	}
+	return ""
+}
+
 // staticVolumeConfig represents a volume in docker-compose.
 type staticVolumeConfig struct {
-	Type     string `yaml:"type"`
-	Source   string `yaml:"source"`
-	Target   string `yaml:"target"`
-	ReadOnly bool   `yaml:"read_only"`
+	Type        string `yaml:"type"`
+	Source      string `yaml:"source"`
+	Target      string `yaml:"target"`
+	ReadOnly    bool   `yaml:"read_only"`
+	Consistency string `yaml:"consistency,omitempty"`
 }
 
 // staticServiceConfig represents a service in docker-compose.
@@ -1078,6 +1090,29 @@ type staticServiceConfig struct {
 	Labels        map[string]string    `yaml:"labels"`
 	Networks      []string             `yaml:"networks"`
 	Restart       string               `yaml:"restart"`
+	HealthCheck   *staticHealthCheck   `yaml:"healthcheck,omitempty"`
+}
+
+// staticHealthCheck mirrors the compose healthcheck shape. Kept separate from
+// phpHealthCheck so static sites don't pull in the FPM-specific helper.
+type staticHealthCheck struct {
+	Test        []string `yaml:"test"`
+	Interval    string   `yaml:"interval,omitempty"`
+	Timeout     string   `yaml:"timeout,omitempty"`
+	StartPeriod string   `yaml:"start_period,omitempty"`
+	Retries     int      `yaml:"retries,omitempty"`
+}
+
+// makeStaticHealthCheck builds a TCP-probe healthcheck for the given port.
+// busybox `nc` ships in every alpine image srv currently uses.
+func makeStaticHealthCheck(port int) *staticHealthCheck {
+	return &staticHealthCheck{
+		Test:        []string{"CMD-SHELL", fmt.Sprintf("nc -z 127.0.0.1 %d || exit 1", port)},
+		Interval:    "30s",
+		Timeout:     "3s",
+		StartPeriod: "5s",
+		Retries:     3,
+	}
 }
 
 // staticNetworkConfig represents a network in docker-compose.
@@ -1137,10 +1172,11 @@ func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, network
 				Image:         constants.ImageNginxAlpine,
 				Volumes: []staticVolumeConfig{
 					{
-						Type:     "bind",
-						Source:   projectPath,
-						Target:   constants.NginxHTMLPath,
-						ReadOnly: true,
+						Type:        "bind",
+						Source:      projectPath,
+						Target:      constants.NginxHTMLPath,
+						ReadOnly:    true,
+						Consistency: volumeConsistencyForHost(),
 					},
 					{
 						Type:     "bind",
@@ -1149,9 +1185,10 @@ func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, network
 						ReadOnly: true,
 					},
 				},
-				Labels:   labels,
-				Networks: []string{constants.TraefikSubdir},
-				Restart:  constants.RestartUnlessStopped,
+				Labels:      labels,
+				Networks:    []string{constants.TraefikSubdir},
+				Restart:     constants.RestartUnlessStopped,
+				HealthCheck: makeStaticHealthCheck(80),
 			},
 		},
 		Networks: map[string]staticNetworkConfig{

@@ -155,6 +155,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	steps.Done("Traefik started")
 
+	// Pre-warm dnsmasq with every domain that's already registered so site
+	// hostnames resolve immediately after `srv install` instead of waiting
+	// for the first `srv add` to trigger a config reload.
+	if err := traefik.UpdateDnsmasqConfig(); err != nil {
+		ui.Dim("DNS pre-warm skipped: %v", err)
+	}
+
 	// Step 4: Set up dashboard HTTPS proxy (traefik.local)
 	steps.Next("Setting up dashboard proxy (%s)", traefik.DashboardLocalURL())
 	if err := traefik.CheckMkcert(); err != nil {

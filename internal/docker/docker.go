@@ -161,8 +161,10 @@ func ComposeUpBuildWithProfile(dir, profile string) error {
 }
 
 // ComposeDown runs docker compose down in the specified directory.
+// Passes --remove-orphans so containers from previous compose versions get
+// cleaned up too.
 func ComposeDown(dir string) error {
-	return Compose(dir, "down")
+	return Compose(dir, "down", "--remove-orphans")
 }
 
 // ComposeStop runs docker compose stop in the specified directory.

@@ -134,6 +134,7 @@ type pythonServiceConfig struct {
 	Labels        map[string]string  `yaml:"labels,omitempty"`
 	Networks      []string           `yaml:"networks"`
 	Restart       string             `yaml:"restart"`
+	HealthCheck   *staticHealthCheck `yaml:"healthcheck,omitempty"`
 }
 
 type pythonComposeConfig struct {
@@ -180,15 +181,17 @@ func WritePythonSiteConfig(name string, meta SiteMetadata, info *PythonSiteInfo,
 				WorkingDir:    constants.PythonDockerWorkDir,
 				Volumes: []nodeVolumeConfig{
 					{
-						Type:   "bind",
-						Source: meta.ProjectPath,
-						Target: constants.PythonDockerWorkDir,
+						Type:        "bind",
+						Source:      meta.ProjectPath,
+						Target:      constants.PythonDockerWorkDir,
+						Consistency: volumeConsistencyForHost(),
 					},
 				},
 				Environment: env,
 				Labels:      labels,
 				Networks:    []string{constants.TraefikSubdir},
 				Restart:     constants.RestartUnlessStopped,
+				HealthCheck: makeStaticHealthCheck(info.Port),
 			},
 		},
 		Networks: map[string]nodeNetworkConfig{

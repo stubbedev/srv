@@ -365,12 +365,14 @@ type nodeServiceConfig struct {
 	Labels        map[string]string  `yaml:"labels,omitempty"`
 	Networks      []string           `yaml:"networks"`
 	Restart       string             `yaml:"restart"`
+	HealthCheck   *staticHealthCheck `yaml:"healthcheck,omitempty"`
 }
 
 type nodeVolumeConfig struct {
-	Type   string `yaml:"type"`
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
+	Type        string `yaml:"type"`
+	Source      string `yaml:"source"`
+	Target      string `yaml:"target"`
+	Consistency string `yaml:"consistency,omitempty"`
 }
 
 type nodeNetworkConfig struct {
@@ -423,15 +425,17 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 				WorkingDir:    constants.NodeDockerWorkDir,
 				Volumes: []nodeVolumeConfig{
 					{
-						Type:   "bind",
-						Source: meta.ProjectPath,
-						Target: constants.NodeDockerWorkDir,
+						Type:        "bind",
+						Source:      meta.ProjectPath,
+						Target:      constants.NodeDockerWorkDir,
+						Consistency: volumeConsistencyForHost(),
 					},
 				},
 				Environment: env,
 				Labels:      labels,
 				Networks:    []string{constants.TraefikSubdir},
 				Restart:     constants.RestartUnlessStopped,
+				HealthCheck: makeStaticHealthCheck(info.Port),
 			},
 		},
 		Networks: map[string]nodeNetworkConfig{
