@@ -85,6 +85,20 @@ func GetSiteNames() []string {
 	return names
 }
 
+// GetSiteRouteIDs returns the route IDs configured for a site. Used by shell
+// completion for `srv route remove`.
+func GetSiteRouteIDs(name string) []string {
+	meta, err := site.ReadSiteMetadata(name)
+	if err != nil || meta == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(meta.Routes))
+	for _, r := range meta.Routes {
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
 // GetSiteAliases returns the alias hostnames (Domains[1:]) for a site, used to
 // drive shell completion for `srv alias remove`.
 func GetSiteAliases(name string) []string {

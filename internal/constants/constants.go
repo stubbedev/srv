@@ -193,6 +193,8 @@ const (
 	SiteConfigPrefix = "site-"
 	// ProxyConfigPrefix is the prefix for proxy configuration files.
 	ProxyConfigPrefix = "proxy-"
+	// RoutesConfigPrefix is the prefix for per-site extra route configuration files.
+	RoutesConfigPrefix = "routes-"
 	// TraefikDashboardDomain is the local domain used to expose the Traefik dashboard over HTTPS.
 	TraefikDashboardDomain = "traefik.local"
 	// TraefikDashboardProxyName is the proxy name used for the dashboard proxy.

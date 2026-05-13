@@ -88,6 +88,13 @@ func Reload(name string) (*ReloadResult, error) {
 		}
 	}
 
+	// Always refresh the per-site extra-routes Traefik file (or remove it
+	// when meta has no routes). Picked up by Traefik's file provider with
+	// no container restart.
+	if err := traefik.WriteRoutesConfig(cfg, buildRouteSet(name, meta)); err != nil {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("routes: %v", err))
+	}
+
 	// Local SSL + DNS: idempotent; re-issues the cert only if the SAN set
 	// would change (handled inside EnsureLocalCert).
 	if meta.IsLocal && len(meta.Domains) > 0 {
@@ -179,3 +186,38 @@ func ValidateMetadata(meta *SiteMetadata) error {
 }
 
 var routeIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// buildRouteSet compiles metadata.Routes into the Traefik-facing RouteSpec
+// list. Validation already happened in ValidateMetadata so errors here are
+// programmer bugs and surface via WriteRoutesConfig.
+func buildRouteSet(siteName string, meta *SiteMetadata) traefik.SiteRouteSet {
+	set := traefik.SiteRouteSet{
+		SiteName: siteName,
+		Domains:  meta.Domains,
+		Wildcard: meta.Wildcard,
+		IsLocal:  meta.IsLocal,
+	}
+	for _, r := range meta.Routes {
+		preserve := true
+		if r.PreserveHost != nil {
+			preserve = *r.PreserveHost
+		}
+		upstreamURL, err := traefik.ResolveUpstreamURL(r.Upstream.Kind, r.Upstream.Container, r.Upstream.URL, r.Upstream.Port)
+		if err != nil {
+			// Skip malformed entries; ValidateMetadata covers the common cases
+			// and structural errors surface there. Silent skip avoids tearing
+			// down good routes when one entry is bad.
+			continue
+		}
+		set.Routes = append(set.Routes, traefik.RouteSpec{
+			ID:           r.ID,
+			Path:         r.Path,
+			PathRegex:    r.PathRegex,
+			Rewrite:      r.Rewrite,
+			UpstreamURL:  upstreamURL,
+			PreserveHost: preserve,
+			Priority:     r.Priority,
+		})
+	}
+	return set
+}

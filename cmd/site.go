@@ -1106,6 +1106,11 @@ func runRemove(cmd *cobra.Command, args []string) error {
 				ui.Dim("Removed traefik config for %s", siteName)
 			}
 		}
+
+		// Remove per-site extra-routes file if present.
+		if err := traefik.RemoveRoutesConfig(cfg, siteName); err != nil {
+			ui.Warn("Could not remove routes config: %v", err)
+		}
 	}
 
 	// Remove SSL certificate and DNS for local domains

@@ -1,0 +1,236 @@
+// Package traefik — routes.go emits the per-site "extra routes" Traefik file
+// provider config used by `srv route`. Routes attach additional routers to the
+// same hostname(s) (e.g. /app → WebSocket on :6001, or /videos/... regex
+// rewritten and proxied to an S3-gateway upstream).
+package traefik
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/constants"
+)
+
+// RouteSpec is the Traefik-agnostic description of a single extra router.
+// Mirrors site.Route but lives in the traefik package so the emitter does not
+// depend on internal/site (and vice versa).
+type RouteSpec struct {
+	ID               string
+	Path             string // PathPrefix; empty if PathRegex is set
+	PathRegex        string // PathRegexp; empty if Path is set
+	Rewrite          string // optional, requires PathRegex
+	UpstreamURL      string // pre-resolved upstream (e.g. http://host.docker.internal:6001)
+	PreserveHost     bool
+	Priority         int
+}
+
+// SiteRouteSet is the set of routes belonging to one site, used to render a
+// single per-site Traefik dynamic config file.
+type SiteRouteSet struct {
+	SiteName string
+	Domains  []string
+	Wildcard bool
+	IsLocal  bool
+	Routes   []RouteSpec
+}
+
+// WriteRoutesConfig renders the per-site routes-<name>.yml file. If the set
+// has zero routes, the file is removed instead.
+func WriteRoutesConfig(cfg *config.Config, set SiteRouteSet) error {
+	path := routesConfigPath(cfg, set.SiteName)
+	if len(set.Routes) == 0 {
+		return RemoveRoutesConfig(cfg, set.SiteName)
+	}
+
+	type Server struct {
+		URL string `yaml:"url"`
+	}
+	type LoadBalancer struct {
+		Servers        []Server `yaml:"servers"`
+		PassHostHeader *bool    `yaml:"passHostHeader,omitempty"`
+	}
+	type Service struct {
+		LoadBalancer LoadBalancer `yaml:"loadBalancer"`
+	}
+	type TLSConfig struct {
+		CertResolver string `yaml:"certResolver,omitempty"`
+	}
+	type Router struct {
+		Rule        string     `yaml:"rule"`
+		EntryPoints []string   `yaml:"entryPoints"`
+		Service     string     `yaml:"service"`
+		Middlewares []string   `yaml:"middlewares,omitempty"`
+		Priority    int        `yaml:"priority,omitempty"`
+		TLS         *TLSConfig `yaml:"tls,omitempty"`
+	}
+	type ReplacePathRegex struct {
+		Regex       string `yaml:"regex"`
+		Replacement string `yaml:"replacement"`
+	}
+	type Middleware struct {
+		ReplacePathRegex *ReplacePathRegex `yaml:"replacePathRegex,omitempty"`
+	}
+	type HTTP struct {
+		Routers     map[string]Router     `yaml:"routers"`
+		Services    map[string]Service    `yaml:"services"`
+		Middlewares map[string]Middleware `yaml:"middlewares,omitempty"`
+	}
+	type Config struct {
+		HTTP HTTP `yaml:"http"`
+	}
+
+	routers := make(map[string]Router, len(set.Routes))
+	services := make(map[string]Service, len(set.Routes))
+	middlewares := make(map[string]Middleware)
+	hostRule := BuildHostRule(set.Domains, set.Wildcard)
+	seen := make(map[string]bool, len(set.Routes))
+
+	for _, r := range set.Routes {
+		if r.ID == "" {
+			return fmt.Errorf("route is missing id")
+		}
+		if seen[r.ID] {
+			return fmt.Errorf("duplicate route id %q", r.ID)
+		}
+		seen[r.ID] = true
+
+		baseRouter := fmt.Sprintf("%s-%s", set.SiteName, r.ID)
+		serviceName := baseRouter
+
+		matcher, err := routeMatcher(r)
+		if err != nil {
+			return fmt.Errorf("route %q: %w", r.ID, err)
+		}
+		rule := fmt.Sprintf("(%s) && (%s)", hostRule, matcher)
+
+		// Priority defaults: a path-prefix or regex match must outrank the
+		// site's catch-all router (priority 0). Use 100 by default + length
+		// heuristic so longer, more-specific paths win.
+		priority := r.Priority
+		if priority == 0 {
+			priority = 100 + len(r.Path) + len(r.PathRegex)
+		}
+
+		router := Router{
+			Rule:        rule,
+			EntryPoints: []string{constants.EntryPointWebsecure},
+			Service:     serviceName,
+			Priority:    priority,
+		}
+		if set.IsLocal {
+			router.TLS = &TLSConfig{}
+		} else {
+			router.TLS = &TLSConfig{CertResolver: constants.CertResolverLetsEncrypt}
+		}
+
+		if r.Rewrite != "" {
+			mwName := baseRouter + "-rewrite"
+			middlewares[mwName] = Middleware{
+				ReplacePathRegex: &ReplacePathRegex{
+					Regex:       r.PathRegex,
+					Replacement: r.Rewrite,
+				},
+			}
+			router.Middlewares = append(router.Middlewares, mwName)
+		}
+
+		routers[baseRouter] = router
+
+		preserve := r.PreserveHost
+		var preservePtr *bool
+		if !preserve {
+			f := false
+			preservePtr = &f
+		}
+		services[serviceName] = Service{
+			LoadBalancer: LoadBalancer{
+				Servers:        []Server{{URL: r.UpstreamURL}},
+				PassHostHeader: preservePtr,
+			},
+		}
+	}
+
+	out := Config{HTTP: HTTP{
+		Routers:     routers,
+		Services:    services,
+		Middlewares: middlewares,
+	}}
+	data, err := yaml.Marshal(&out)
+	if err != nil {
+		return fmt.Errorf("marshal routes config: %w", err)
+	}
+	header := fmt.Sprintf("# Extra routes for %s - generated by srv\n", set.SiteName)
+	return os.WriteFile(path, []byte(header+string(data)), constants.FilePermDefault)
+}
+
+// RemoveRoutesConfig deletes the per-site extra-routes file if it exists.
+func RemoveRoutesConfig(cfg *config.Config, name string) error {
+	path := routesConfigPath(cfg, name)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove routes config: %w", err)
+	}
+	return nil
+}
+
+// HasRoutesConfig reports whether a routes-<name>.yml file is present.
+func HasRoutesConfig(cfg *config.Config, name string) bool {
+	_, err := os.Stat(routesConfigPath(cfg, name))
+	return err == nil
+}
+
+func routesConfigPath(cfg *config.Config, name string) string {
+	return filepath.Join(cfg.TraefikConfDir(), constants.RoutesConfigPrefix+name+constants.ExtYAML)
+}
+
+// routeMatcher returns the Traefik matcher fragment for r (without the Host
+// guard). The caller wraps it in `(host) && (matcher)` to produce the full rule.
+func routeMatcher(r RouteSpec) (string, error) {
+	switch {
+	case r.Path != "" && r.PathRegex != "":
+		return "", fmt.Errorf("set exactly one of path / path_regex")
+	case r.Path == "" && r.PathRegex == "":
+		return "", fmt.Errorf("missing path / path_regex")
+	case r.PathRegex != "":
+		if _, err := regexp.Compile(r.PathRegex); err != nil {
+			return "", fmt.Errorf("invalid path_regex: %w", err)
+		}
+		return fmt.Sprintf("PathRegexp(`%s`)", r.PathRegex), nil
+	default:
+		return fmt.Sprintf("PathPrefix(`%s`)", r.Path), nil
+	}
+}
+
+// ResolveUpstreamURL converts an upstream description (kind + port/container/url)
+// into the URL string Traefik expects. host.docker.internal is used for the
+// localhost kind so that the request hits the host machine from within the
+// Traefik container (or directly via host networking on Linux).
+func ResolveUpstreamURL(kind, container, urlStr string, port int) (string, error) {
+	switch kind {
+	case "localhost":
+		if port <= 0 {
+			return "", fmt.Errorf("upstream kind=localhost requires a port")
+		}
+		return fmt.Sprintf("http://%s:%d", constants.DockerHostInternal, port), nil
+	case "container":
+		if container == "" || port <= 0 {
+			return "", fmt.Errorf("upstream kind=container requires container and port")
+		}
+		return fmt.Sprintf("http://%s:%d", container, port), nil
+	case "url":
+		if urlStr == "" {
+			return "", fmt.Errorf("upstream kind=url requires url")
+		}
+		if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+			return "", fmt.Errorf("upstream url must start with http:// or https://")
+		}
+		return urlStr, nil
+	default:
+		return "", fmt.Errorf("unknown upstream kind %q", kind)
+	}
+}
