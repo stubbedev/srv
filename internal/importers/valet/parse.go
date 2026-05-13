@@ -4,12 +4,34 @@
 package valet
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// Config mirrors the subset of valet's config.json that the importer uses.
+type Config struct {
+	Domain string   `json:"domain"`
+	Paths  []string `json:"paths"`
+	Port   string   `json:"port"`
+}
+
+// ReadConfig reads valet's config.json from the given valet dir; returns a
+// zero-value Config if the file is absent or unreadable.
+func ReadConfig(valetDir string) Config {
+	b, err := os.ReadFile(filepath.Join(valetDir, "config.json"))
+	if err != nil {
+		return Config{}
+	}
+	var c Config
+	if err := json.Unmarshal(b, &c); err != nil {
+		return Config{}
+	}
+	return c
+}
 
 // Site is the imported description of one Valet nginx file.
 type Site struct {
@@ -42,7 +64,12 @@ type Route struct {
 // ParseDir walks the supplied Valet Nginx directory (typically
 // ~/.valet/Nginx) and returns one Site per recognised config file.
 // Files prefixed with `_` and `.keep` markers are skipped.
-func ParseDir(nginxDir, sitesDir string) ([]*Site, error) {
+//
+// parkedPaths and sitesDir together drive project-path resolution: for each
+// host, the resolver first tries every hyphen-split candidate against the
+// Sites/ symlink table, then falls back to looking the same candidates up
+// inside every parked path (valet's automatic directory-name mode).
+func ParseDir(nginxDir, sitesDir string, parkedPaths []string) ([]*Site, error) {
 	entries, err := os.ReadDir(nginxDir)
 	if err != nil {
 		return nil, err
@@ -57,7 +84,7 @@ func ParseDir(nginxDir, sitesDir string) ([]*Site, error) {
 			continue
 		}
 		path := filepath.Join(nginxDir, name)
-		site, perr := ParseFile(path, sitesDir)
+		site, perr := ParseFile(path, sitesDir, parkedPaths)
 		if perr != nil {
 			site = &Site{File: path, UnknownNotes: []string{perr.Error()}}
 		}
@@ -67,7 +94,7 @@ func ParseDir(nginxDir, sitesDir string) ([]*Site, error) {
 }
 
 // ParseFile parses a single Valet Nginx config file.
-func ParseFile(path, sitesDir string) (*Site, error) {
+func ParseFile(path, sitesDir string, parkedPaths []string) (*Site, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -105,8 +132,8 @@ func ParseFile(path, sitesDir string) (*Site, error) {
 
 	parsePrimaryBlock(primary, site)
 
-	if site.IsPHP && sitesDir != "" {
-		site.ProjectPath = resolveValetProjectPath(site.Domain, sitesDir)
+	if site.IsPHP {
+		site.ProjectPath = resolveValetProjectPath(site.Domain, sitesDir, parkedPaths)
 	}
 	return site, nil
 }
@@ -242,12 +269,18 @@ func parsePrimaryBlock(block string, site *Site) {
 }
 
 // resolveValetProjectPath turns a domain like "cms-kontainer.test" into the
-// project directory under ~/.valet/Sites. Valet uses subdomain-stripping to
-// route an arbitrary `<prefix>-<name>.test` host into `Sites/<name>`, and
-// `<name>-<suffix>.test` into `Sites/<name>` as well. So we try every
-// hyphen-split substring of the first label, descending in specificity,
-// until a Sites symlink is found. Returns "" when no candidate resolves.
-func resolveValetProjectPath(domain, sitesDir string) string {
+// project directory. Valet maps hosts onto projects two ways:
+//
+//   1. Linked sites: ~/.valet/Sites/<name> is a symlink to the project dir.
+//      Subdomain stripping lets `<prefix>-<name>.test` and `<name>-<suffix>.test`
+//      resolve via Sites/<name> too.
+//   2. Parked sites: any directory under one of the paths in config.json/paths
+//      is reachable as `<dirname>.test` automatically.
+//
+// We try every hyphen-split substring of the first label against both the
+// Sites symlink table and each parked path. Returns "" when no candidate
+// resolves.
+func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) string {
 	base := domain
 	if idx := strings.Index(domain, "."); idx >= 0 {
 		base = domain[:idx]
@@ -280,10 +313,26 @@ func resolveValetProjectPath(domain, sitesDir string) string {
 		add(p)
 	}
 
-	for _, c := range candidates {
-		p := filepath.Join(sitesDir, c)
-		if resolved, err := filepath.EvalSymlinks(p); err == nil {
-			return resolved
+	// Sites/ symlink lookup wins.
+	if sitesDir != "" {
+		for _, c := range candidates {
+			p := filepath.Join(sitesDir, c)
+			if resolved, err := filepath.EvalSymlinks(p); err == nil {
+				return resolved
+			}
+		}
+	}
+	// Parked-path discovery: any directory inside a parked path that matches
+	// a candidate name is a valid project (valet's directory-name mode).
+	for _, parked := range parkedPaths {
+		if parked == "" || parked == sitesDir {
+			continue
+		}
+		for _, c := range candidates {
+			p := filepath.Join(parked, c)
+			if info, err := os.Stat(p); err == nil && info.IsDir() {
+				return p
+			}
 		}
 	}
 	return ""

@@ -47,14 +47,11 @@ func init() {
 }
 
 func runImportValet(cmd *cobra.Command, args []string) error {
-	valetDir := importFlags.valetDir
-	if valetDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		valetDir = filepath.Join(home, ".valet")
+	valetDir, err := resolveValetDir(importFlags.valetDir)
+	if err != nil {
+		return err
 	}
+	ui.Dim("Using valet dir: %s", valetDir)
 	nginxDir := filepath.Join(valetDir, "Nginx")
 	sitesDir := filepath.Join(valetDir, "Sites")
 
@@ -62,7 +59,10 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot read %s: %w", nginxDir, err)
 	}
 
-	sites, err := valet.ParseDir(nginxDir, sitesDir)
+	// Pull parked paths from config.json so directory-name mode works.
+	cfg := valet.ReadConfig(valetDir)
+
+	sites, err := valet.ParseDir(nginxDir, sitesDir, cfg.Paths)
 	if err != nil {
 		return err
 	}
@@ -96,16 +96,59 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		srvBinary = "srv"
 	}
+	executed := 0
+	skipped := 0
 	for i, step := range plan {
-		// Each step is a list of args (already shell-safe), not a /bin/sh string.
+		if len(step.args) == 0 {
+			// Commented / unresolved entry — skip during --apply.
+			skipped++
+			continue
+		}
 		cmd := exec.Command(srvBinary, step.args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("step %d (%s) failed: %w", i+1, step.line, err)
 		}
+		executed++
 	}
-	ui.Success("Imported %d entries", len(plan))
+	if skipped > 0 {
+		ui.Warn("Skipped %d entry/ies with unresolved fields (run dry-run to see them)", skipped)
+	}
+	ui.Success("Imported %d entry/ies", executed)
+	return nil
+}
+
+// resolveValetDir picks a valet config directory. Order: explicit --valet-dir,
+// then ~/.config/valet (XDG), then ~/.valet (legacy). The chosen directory
+// must exist and contain an `Nginx/` subdirectory.
+func resolveValetDir(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, validateValetDir(explicit)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	candidates := []string{
+		filepath.Join(home, ".config", "valet"),
+		filepath.Join(home, ".valet"),
+	}
+	var firstErr error
+	for _, c := range candidates {
+		if err := validateValetDir(c); err == nil {
+			return c, nil
+		} else if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return "", fmt.Errorf("could not find a valet config dir; tried %v: %w", candidates, firstErr)
+}
+
+func validateValetDir(dir string) error {
+	if _, err := os.Stat(filepath.Join(dir, "Nginx")); err != nil {
+		return fmt.Errorf("%s has no Nginx/ subdir: %w", dir, err)
+	}
 	return nil
 }
 
@@ -224,11 +267,30 @@ func planLooseSite(s *valet.Site) (importStep, bool) {
 		}
 		return importStep{line: "srv " + strings.Join(args, " "), args: args, notes: notes}, true
 	}
-	// PHP site whose project path we couldn't resolve. Print best-effort hint.
+	// PHP site whose project path we couldn't resolve. Emit a fully-formed
+	// `srv add` line with <PROJECT_PATH> placeholder so the user only has
+	// to fill the path. Still printed as a comment so --apply skips it.
 	if s.IsPHP {
+		args := []string{"add", "<PROJECT_PATH>", "--domain", s.Domain, "--local"}
+		if s.Wildcard {
+			args = append(args, "--wildcard")
+		}
+		if s.Internal {
+			args = append(args, "--internal-http")
+		}
+		for _, a := range s.Aliases {
+			args = append(args, "--alias", a)
+		}
+		addLimitFlags(&args, s)
+		notes := []string{}
+		for _, r := range s.Routes {
+			notes = append(notes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
+		}
+		notes = append(notes, fmt.Sprintf("source: %s", filepath.Base(s.File)))
 		return importStep{
-			line:  fmt.Sprintf("# PHP site %s — project path unresolved; rerun with --valet-dir or symlink ~/.valet/Sites/<name>", s.Domain),
-			notes: []string{filepath.Base(s.File)},
+			line:  "# unresolved (fill in <PROJECT_PATH>): srv " + strings.Join(args, " "),
+			args:  nil, // never executed via --apply because line is commented
+			notes: notes,
 		}, true
 	}
 	return importStep{}, false

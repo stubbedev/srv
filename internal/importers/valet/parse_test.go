@@ -54,7 +54,7 @@ server {
 		t.Fatal(err)
 	}
 
-	site, err := ParseFile(nginxPath, sitesDir)
+	site, err := ParseFile(nginxPath, sitesDir, nil)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestParseFile_ProxyWithFallback(t *testing.T) {
 	if err := os.WriteFile(nginxPath, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	site, err := ParseFile(nginxPath, "")
+	site, err := ParseFile(nginxPath, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestParseFile_RouteSplits(t *testing.T) {
 	if err := os.WriteFile(nginxPath, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	site, err := ParseFile(nginxPath, "")
+	site, err := ParseFile(nginxPath, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -201,9 +201,32 @@ func TestResolveValetProjectPath(t *testing.T) {
 		{"site-kontainer-extra.test", project},    // multi-segment, kontainer is in the middle
 	}
 	for _, tc := range tests {
-		got := resolveValetProjectPath(tc.domain, sitesDir)
+		got := resolveValetProjectPath(tc.domain, sitesDir, nil)
 		if got != tc.want {
 			t.Errorf("resolveValetProjectPath(%q) = %q, want %q", tc.domain, got, tc.want)
 		}
+	}
+}
+
+func TestResolveValetProjectPath_ParkedPath(t *testing.T) {
+	dir := t.TempDir()
+	parked := filepath.Join(dir, "parked")
+	myapp := filepath.Join(parked, "myapp")
+	if err := os.MkdirAll(myapp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveValetProjectPath("myapp.test", "", []string{parked})
+	if got != myapp {
+		t.Errorf("got %q, want %q", got, myapp)
+	}
+	// Subdomain stripping for parked mode too.
+	got = resolveValetProjectPath("api-myapp.test", "", []string{parked})
+	if got != myapp {
+		t.Errorf("strip: got %q, want %q", got, myapp)
+	}
+	// Unknown host returns "".
+	got = resolveValetProjectPath("nothing.test", "", []string{parked})
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
 	}
 }
