@@ -161,6 +161,7 @@ func WritePythonSiteConfig(name string, meta SiteMetadata, info *PythonSiteInfo,
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 
 	env := map[string]string{
 		"PORT":                    fmt.Sprintf("%d", info.Port),

@@ -10,6 +10,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/metrics"
+	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -17,10 +18,11 @@ var metricsCmd = &cobra.Command{
 	Use:   "metrics",
 	Short: "Manage the optional metrics stack (prometheus + grafana)",
 	Long: `Prometheus scrapes Traefik's existing /metrics endpoint; Grafana ships with
-a pre-wired Prometheus datasource. UIs are exposed on:
+a pre-wired Prometheus datasource. Both UIs route through Traefik with
+mkcert-signed TLS:
 
-    Grafana:     http://127.0.0.1:` + metrics.GrafanaPort + ` (admin / admin)
-    Prometheus:  http://127.0.0.1:` + metrics.PrometheusPort + `
+    Grafana:     https://` + metrics.GrafanaDomain + `   (admin / admin)
+    Prometheus:  https://` + metrics.PrometheusDomain + `
 
 Import a Traefik dashboard in Grafana (dashboard ID 17347) to see request
 rates, latency, and error percentages per router.`,
@@ -61,15 +63,34 @@ func runMetricsEnable(cmd *cobra.Command, args []string) error {
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
+
+	domains := []string{metrics.GrafanaDomain, metrics.PrometheusDomain}
+
+	// Issue / refresh a single mkcert cert that covers both hostnames.
+	if _, err := traefik.EnsureLocalCert(metrics.ProxySiteName, domains, false); err != nil {
+		ui.Warn("Failed to provision metrics certificate: %v", err)
+	}
+	for _, d := range domains {
+		if err := traefik.RegisterLocalDomain(d, false); err != nil {
+			ui.Warn("Failed to register DNS for %s: %v", d, err)
+		}
+	}
+
 	if err := metrics.WriteStack(cfg); err != nil {
 		return fmt.Errorf("render metrics stack: %w", err)
+	}
+	if err := metrics.WriteTraefikConfig(cfg); err != nil {
+		return fmt.Errorf("write metrics Traefik config: %w", err)
+	}
+	if err := traefik.UpdateDynamicConfig(); err != nil {
+		ui.Warn("Failed to refresh Traefik dynamic config: %v", err)
 	}
 	if err := docker.ComposeUp(metrics.Dir(cfg)); err != nil {
 		return fmt.Errorf("start metrics stack: %w", err)
 	}
 	ui.Success("Metrics stack started")
-	ui.Info("Grafana:    http://127.0.0.1:%s  (admin / admin)", metrics.GrafanaPort)
-	ui.Info("Prometheus: http://127.0.0.1:%s", metrics.PrometheusPort)
+	ui.Info("Grafana:    https://%s  (admin / admin)", metrics.GrafanaDomain)
+	ui.Info("Prometheus: https://%s", metrics.PrometheusDomain)
 	ui.Dim("Import Grafana dashboard ID 17347 for a Traefik overview.")
 	return nil
 }
@@ -84,6 +105,20 @@ func runMetricsDisable(cmd *cobra.Command, args []string) error {
 	}
 	if err := docker.ComposeDown(metrics.Dir(cfg)); err != nil {
 		ui.Warn("Failed to stop metrics stack: %v", err)
+	}
+	if err := metrics.RemoveTraefikConfig(cfg); err != nil {
+		ui.Warn("Failed to remove metrics Traefik config: %v", err)
+	}
+	for _, d := range []string{metrics.GrafanaDomain, metrics.PrometheusDomain} {
+		if err := traefik.UnregisterLocalDomain(d); err != nil {
+			ui.Warn("Failed to unregister DNS for %s: %v", d, err)
+		}
+	}
+	if err := traefik.RemoveLocalCerts(metrics.ProxySiteName, metrics.GrafanaDomain); err != nil {
+		ui.Warn("Failed to remove metrics certificate: %v", err)
+	}
+	if err := traefik.UpdateDynamicConfig(); err != nil {
+		ui.Warn("Failed to refresh Traefik dynamic config: %v", err)
 	}
 	ui.Success("Metrics stack stopped")
 	return nil

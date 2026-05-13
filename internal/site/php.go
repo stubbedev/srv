@@ -859,6 +859,7 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 
 	siteMount := constants.PHPSiteDocRootRoot + "/" + name
 	composeConfig := phpComposeConfig{
@@ -1073,6 +1074,7 @@ func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) err
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 
 	siteMount := constants.PHPSiteDocRootRoot + "/" + name
 	composeConfig := phpComposeConfig{

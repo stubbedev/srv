@@ -405,6 +405,7 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 	cmd := nodeWrappedCommand(info)
 
 	env := map[string]string{

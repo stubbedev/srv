@@ -179,6 +179,7 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 
 	composeConfig := rubyComposeConfig{
 		Name:     constants.ComposeProjectName,

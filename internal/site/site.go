@@ -1164,6 +1164,14 @@ func addInternalListenerLabels(labels map[string]string, name string, domains []
 	labels[fmt.Sprintf("traefik.http.routers.%s.service", router)] = name
 }
 
+// StampSrvLabels attaches the dev.srv.site / dev.srv.type identity labels onto
+// a container label map. Used by every site generator so `docker ps --filter
+// label=dev.srv.site=<name>` works uniformly.
+func StampSrvLabels(labels map[string]string, siteName, siteType string) {
+	labels[constants.LabelSrvSite] = siteName
+	labels[constants.LabelSrvType] = siteType
+}
+
 // buildStaticComposeConfig builds the docker-compose configuration for a static site.
 func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) staticComposeConfig {
 	return staticComposeConfig{
@@ -1243,6 +1251,7 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) error {
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 	composeConfig := buildStaticComposeConfig(containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
 
 	data, err := yaml.Marshal(&composeConfig)

@@ -110,6 +110,7 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
+	StampSrvLabels(labels, name, string(meta.Type))
 
 	composeConfig := dockerfileComposeConfig{
 		Name:     constants.ComposeProjectName,

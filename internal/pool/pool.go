@@ -189,6 +189,7 @@ func buildCompose(cfg *config.Config, fp, dir string, members []Member) composeF
 					Retries:     3,
 				},
 				Labels: map[string]string{
+					constants.LabelSrvSite: "fpm-pool-" + fp,
 					constants.LabelSrvType: "php-fpm-pool",
 				},
 			},
