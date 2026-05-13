@@ -87,12 +87,14 @@ var proxyListCmd = &cobra.Command{
 }
 
 var proxyAddFlags struct {
-	domain    string
-	port      string
-	container string
-	name      string
-	force     bool
-	wildcard  bool
+	domain          string
+	port            string
+	container       string
+	name            string
+	force           bool
+	wildcard        bool
+	fallbackURL     string
+	fallbackTimeout string
 }
 
 func init() {
@@ -106,6 +108,8 @@ func init() {
 	proxyAddCmd.Flags().StringVarP(&proxyAddFlags.name, "name", "n", "", "Proxy name (default: derived from domain)")
 	proxyAddCmd.Flags().BoolVarP(&proxyAddFlags.force, "force", "f", false, "Overwrite existing proxy configuration")
 	proxyAddCmd.Flags().BoolVar(&proxyAddFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test)")
+	proxyAddCmd.Flags().StringVar(&proxyAddFlags.fallbackURL, "fallback", "", "URL to proxy to when the primary upstream returns 5xx (e.g. https://prod.example.com)")
+	proxyAddCmd.Flags().StringVar(&proxyAddFlags.fallbackTimeout, "fallback-timeout", "2s", "Connect timeout to the primary upstream before falling back")
 	_ = proxyAddCmd.MarkFlagRequired("domain")
 
 	proxyCmd.GroupID = GroupProxy
@@ -307,6 +311,29 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// When --fallback is set we sit an nginx sidecar in front of the primary
+	// upstream so 5xx responses transparently re-proxy to the fallback URL.
+	// Traefik then routes to the sidecar instead of the original target.
+	if proxyAddFlags.fallbackURL != "" {
+		primaryHost, primaryPort, perr := splitTargetURL(targetURL)
+		if perr != nil {
+			return fmt.Errorf("internal: cannot parse primary target: %w", perr)
+		}
+		spec := fallbackSpec{
+			Name:            input.name,
+			PrimaryHost:     primaryHost,
+			PrimaryPort:     primaryPort,
+			FallbackURL:     proxyAddFlags.fallbackURL,
+			FallbackTimeout: proxyAddFlags.fallbackTimeout,
+		}
+		sidecarURL, ferr := writeFallbackSidecar(cfg, spec)
+		if ferr != nil {
+			return ferr
+		}
+		targetURL = sidecarURL
+		ui.Dim("Fallback sidecar started (%s)", fallbackContainerName(input.name))
+	}
+
 	// Create proxy config file
 	if err := writeProxyConfig(cfg, input.name, input.domain, targetURL, input.containerName, input.wildcard); err != nil {
 		return err
@@ -357,6 +384,11 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 		if err := traefik.UnregisterLocalDomain(proxyInfo.Domain); err != nil {
 			ui.Warn("Failed to unregister DNS for %s: %v", proxyInfo.Domain, err)
 		}
+	}
+
+	// Tear down the fallback sidecar if one was configured for this proxy.
+	if err := removeFallbackSidecar(cfg, name); err != nil {
+		ui.Warn("Failed to remove fallback sidecar: %v", err)
 	}
 
 	// Update Traefik dynamic config
