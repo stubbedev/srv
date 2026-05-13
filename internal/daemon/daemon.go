@@ -38,6 +38,9 @@ type Daemon struct {
 	cancel          context.CancelFunc
 	logFile         *os.File
 	lastRefreshTime time.Time // guards against refresh storms
+	// WatchMetadata controls whether the daemon also watches site metadata.yml
+	// files and hot-reloads them. Set via `srv daemon start --no-watch=false`.
+	WatchMetadata bool
 }
 
 // New creates a new daemon instance.
@@ -50,11 +53,12 @@ func New() (*Daemon, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Daemon{
-		cfg:         cfg,
-		networkName: cfg.NetworkName,
-		containers:  make(map[string]string),
-		ctx:         ctx,
-		cancel:      cancel,
+		cfg:           cfg,
+		networkName:   cfg.NetworkName,
+		containers:    make(map[string]string),
+		ctx:           ctx,
+		cancel:        cancel,
+		WatchMetadata: true,
 	}, nil
 }
 
@@ -111,6 +115,15 @@ func (d *Daemon) Run() error {
 		case <-d.ctx.Done():
 		}
 	}()
+
+	// Watch metadata.yml writes (P3 hot-reload) unless disabled.
+	if d.WatchMetadata {
+		if _, err := d.startMetadataWatcher(); err != nil {
+			d.log("Metadata watcher disabled: %v", err)
+		}
+	} else {
+		d.log("Metadata watcher disabled by --no-watch")
+	}
 
 	// Watch Docker events
 	return d.watchEvents()

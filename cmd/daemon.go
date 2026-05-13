@@ -39,6 +39,7 @@ func init() {
 
 var daemonStartFlags struct {
 	foreground bool
+	noWatch    bool
 }
 
 var daemonStartCmd = &cobra.Command{
@@ -55,6 +56,7 @@ Use --foreground to run in the foreground (useful for debugging).`,
 
 func init() {
 	daemonStartCmd.Flags().BoolVarP(&daemonStartFlags.foreground, "foreground", "f", false, "Run in foreground (don't daemonize)")
+	daemonStartCmd.Flags().BoolVar(&daemonStartFlags.noWatch, "no-watch", false, "Disable the metadata.yml file watcher (hot-reload)")
 	daemonCmd.AddCommand(daemonStartCmd)
 }
 
@@ -66,6 +68,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		d.WatchMetadata = !daemonStartFlags.noWatch
 		return d.Run()
 	}
 

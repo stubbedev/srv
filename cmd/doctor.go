@@ -10,6 +10,7 @@ import (
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/firewall"
 	"github.com/stubbedev/srv/internal/shell"
+	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -51,6 +52,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	issues += checkTraefik()
 	issues += checkDNS()
 	issues += checkCertificates()
+	issues += checkSitesValid()
 
 	// Summary
 	ui.Blank()
@@ -298,6 +300,42 @@ func checkCertificateExpiry() int {
 
 	ui.IndentedSuccess(1, "%d certificate(s) valid", len(certs))
 	return 0
+}
+
+// checkSitesValid validates every site's metadata.yml so users learn about
+// hand-edits that won't be hot-reloaded before they hit an error at runtime.
+func checkSitesValid() int {
+	ui.Bold("Site Metadata")
+	sites, err := site.List()
+	if err != nil {
+		ui.IndentedWarn(1, "Could not list sites: %v", err)
+		ui.Blank()
+		return 1
+	}
+	if len(sites) == 0 {
+		ui.IndentedDim(1, "No sites registered")
+		ui.Blank()
+		return 0
+	}
+	issues := 0
+	for _, s := range sites {
+		meta, err := site.ReadSiteMetadata(s.Name)
+		if err != nil {
+			ui.IndentedWarn(1, "%s: %v", s.Name, err)
+			issues++
+			continue
+		}
+		if err := site.ValidateMetadata(meta); err != nil {
+			ui.IndentedWarn(1, "%s: %v", s.Name, err)
+			issues++
+			continue
+		}
+	}
+	if issues == 0 {
+		ui.IndentedSuccess(1, "%d site(s) valid", len(sites))
+	}
+	ui.Blank()
+	return issues
 }
 
 // =============================================================================
