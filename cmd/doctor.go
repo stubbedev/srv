@@ -122,6 +122,7 @@ func checkPorts() int {
 	ports := []portInfo{
 		{constants.PortHTTP, constants.PortNameHTTP, traefik.IsRunning, docker.ContainerTraefik},
 		{constants.PortHTTPS, constants.PortNameHTTPS, traefik.IsRunning, docker.ContainerTraefik},
+		{constants.PortInternal, constants.PortNameInternal, traefik.IsRunning, docker.ContainerTraefik},
 		{constants.PortDashboard, constants.PortNameDashboard, traefik.IsRunning, docker.ContainerTraefik},
 		{constants.PortDNS, constants.PortNameDNS, traefik.IsDNSRunning, docker.ContainerDNS},
 	}

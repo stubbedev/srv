@@ -63,6 +63,8 @@ entryPoints:
           scheme: https
   websecure:
     address: ":443"
+  internal:
+    address: ":88"
 
 providers:
   docker:
@@ -156,6 +158,7 @@ func DockerComposeTemplate(networkName, sitesDir, dnsUser, dnsPass string) strin
     ports:
       - "80:80"
       - "443:443"
+      - "88:88"
       - "8080:8080"`
 	extraHosts := ""
 	networks := `
@@ -447,7 +450,7 @@ func mergeTraefikConfigs(existing, template map[string]any) map[string]any {
 }
 
 // mergeEntryPoints merges entryPoints configs.
-// Preserves user-added entrypoints, ensures web and websecure exist from template.
+// Preserves user-added entrypoints, ensures web/websecure/internal exist from template.
 func mergeEntryPoints(existing, template map[string]any) map[string]any {
 	result := make(map[string]any)
 
@@ -456,13 +459,12 @@ func mergeEntryPoints(existing, template map[string]any) map[string]any {
 		maps.Copy(result, existingEP)
 	}
 
-	// Ensure web and websecure from template (these are required by srv)
+	// Ensure the srv-managed entrypoints from the template are present.
 	if templateEP, ok := template["entryPoints"].(map[string]any); ok {
-		if web, ok := templateEP["web"]; ok {
-			result["web"] = web
-		}
-		if websecure, ok := templateEP["websecure"]; ok {
-			result["websecure"] = websecure
+		for _, name := range []string{"web", "websecure", constants.EntryPointInternal} {
+			if v, ok := templateEP[name]; ok {
+				result[name] = v
+			}
 		}
 	}
 

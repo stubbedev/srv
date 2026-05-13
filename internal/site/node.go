@@ -399,6 +399,9 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 	containerName := "srv-" + name + "-node"
 	image := nodeDockerImage(info)
 	labels := buildNodeTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
+	if HasListener(meta.Listeners, constants.ListenerInternal) {
+		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
+	}
 	cmd := nodeWrappedCommand(info)
 
 	env := map[string]string{

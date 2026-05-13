@@ -33,6 +33,7 @@ var addFlags struct {
 	service        string
 	local          bool
 	wildcard       bool
+	internalHTTP   bool
 	force          bool
 	skipValidation bool
 	typeOverride   string // Force site type: php/node/ruby/python/dockerfile/static/compose
@@ -105,6 +106,7 @@ func init() {
 	addCmd.Flags().StringVar(&addFlags.service, "service", "", "Container name to route to")
 	addCmd.Flags().BoolVarP(&addFlags.local, "local", "l", false, "Use local SSL via mkcert (otherwise Let's Encrypt)")
 	addCmd.Flags().BoolVar(&addFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test); local sites only")
+	addCmd.Flags().BoolVar(&addFlags.internalHTTP, "internal-http", false, "Expose the site on the internal plain-HTTP entrypoint (port 88) in addition to HTTPS")
 	addCmd.Flags().BoolVarP(&addFlags.force, "force", "f", false, "Overwrite existing configuration")
 	addCmd.Flags().BoolVar(&addFlags.skipValidation, "skip-validation", false, "Skip compose file validation")
 	// Static site options
@@ -209,6 +211,7 @@ type siteSetup struct {
 	siteName           string
 	domain             string   // canonical/primary domain
 	aliases            []string // extra hostnames mapped to the same site
+	listeners          []string // extra Traefik entrypoints (e.g. "internal")
 	limits             *site.Limits
 	port               int
 	isLocal            bool
@@ -445,6 +448,10 @@ func promptForMissingConfig(setup *siteSetup) error {
 	// Limits: collect any user-supplied overrides. Empty values are omitted.
 	if l := limitsFromFlags(); l != nil {
 		setup.limits = l
+	}
+
+	if addFlags.internalHTTP {
+		setup.listeners = append(setup.listeners, constants.ListenerInternal)
 	}
 
 	// Static site options
@@ -719,6 +726,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		IsLocal:            setup.isLocal,
 		Wildcard:           setup.wildcard,
 		NetworkName:        cfg.NetworkName,
+		Listeners:          setup.listeners,
 		Limits:             setup.limits,
 		SPA:                setup.spa,
 		Cache:              setup.cache,
@@ -809,6 +817,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 			Port:        setup.port,
 			IsLocal:     setup.isLocal,
 			Wildcard:    setup.wildcard,
+			Listeners:   meta.Listeners,
 		}
 		if err := traefik.WriteSiteRouteConfig(cfg, routeConfig); err != nil {
 			return fmt.Errorf("failed to write traefik config: %w", err)

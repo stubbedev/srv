@@ -156,6 +156,9 @@ func WritePythonSiteConfig(name string, meta SiteMetadata, info *PythonSiteInfo,
 	containerName := "srv-" + name + "-app"
 	image := PythonImageTag(info.PythonVersion)
 	labels := buildAppTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
+	if HasListener(meta.Listeners, constants.ListenerInternal) {
+		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
+	}
 
 	env := map[string]string{
 		"PORT":                    fmt.Sprintf("%d", info.Port),

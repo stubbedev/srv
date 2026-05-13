@@ -1107,6 +1107,27 @@ func buildStaticTraefikLabels(name string, domains []string, isLocal, wildcard b
 	return labels
 }
 
+// HasListener reports whether the supplied listener name is enabled on the
+// site. Comparison is case-insensitive.
+func HasListener(listeners []string, name string) bool {
+	for _, l := range listeners {
+		if strings.EqualFold(l, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// addInternalListenerLabels appends labels for a plain-HTTP router on the
+// `internal` entrypoint, sharing the site's existing Traefik service. Called
+// when the site opts in via `listeners: [internal]`.
+func addInternalListenerLabels(labels map[string]string, name string, domains []string, wildcard bool) {
+	router := name + "-internal"
+	labels[fmt.Sprintf("traefik.http.routers.%s.rule", router)] = traefik.BuildHostRule(domains, wildcard)
+	labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", router)] = constants.EntryPointInternal
+	labels[fmt.Sprintf("traefik.http.routers.%s.service", router)] = name
+}
+
 // buildStaticComposeConfig builds the docker-compose configuration for a static site.
 func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) staticComposeConfig {
 	return staticComposeConfig{
@@ -1180,6 +1201,9 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) error {
 	// Build and write docker-compose.yml
 	containerName := generateStaticContainerName(name)
 	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
+	if HasListener(meta.Listeners, constants.ListenerInternal) {
+		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
+	}
 	composeConfig := buildStaticComposeConfig(containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
 
 	data, err := yaml.Marshal(&composeConfig)

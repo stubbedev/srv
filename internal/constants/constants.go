@@ -55,6 +55,10 @@ const (
 	PortHTTPS = 443
 	// PortDashboard is the Traefik dashboard port.
 	PortDashboard = 8080
+	// PortInternal is the plain-HTTP "internal" entrypoint port. Used by sites
+	// that opt into the internal listener (typically for container→host calls
+	// that skip TLS verification).
+	PortInternal = 88
 	// PortDNS is the DNS server port.
 	PortDNS = 53
 	// PortMin is the minimum valid port number.
@@ -68,6 +72,7 @@ const (
 	PortHTTPStr      = "80"
 	PortHTTPSStr     = "443"
 	PortDashboardStr = "8080"
+	PortInternalStr  = "88"
 	PortDNSStr       = "53"
 )
 
@@ -75,6 +80,7 @@ const (
 const (
 	PortNameHTTP      = "HTTP"
 	PortNameHTTPS     = "HTTPS"
+	PortNameInternal  = "Internal"
 	PortNameDashboard = "Dashboard"
 	PortNameDNS       = "DNS"
 )
@@ -175,6 +181,12 @@ const (
 	EntryPointWeb = "web"
 	// EntryPointWebsecure is the Traefik HTTPS entrypoint name.
 	EntryPointWebsecure = "websecure"
+	// EntryPointInternal is the plain-HTTP entrypoint used for in-cluster /
+	// host-internal traffic that bypasses TLS.
+	EntryPointInternal = "internal"
+	// ListenerInternal is the metadata.yml `listeners` entry that maps to the
+	// internal entrypoint.
+	ListenerInternal = "internal"
 	// CertResolverLetsEncrypt is the Let's Encrypt certificate resolver name.
 	CertResolverLetsEncrypt = "letsencrypt"
 	// SiteConfigPrefix is the prefix for site configuration files.
@@ -197,6 +209,8 @@ const (
 	BindHTTP = ":80"
 	// BindHTTPS is the HTTPS binding address.
 	BindHTTPS = ":443"
+	// BindInternal is the binding address for the plain-HTTP internal entrypoint.
+	BindInternal = ":88"
 )
 
 // Traefik port mappings for docker-compose.

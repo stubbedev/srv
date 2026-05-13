@@ -212,5 +212,6 @@ func regenerateSiteRouting(siteName string, meta *site.SiteMetadata) error {
 		Port:        meta.Port,
 		IsLocal:     meta.IsLocal,
 		Wildcard:    meta.Wildcard,
+		Listeners:   meta.Listeners,
 	})
 }

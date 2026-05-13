@@ -40,6 +40,7 @@ type SiteRouteConfig struct {
 	Port        int      // Port the service listens on
 	IsLocal     bool     // Whether to use local SSL (mkcert) or Let's Encrypt
 	Wildcard    bool     // Match apex + one-level subdomains (apex only when false)
+	Listeners   []string // Extra entrypoints to attach to this site, e.g. ["internal"]
 }
 
 // WriteSiteRouteConfig creates a Traefik file provider config for a site.
@@ -95,11 +96,25 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 		router.TLS = &TLSConfig{CertResolver: constants.CertResolverLetsEncrypt}
 	}
 
+	routers := map[string]Router{
+		routerName: router,
+	}
+
+	// Optional plain-HTTP router on the `internal` entrypoint, sharing the
+	// same backend service. Used by sites that opt in via listeners: [internal].
+	for _, l := range route.Listeners {
+		if l == constants.ListenerInternal {
+			routers[routerName+"-internal"] = Router{
+				Rule:        BuildHostRule(route.Domains, route.Wildcard),
+				EntryPoints: []string{constants.EntryPointInternal},
+				Service:     serviceName,
+			}
+		}
+	}
+
 	siteConfig := SiteConfig{
 		HTTP: HTTP{
-			Routers: map[string]Router{
-				routerName: router,
-			},
+			Routers: routers,
 			Services: map[string]Service{
 				serviceName: {
 					LoadBalancer: LoadBalancer{

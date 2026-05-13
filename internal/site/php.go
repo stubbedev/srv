@@ -772,6 +772,9 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 	internalNetworkName := "srv-" + name + "-internal"
 
 	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
+	if HasListener(meta.Listeners, constants.ListenerInternal) {
+		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
+	}
 
 	// Determine the nginx document root mount target.
 	// The project is always mounted to /var/www/html; nginx's root directive
@@ -874,6 +877,9 @@ func WritePHPDockerConfig(name string, meta SiteMetadata, info *PHPSiteInfo) err
 	internalNetworkName := "srv-" + name + "-internal"
 
 	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
+	if HasListener(meta.Listeners, constants.ListenerInternal) {
+		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
+	}
 
 	composeConfig := phpComposeConfig{
 		Services: map[string]phpServiceConfig{

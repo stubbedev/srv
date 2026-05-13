@@ -174,6 +174,9 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 	containerName := "srv-" + name + "-app"
 	image := RubyImageTag(info.RubyVersion)
 	labels := buildAppTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
+	if HasListener(meta.Listeners, constants.ListenerInternal) {
+		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
+	}
 
 	composeConfig := rubyComposeConfig{
 		Services: map[string]rubyServiceConfig{

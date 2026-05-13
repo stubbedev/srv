@@ -342,3 +342,55 @@ func TestSite_Domain(t *testing.T) {
 		t.Errorf("empty Site.Domain() = %q, want \"\"", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// HasListener + internal-listener label wiring
+// ---------------------------------------------------------------------------
+
+func TestHasListener(t *testing.T) {
+	tests := []struct {
+		name      string
+		listeners []string
+		probe     string
+		want      bool
+	}{
+		{"empty", nil, "internal", false},
+		{"match", []string{"internal"}, "internal", true},
+		{"case-insensitive", []string{"Internal"}, "internal", true},
+		{"miss", []string{"web"}, "internal", false},
+		{"multiple", []string{"web", "internal", "extra"}, "internal", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasListener(tc.listeners, tc.probe); got != tc.want {
+				t.Errorf("HasListener(%v, %q) = %v, want %v", tc.listeners, tc.probe, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAddInternalListenerLabels(t *testing.T) {
+	labels := buildStaticTraefikLabels("kontainer", []string{"a.test", "b.test"}, true, true)
+	addInternalListenerLabels(labels, "kontainer", []string{"a.test", "b.test"}, true)
+
+	wantKeys := []string{
+		"traefik.http.routers.kontainer-internal.rule",
+		"traefik.http.routers.kontainer-internal.entrypoints",
+		"traefik.http.routers.kontainer-internal.service",
+	}
+	for _, k := range wantKeys {
+		if _, ok := labels[k]; !ok {
+			t.Errorf("missing label %q", k)
+		}
+	}
+	if labels["traefik.http.routers.kontainer-internal.entrypoints"] != "internal" {
+		t.Errorf("expected entrypoints=internal, got %q", labels["traefik.http.routers.kontainer-internal.entrypoints"])
+	}
+	if labels["traefik.http.routers.kontainer-internal.service"] != "kontainer" {
+		t.Errorf("expected service=kontainer (shared with HTTPS router), got %q", labels["traefik.http.routers.kontainer-internal.service"])
+	}
+	// The internal router must reuse the same multi-host rule as the HTTPS one.
+	if labels["traefik.http.routers.kontainer-internal.rule"] != labels["traefik.http.routers.kontainer.rule"] {
+		t.Errorf("internal router rule diverged from HTTPS rule")
+	}
+}
