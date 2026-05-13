@@ -65,9 +65,9 @@ srv add /var/www/myapp --domain example.com
 | `srv info SITE` | Show detailed site information |
 | `srv logs SITE` | View site container logs (`--all` to multiplex every site) |
 | `srv shell SITE` | Open an interactive shell in the site's container |
-| `srv alias add|remove|list SITE` | Manage extra hostnames mapped to the same site |
-| `srv internal enable|disable|list SITE` | Toggle the plain-HTTP `:88` listener for a site |
-| `srv route add|remove|list SITE` | Attach path-prefix / regex-rewrite routers to a site |
+| `srv alias add\|remove\|list SITE` | Manage extra hostnames mapped to the same site |
+| `srv internal enable\|disable\|list SITE` | Toggle the plain-HTTP `:88` listener for a site |
+| `srv route add\|remove\|list SITE` | Attach path-prefix / regex-rewrite routers to a site |
 
 ### Proxy Management
 
