@@ -271,11 +271,11 @@ func parsePrimaryBlock(block string, site *Site) {
 // resolveValetProjectPath turns a domain like "cms-kontainer.test" into the
 // project directory. Valet maps hosts onto projects two ways:
 //
-//   1. Linked sites: ~/.valet/Sites/<name> is a symlink to the project dir.
-//      Subdomain stripping lets `<prefix>-<name>.test` and `<name>-<suffix>.test`
-//      resolve via Sites/<name> too.
-//   2. Parked sites: any directory under one of the paths in config.json/paths
-//      is reachable as `<dirname>.test` automatically.
+//  1. Linked sites: ~/.valet/Sites/<name> is a symlink to the project dir.
+//     Subdomain stripping lets `<prefix>-<name>.test` and `<name>-<suffix>.test`
+//     resolve via Sites/<name> too.
+//  2. Parked sites: any directory under one of the paths in config.json/paths
+//     is reachable as `<dirname>.test` automatically.
 //
 // We try every hyphen-split substring of the first label against both the
 // Sites symlink table and each parked path. Returns "" when no candidate
@@ -456,19 +456,19 @@ func expandNginxVars(s string, vars map[string]string) string {
 }
 
 var (
-	listen443                = regexp.MustCompile(`(?m)^\s*listen\s+443\b`)
-	listen80                 = regexp.MustCompile(`(?m)^\s*listen\s+80\b`)
-	matchListen              = regexp.MustCompile(`(?m)^\s*listen\s+\d+\b`)
-	serverNameRe             = regexp.MustCompile(`(?m)^\s*server_name\s+([^;]+);`)
-	clientMaxBodyRe          = regexp.MustCompile(`(?m)^\s*client_max_body_size\s+([^;]+);`)
-	fastcgiReadTimeoutRe     = regexp.MustCompile(`(?m)fastcgi_read_timeout\s+([^;]+);`)
-	fastcgiSendTimeoutRe     = regexp.MustCompile(`(?m)fastcgi_send_timeout\s+([^;]+);`)
-	fastcgiConnectTimeoutRe  = regexp.MustCompile(`(?m)fastcgi_connect_timeout\s+([^;]+);`)
-	namedLocationRe          = regexp.MustCompile(`location\s+@([A-Za-z0-9_]+)\s*\{([^{}]*)\}`)
-	errorPageRe              = regexp.MustCompile(`error_page\s+5\d\d(?:\s+5\d\d)*\s*=\s*@([A-Za-z0-9_]+)`)
-	plainLocationRe          = regexp.MustCompile(`(?ms)location\s+(/[A-Za-z0-9_./-]*)\s*\{([^{}]*)\}`)
-	regexLocationRe          = regexp.MustCompile(`(?ms)location\s+~\*?\s+([^{]+?)\s*\{([^{}]*)\}`)
-	proxyPassRe              = regexp.MustCompile(`proxy_pass\s+([^;\s]+)\s*;`)
-	rewriteRe                = regexp.MustCompile(`rewrite\s+([^\s]+)\s+([^\s]+)\s+(?:last|break|redirect|permanent)\s*;`)
-	nginxSetRe               = regexp.MustCompile(`(?m)^\s*set\s+\$([A-Za-z_][A-Za-z0-9_]*)\s+("[^"]*"|[^;\s]+)\s*;`)
+	listen443               = regexp.MustCompile(`(?m)^\s*listen\s+443\b`)
+	listen80                = regexp.MustCompile(`(?m)^\s*listen\s+80\b`)
+	matchListen             = regexp.MustCompile(`(?m)^\s*listen\s+\d+\b`)
+	serverNameRe            = regexp.MustCompile(`(?m)^\s*server_name\s+([^;]+);`)
+	clientMaxBodyRe         = regexp.MustCompile(`(?m)^\s*client_max_body_size\s+([^;]+);`)
+	fastcgiReadTimeoutRe    = regexp.MustCompile(`(?m)fastcgi_read_timeout\s+([^;]+);`)
+	fastcgiSendTimeoutRe    = regexp.MustCompile(`(?m)fastcgi_send_timeout\s+([^;]+);`)
+	fastcgiConnectTimeoutRe = regexp.MustCompile(`(?m)fastcgi_connect_timeout\s+([^;]+);`)
+	namedLocationRe         = regexp.MustCompile(`location\s+@([A-Za-z0-9_]+)\s*\{([^{}]*)\}`)
+	errorPageRe             = regexp.MustCompile(`error_page\s+5\d\d(?:\s+5\d\d)*\s*=\s*@([A-Za-z0-9_]+)`)
+	plainLocationRe         = regexp.MustCompile(`(?ms)location\s+(/[A-Za-z0-9_./-]*)\s*\{([^{}]*)\}`)
+	regexLocationRe         = regexp.MustCompile(`(?ms)location\s+~\*?\s+([^{]+?)\s*\{([^{}]*)\}`)
+	proxyPassRe             = regexp.MustCompile(`proxy_pass\s+([^;\s]+)\s*;`)
+	rewriteRe               = regexp.MustCompile(`rewrite\s+([^\s]+)\s+([^\s]+)\s+(?:last|break|redirect|permanent)\s*;`)
+	nginxSetRe              = regexp.MustCompile(`(?m)^\s*set\s+\$([A-Za-z_][A-Za-z0-9_]*)\s+("[^"]*"|[^;\s]+)\s*;`)
 )

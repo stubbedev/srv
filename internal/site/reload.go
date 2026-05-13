@@ -24,13 +24,13 @@ import (
 
 // ReloadResult describes the work Reload performed for a single site.
 type ReloadResult struct {
-	Name              string
-	Skipped           bool // true when metadata hash matches last-applied; no work was done
-	NeedsRestart      bool // true when label-based artifacts changed and a container restart is required
-	RegeneratedCert   bool
-	CertCovered       bool // false when local cert could not be issued (e.g. mkcert missing)
-	DNSRegistered     int  // count of domains registered with the local resolver
-	Warnings          []string
+	Name            string
+	Skipped         bool // true when metadata hash matches last-applied; no work was done
+	NeedsRestart    bool // true when label-based artifacts changed and a container restart is required
+	RegeneratedCert bool
+	CertCovered     bool // false when local cert could not be issued (e.g. mkcert missing)
+	DNSRegistered   int  // count of domains registered with the local resolver
+	Warnings        []string
 }
 
 // reloadStateFile is the hidden file inside each site's config dir that

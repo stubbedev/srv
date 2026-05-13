@@ -742,7 +742,7 @@ func PHPImageFingerprint(info *PHPSiteInfo) string {
 	}
 	sort.Strings(exts)
 	h := sha256.New()
-	fmt.Fprintf(h, "v1|%s|%s", info.PHPVersion, strings.Join(exts, ","))
+	_, _ = fmt.Fprintf(h, "v1|%s|%s", info.PHPVersion, strings.Join(exts, ","))
 	return fmt.Sprintf("srv-php:%x", h.Sum(nil)[:6])
 }
 

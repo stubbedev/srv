@@ -419,7 +419,7 @@ func WriteNodeSiteConfig(name string, meta SiteMetadata, info *NodeSiteInfo, for
 	}
 
 	composeConfig := nodeComposeConfig{
-		Name:     constants.ComposeProjectName,
+		Name: constants.ComposeProjectName,
 		Services: map[string]nodeServiceConfig{
 			"node": {
 				ContainerName: containerName,

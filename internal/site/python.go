@@ -175,7 +175,7 @@ func WritePythonSiteConfig(name string, meta SiteMetadata, info *PythonSiteInfo,
 	}
 
 	composeConfig := pythonComposeConfig{
-		Name:     constants.ComposeProjectName,
+		Name: constants.ComposeProjectName,
 		Services: map[string]pythonServiceConfig{
 			"app": {
 				ContainerName: containerName,

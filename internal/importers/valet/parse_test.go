@@ -194,11 +194,11 @@ func TestResolveValetProjectPath(t *testing.T) {
 		domain string
 		want   string
 	}{
-		{"kontainer.test", project},               // exact label
-		{"cms-kontainer.test", project},           // suffix peel
-		{"kontainer-8080.test", project},          // prefix peel
-		{"jira.konform.com", ""},                  // no symlink
-		{"site-kontainer-extra.test", project},    // multi-segment, kontainer is in the middle
+		{"kontainer.test", project},            // exact label
+		{"cms-kontainer.test", project},        // suffix peel
+		{"kontainer-8080.test", project},       // prefix peel
+		{"jira.konform.com", ""},               // no symlink
+		{"site-kontainer-extra.test", project}, // multi-segment, kontainer is in the middle
 	}
 	for _, tc := range tests {
 		got := resolveValetProjectPath(tc.domain, sitesDir, nil)

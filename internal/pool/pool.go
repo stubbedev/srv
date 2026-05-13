@@ -43,7 +43,7 @@ func Fingerprint(phpVersion string, extensions []string) string {
 	exts := append([]string(nil), extensions...)
 	sort.Strings(exts)
 	h := sha256.New()
-	fmt.Fprintf(h, "v1|%s|%s", phpVersion, strings.Join(exts, ","))
+	_, _ = fmt.Fprintf(h, "v1|%s|%s", phpVersion, strings.Join(exts, ","))
 	return fmt.Sprintf("%x", h.Sum(nil)[:6])
 }
 
@@ -79,15 +79,15 @@ type composeFile struct {
 }
 
 type composeService struct {
-	Build         *composeBuild        `yaml:"build,omitempty"`
-	Image         string               `yaml:"image,omitempty"`
-	PullPolicy    string               `yaml:"pull_policy,omitempty"`
-	ContainerName string               `yaml:"container_name"`
-	Volumes       []composeVolume      `yaml:"volumes,omitempty"`
-	Networks      []string             `yaml:"networks"`
-	Restart       string               `yaml:"restart"`
-	HealthCheck   *composeHealthCheck  `yaml:"healthcheck,omitempty"`
-	Labels        map[string]string    `yaml:"labels,omitempty"`
+	Build         *composeBuild       `yaml:"build,omitempty"`
+	Image         string              `yaml:"image,omitempty"`
+	PullPolicy    string              `yaml:"pull_policy,omitempty"`
+	ContainerName string              `yaml:"container_name"`
+	Volumes       []composeVolume     `yaml:"volumes,omitempty"`
+	Networks      []string            `yaml:"networks"`
+	Restart       string              `yaml:"restart"`
+	HealthCheck   *composeHealthCheck `yaml:"healthcheck,omitempty"`
+	Labels        map[string]string   `yaml:"labels,omitempty"`
 }
 
 type composeBuild struct {

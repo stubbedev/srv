@@ -21,13 +21,13 @@ import (
 // Mirrors site.Route but lives in the traefik package so the emitter does not
 // depend on internal/site (and vice versa).
 type RouteSpec struct {
-	ID               string
-	Path             string // PathPrefix; empty if PathRegex is set
-	PathRegex        string // PathRegexp; empty if Path is set
-	Rewrite          string // optional, requires PathRegex
-	UpstreamURL      string // pre-resolved upstream (e.g. http://host.docker.internal:6001)
-	PreserveHost     bool
-	Priority         int
+	ID           string
+	Path         string // PathPrefix; empty if PathRegex is set
+	PathRegex    string // PathRegexp; empty if Path is set
+	Rewrite      string // optional, requires PathRegex
+	UpstreamURL  string // pre-resolved upstream (e.g. http://host.docker.internal:6001)
+	PreserveHost bool
+	Priority     int
 }
 
 // SiteRouteSet is the set of routes belonging to one site, used to render a

@@ -53,9 +53,7 @@ func init() {
 func runReload(cmd *cobra.Command, args []string) error {
 	var names []string
 	if reloadFlags.all {
-		for _, s := range GetSiteNames() {
-			names = append(names, s)
-		}
+		names = append(names, GetSiteNames()...)
 	} else {
 		names = []string{args[0]}
 	}

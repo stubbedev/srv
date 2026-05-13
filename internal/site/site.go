@@ -850,8 +850,8 @@ const (
 // All fields use string forms ("2G", "300s") so YAML stays human-readable and
 // the values pass through to nginx/Traefik in their native syntax.
 type Limits struct {
-	MaxBody        string `yaml:"max_body,omitempty"`        // e.g. "2G", "128M"
-	ReadTimeout    string `yaml:"read_timeout,omitempty"`    // e.g. "300s"
+	MaxBody        string `yaml:"max_body,omitempty"`     // e.g. "2G", "128M"
+	ReadTimeout    string `yaml:"read_timeout,omitempty"` // e.g. "300s"
 	SendTimeout    string `yaml:"send_timeout,omitempty"`
 	ConnectTimeout string `yaml:"connect_timeout,omitempty"`
 }
@@ -868,15 +868,15 @@ type Upstream struct {
 // Route attaches an extra Traefik router to a site, used for path-prefix splits
 // (e.g. /app → WebSocket on :6001) or regex rewrites (e.g. /videos/...).
 type Route struct {
-	ID               string   `yaml:"id"`                            // stable handle for CLI
-	Path             string   `yaml:"path,omitempty"`                // PathPrefix
-	PathRegex        string   `yaml:"path_regex,omitempty"`          // PathRegexp
-	Rewrite          string   `yaml:"rewrite,omitempty"`             // ReplacePathRegex replacement
+	ID               string   `yaml:"id"`                   // stable handle for CLI
+	Path             string   `yaml:"path,omitempty"`       // PathPrefix
+	PathRegex        string   `yaml:"path_regex,omitempty"` // PathRegexp
+	Rewrite          string   `yaml:"rewrite,omitempty"`    // ReplacePathRegex replacement
 	Upstream         Upstream `yaml:"upstream"`
-	PreserveHost     *bool    `yaml:"preserve_host,omitempty"`       // tri-state; nil = default true
+	PreserveHost     *bool    `yaml:"preserve_host,omitempty"` // tri-state; nil = default true
 	PassRangeHeaders bool     `yaml:"pass_range_headers,omitempty"`
-	Priority         int      `yaml:"priority,omitempty"`            // optional Traefik priority override
-	Limits           *Limits  `yaml:"limits,omitempty"`              // per-route override
+	Priority         int      `yaml:"priority,omitempty"` // optional Traefik priority override
+	Limits           *Limits  `yaml:"limits,omitempty"`   // per-route override
 }
 
 // Fallback configures a remote upstream that takes over when the primary

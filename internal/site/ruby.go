@@ -182,7 +182,7 @@ func WriteRubySiteConfig(name string, meta SiteMetadata, info *RubySiteInfo, for
 	StampSrvLabels(labels, name, string(meta.Type))
 
 	composeConfig := rubyComposeConfig{
-		Name:     constants.ComposeProjectName,
+		Name: constants.ComposeProjectName,
 		Services: map[string]rubyServiceConfig{
 			"app": {
 				ContainerName: containerName,
