@@ -123,6 +123,13 @@ _release-checks:
         git commit -m "chore: format code for release"
         echo "Committed formatting changes"
     fi
+    echo "Updating flake.lock..."
+    nix flake update
+    if [ -n "$(git status --porcelain flake.lock)" ]; then
+        git add flake.lock
+        git commit -m "chore: update flake.lock for release"
+        echo "Committed flake.lock update"
+    fi
 
 # Release a new major version (X.y.z -> X+1.0.0) with GitHub release
 release-major: _release-checks
