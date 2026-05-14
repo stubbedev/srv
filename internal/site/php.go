@@ -48,7 +48,7 @@ func DetectPHPSite(dir string) (*PHPSiteInfo, error) {
 	var composer ComposerJSON
 	if err := json.Unmarshal(data, &composer); err != nil {
 		// Malformed composer.json — treat as raw PHP rather than failing hard.
-		return RawPHPDefaults(), nil
+		return RawPHPDefaults(), nil //nolint:nilerr
 	}
 
 	framework := DetectFramework(dir, &composer)

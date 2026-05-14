@@ -23,10 +23,8 @@ type Config struct {
 
 // UserConfig holds user-configurable settings stored in config.yml.
 type UserConfig struct {
-	ParkedPaths []string `yaml:"parked_paths,omitempty"`
-	// UpstreamDNS lists upstream resolvers written into dnsmasq.conf.
-	// Defaults to Google DNS (8.8.8.8, 8.8.4.4) when empty.
-	UpstreamDNS []string `yaml:"upstream_dns,omitempty"`
+	ParkedPaths []string `yaml:"parked_paths,omitempty" jsonschema:"description=Directories that 'srv park' watches for new sites."`
+	UpstreamDNS []string `yaml:"upstream_dns,omitempty" jsonschema:"description=Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty."`
 }
 
 var (
@@ -176,7 +174,9 @@ func (c *Config) SaveUserConfig(userCfg *UserConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	return atomicWriteFile(configPath, data, constants.FilePermDefault)
+	header := "# yaml-language-server: $schema=" + constants.UserConfigSchemaURL + "\n" +
+		"# srv user config\n"
+	return atomicWriteFile(configPath, append([]byte(header), data...), constants.FilePermDefault)
 }
 
 // atomicWriteFile writes data to a file atomically by writing to a temp file first.

@@ -28,8 +28,49 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Check gofmt
+        run: |
+          out=$(gofmt -l $(go list -f '{{.Dir}}' ./...))
+          if [ -n "$out" ]; then
+            echo "Unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./...
+      - name: Test (with race detector)
+        run: go test -race ./...
+
+      - name: Verify schemas are up to date
+        run: |
+          go run ./cmd/gen-schema
+          if [ -n "$(git status --porcelain schemas/)" ]; then
+            echo "schemas/ is out of date. Run 'just schemas' and commit."
+            git --no-pager diff schemas/
+            exit 1
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Download mkcert binaries for embedding
+        run: just mkcert
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.1

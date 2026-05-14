@@ -65,6 +65,10 @@ vet:
 lint:
     golangci-lint run ./...
 
+# Regenerate JSON Schemas under schemas/ from Go structs
+schemas:
+    go run ./cmd/gen-schema
+
 # Run all checks (fmt, vet, lint, test) - useful for CI
 check: fmt vet lint test
 

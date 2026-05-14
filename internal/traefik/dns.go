@@ -234,7 +234,7 @@ func updateMacOSResolverConfig(domains []string) error {
 	// Remove resolver files for domains no longer registered (but keep TLD files).
 	entries, err := os.ReadDir(constants.MacOSResolverDir)
 	if err != nil {
-		return nil // Non-fatal if we can't read the directory.
+		return nil //nolint:nilerr // Non-fatal if we can't read the directory.
 	}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -311,7 +311,7 @@ func RemoveDNS() error {
 		// This covers both local TLD files and per-domain files (e.g. dev.com).
 		entries, err := os.ReadDir(constants.MacOSResolverDir)
 		if err != nil {
-			return nil // Already removed or directory doesn't exist.
+			return nil //nolint:nilerr // Already removed or directory doesn't exist.
 		}
 		var lastErr error
 		for _, entry := range entries {
@@ -459,7 +459,8 @@ func RegisterLocalDomain(domain string, wildcard bool) error {
 	// Check if this is the first local domain being added
 	isFirstDomain := len(filtered) == 0
 
-	domains = append(filtered, entry)
+	filtered = append(filtered, entry)
+	domains = filtered
 	if err := SaveLocalDomains(domains); err != nil {
 		return err
 	}

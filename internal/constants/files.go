@@ -25,6 +25,11 @@ const (
 	DockerComposeFile = "docker-compose.yml"
 	// MetadataFile is the filename for site metadata.
 	MetadataFile = "metadata.yml"
+	// MetadataSchemaURL is the JSON Schema URL stamped into generated metadata.yml
+	// files so editors (yaml-language-server) provide completion + validation.
+	MetadataSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/metadata.schema.json"
+	// UserConfigSchemaURL is the JSON Schema URL stamped into generated config.yml files.
+	UserConfigSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/config.schema.json"
 	// NginxConfFile is the nginx configuration filename.
 	NginxConfFile = "nginx.conf"
 	// UserConfigFile is the user configuration filename.

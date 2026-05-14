@@ -220,7 +220,7 @@ func restartSystemd() error {
 func GetSystemdStatus() (string, error) {
 	output, err := exec.Command("systemctl", "--user", "is-active", SystemdServiceName).Output()
 	if err != nil {
-		return "inactive", nil
+		return "inactive", nil //nolint:nilerr // exit code from systemctl signals state, not a failure to query
 	}
 	return strings.TrimSpace(string(output)), nil
 }
@@ -362,7 +362,7 @@ func restartLaunchd() error {
 func GetLaunchdStatus() (string, error) {
 	output, err := exec.Command("launchctl", "list", "dev.stubbe.srv-daemon").Output()
 	if err != nil {
-		return "not loaded", nil
+		return "not loaded", nil //nolint:nilerr // launchctl errors when the service isn't loaded
 	}
 	// A loaded-but-stopped service appears in launchctl list without a PID entry.
 	// Only report "running" when the process is actually alive.

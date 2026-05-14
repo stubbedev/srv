@@ -67,7 +67,7 @@ func DetectNodeSite(dir string) (*NodeSiteInfo, error) {
 	var pkg packageJSON
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		// Malformed package.json — use safe npm defaults rather than failing hard.
-		return NodeDefaults(), nil
+		return NodeDefaults(), nil //nolint:nilerr
 	}
 
 	pm := detectPM(dir, &pkg)

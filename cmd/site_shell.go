@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -104,7 +105,8 @@ func runShell(cmd *cobra.Command, args []string) error {
 	c.Stderr = os.Stderr
 	if err := c.Run(); err != nil {
 		// Exit code != 0 from the shell is normal (user typed exit N), don't wrap it as an error.
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
 			return nil
 		}
 		return fmt.Errorf("docker exec failed: %w", err)

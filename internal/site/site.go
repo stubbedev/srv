@@ -288,7 +288,7 @@ func ResolvePath(path string) (string, error) {
 	realPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
 		// Path might not exist yet, return absolute path
-		return absPath, nil
+		return absPath, nil //nolint:nilerr
 	}
 
 	return realPath, nil

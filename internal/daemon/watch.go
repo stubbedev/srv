@@ -157,7 +157,11 @@ func (s *watchState) scheduleReload(siteName string, delay time.Duration, fire f
 // site stays up.
 func (d *Daemon) reloadSite(state *watchState, siteName string) {
 	muAny, _ := state.reloadMu.LoadOrStore(siteName, &sync.Mutex{})
-	mu := muAny.(*sync.Mutex)
+	mu, ok := muAny.(*sync.Mutex)
+	if !ok {
+		d.log("Reload %s: unexpected mutex type", siteName)
+		return
+	}
 	mu.Lock()
 	defer mu.Unlock()
 

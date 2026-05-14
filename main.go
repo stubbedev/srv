@@ -1,6 +1,8 @@
 // Package main provides the srv CLI application.
 package main
 
+//go:generate go run ./cmd/gen-schema
+
 import (
 	"fmt"
 	"os"
@@ -27,6 +29,10 @@ func restoreCursor() {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	// Skip cursor handling during shell completion to avoid polluting output
 	isCompletion := len(os.Args) > 1 && (os.Args[1] == "__complete" || os.Args[1] == "__completeNoDesc")
 
@@ -49,6 +55,7 @@ func main() {
 
 	if err := cmd.Execute(); err != nil {
 		ui.Error("%v", err)
-		os.Exit(constants.ExitCodeError)
+		return constants.ExitCodeError
 	}
+	return 0
 }

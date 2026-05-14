@@ -262,7 +262,7 @@ func collectPoolMembers(fp, siteName, projectPath string) ([]pool.Member, error)
 func RemoveSiteFromPool(siteName string) error {
 	meta, err := ReadSiteMetadata(siteName)
 	if err != nil || meta == nil || meta.Type != SiteTypePHP {
-		return nil
+		return nil //nolint:nilerr // metadata gone or wrong type → nothing to remove from pool
 	}
 	cfg, err := config.Load()
 	if err != nil {

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/config.schema.json",
+  "properties": {
+    "parked_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Directories that 'srv park' watches for new sites."
+    },
+    "upstream_dns": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "title": "srv user config"
+}

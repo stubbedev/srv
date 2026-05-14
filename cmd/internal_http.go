@@ -124,7 +124,7 @@ func runInternalList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	any := false
+	found := false
 	for _, s := range sites {
 		meta, err := site.ReadSiteMetadata(s.Name)
 		if err != nil || meta == nil {
@@ -132,10 +132,10 @@ func runInternalList(cmd *cobra.Command, args []string) error {
 		}
 		if site.HasListener(meta.Listeners, constants.ListenerInternal) {
 			ui.Print("  %s  →  http://%s:%d", s.Name, meta.PrimaryDomain(), constants.PortInternal)
-			any = true
+			found = true
 		}
 	}
-	if !any {
+	if !found {
 		ui.Dim("No sites have the internal listener enabled.")
 	}
 	return nil

@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/metadata.schema.json",
+  "$defs": {
+    "Fallback": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Remote URL to fall back to on 5xx (e.g. https://prod.example.com)."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Fallback request timeout (e.g. '2s')."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Limits": {
+      "properties": {
+        "max_body": {
+          "type": "string",
+          "description": "Maximum request body size (e.g. '2G' '128M' '500k')."
+        },
+        "read_timeout": {
+          "type": "string",
+          "description": "Read timeout (e.g. '300s' '5m')."
+        },
+        "send_timeout": {
+          "type": "string",
+          "description": "Send timeout (e.g. '300s')."
+        },
+        "connect_timeout": {
+          "type": "string",
+          "description": "Upstream connect timeout (e.g. '5s')."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Route": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable handle for the route used by 'srv route' CLI."
+        },
+        "path": {
+          "type": "string",
+          "description": "PathPrefix to match (e.g. /api)."
+        },
+        "path_regex": {
+          "type": "string",
+          "description": "Regex pattern to match (Traefik PathRegexp)."
+        },
+        "rewrite": {
+          "type": "string",
+          "description": "ReplacePathRegex replacement (e.g. /v1/$1)."
+        },
+        "upstream": {
+          "$ref": "#/$defs/Upstream"
+        },
+        "preserve_host": {
+          "type": "boolean",
+          "description": "Whether to preserve the Host header (default true)."
+        },
+        "pass_range_headers": {
+          "type": "boolean",
+          "description": "Forward Range/If-Range headers for byte-range requests."
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Traefik router priority override."
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits",
+          "description": "Per-route limits override."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Upstream": {
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "localhost",
+            "container",
+            "url"
+          ],
+          "description": "Upstream target type."
+        },
+        "port": {
+          "type": "integer",
+          "description": "Port when kind=localhost or kind=container."
+        },
+        "container": {
+          "type": "string",
+          "description": "Container name when kind=container."
+        },
+        "url": {
+          "type": "string",
+          "description": "Full URL when kind=url (e.g. https://api.example.com)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "metadata.yml schema version (1 = current)."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "compose",
+        "static",
+        "php",
+        "node",
+        "ruby",
+        "python",
+        "dockerfile"
+      ],
+      "description": "Site runtime type."
+    },
+    "domains": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "All hostnames; the first entry is canonical."
+    },
+    "project_path": {
+      "type": "string",
+      "description": "Absolute path to the project on disk."
+    },
+    "service_name": {
+      "type": "string",
+      "description": "Container name used for Traefik routing."
+    },
+    "compose_service_name": {
+      "type": "string",
+      "description": "docker-compose service name (for compose commands)."
+    },
+    "profile": {
+      "type": "string",
+      "description": "docker-compose profile (if the service uses profiles)."
+    },
+    "port": {
+      "type": "integer",
+      "description": "Port the service listens on inside the container."
+    },
+    "is_local": {
+      "type": "boolean",
+      "description": "Whether to use a locally-issued (mkcert) SSL certificate."
+    },
+    "wildcard": {
+      "type": "boolean",
+      "description": "Match apex + one-level subdomains (*.example.com)."
+    },
+    "network_name": {
+      "type": "string",
+      "description": "Docker network the site joins."
+    },
+    "listeners": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."
+    },
+    "limits": {
+      "$ref": "#/$defs/Limits",
+      "description": "Request-body / timeout overrides."
+    },
+    "routes": {
+      "items": {
+        "$ref": "#/$defs/Route"
+      },
+      "type": "array",
+      "description": "Extra Traefik routers (path-prefix / regex-rewrite splits)."
+    },
+    "upstream": {
+      "$ref": "#/$defs/Upstream",
+      "description": "Primary backend (proxy-type sites only)."
+    },
+    "fallback": {
+      "$ref": "#/$defs/Fallback",
+      "description": "Remote 5xx fallback target."
+    },
+    "spa": {
+      "type": "boolean",
+      "description": "Single-page-app mode (fall back to /index.html)."
+    },
+    "cache": {
+      "type": "boolean",
+      "description": "Emit aggressive caching headers for static assets."
+    },
+    "cors": {
+      "type": "boolean",
+      "description": "Emit permissive CORS headers."
+    },
+    "php_version": {
+      "type": "string",
+      "description": "PHP version ('latest' or '8.3')."
+    },
+    "php_extensions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Extra PHP extensions to install."
+    },
+    "php_framework": {
+      "type": "string",
+      "description": "Detected PHP framework."
+    },
+    "document_root": {
+      "type": "string",
+      "description": "Document root relative to the project (e.g. 'public')."
+    },
+    "node_runtime": {
+      "type": "string",
+      "enum": [
+        "node",
+        "bun",
+        "deno"
+      ],
+      "description": "JavaScript runtime."
+    },
+    "node_package_manager": {
+      "type": "string",
+      "enum": [
+        "npm",
+        "yarn",
+        "pnpm",
+        "bun",
+        "deno"
+      ],
+      "description": "Package manager."
+    },
+    "node_version": {
+      "type": "string",
+      "description": "Node version ('lts' or '20'; node runtime only)."
+    },
+    "node_framework": {
+      "type": "string",
+      "description": "Detected Node framework."
+    },
+    "node_start_cmd": {
+      "type": "string",
+      "description": "Start command (e.g. 'npm run dev')."
+    },
+    "ruby_version": {
+      "type": "string",
+      "description": "Ruby version ('latest' or '3.3')."
+    },
+    "ruby_framework": {
+      "type": "string",
+      "enum": [
+        "rails",
+        "sinatra",
+        "rack",
+        "generic"
+      ],
+      "description": "Detected Ruby framework."
+    },
+    "ruby_start_cmd": {
+      "type": "string",
+      "description": "Start command."
+    },
+    "python_version": {
+      "type": "string",
+      "description": "Python version ('latest' or '3.12')."
+    },
+    "python_framework": {
+      "type": "string",
+      "enum": [
+        "django",
+        "fastapi",
+        "flask",
+        "generic"
+      ],
+      "description": "Detected Python framework."
+    },
+    "python_start_cmd": {
+      "type": "string",
+      "description": "Start command."
+    },
+    "dockerfile_port": {
+      "type": "integer",
+      "description": "Port discovered from the Dockerfile EXPOSE directive."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "title": "srv site metadata"
+}
