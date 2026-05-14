@@ -142,6 +142,7 @@ release-major: _release-checks
     NEW_VERSION="v${NEW_MAJOR}.0.0"
     echo "Bumping from $CURRENT_TAG to $NEW_VERSION"
     git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+    git push origin HEAD
     git push origin "$NEW_VERSION"
     gh release create "$NEW_VERSION" --generate-notes
     echo "Released $NEW_VERSION"
@@ -158,6 +159,7 @@ release-minor: _release-checks
     NEW_VERSION="v${MAJOR}.${NEW_MINOR}.0"
     echo "Bumping from $CURRENT_TAG to $NEW_VERSION"
     git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+    git push origin HEAD
     git push origin "$NEW_VERSION"
     gh release create "$NEW_VERSION" --generate-notes
     echo "Released $NEW_VERSION"
@@ -175,6 +177,7 @@ release-patch: _release-checks
     NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
     echo "Bumping from $CURRENT_TAG to $NEW_VERSION"
     git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+    git push origin HEAD
     git push origin "$NEW_VERSION"
     gh release create "$NEW_VERSION" --generate-notes
     echo "Released $NEW_VERSION"
