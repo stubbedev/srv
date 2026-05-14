@@ -4,10 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/mkcert"
+	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -126,7 +126,7 @@ func hasNSSProfile() bool {
 // /etc/os-release rather than running lsb_release: it's universal, doesn't
 // require a subprocess, and gives us ID + ID_LIKE for derivative distros.
 func certutilInstallHint() string {
-	if runtime.GOOS != "linux" {
+	if !platform.IsLinux() {
 		return ""
 	}
 	id, idLike := osReleaseIDs()

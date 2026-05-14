@@ -154,7 +154,9 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 			status = "unknown"
 		}
 		ui.Print("Service:  installed (%s)", status)
-		ui.Print("Location: %s", daemon.ServicePath())
+		if path, err := daemon.ServicePath(); err == nil {
+			ui.Print("Location: %s", path)
+		}
 	} else {
 		ui.Print("Service:  not installed")
 	}
@@ -255,21 +257,37 @@ func printLastLines(path string, n int) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	// Collect all lines then print the last n.
-	// For typical daemon log sizes this is fine; a ring-buffer approach
-	// would be needed only for very large files.
-	var lines []string
+	if n <= 0 {
+		return nil
+	}
+
+	// Ring buffer of size n: at any moment we hold only the last n lines, so
+	// memory stays bounded regardless of log file size. write tracks how many
+	// lines we've consumed total; len(ring)-write%n gives the oldest slot.
+	ring := make([]string, n)
+	write := 0
 	scanner := bufio.NewScanner(f)
+	// Allow lines up to 1 MiB — the default 64 KiB limit truncates long stack
+	// traces silently. printLastLines is only used for the daemon's own log.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		ring[write%n] = scanner.Text()
+		write++
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading log file: %w", err)
 	}
 
-	start := max(len(lines)-n, 0)
-	for _, line := range lines[start:] {
-		fmt.Println(line)
+	// Emit in chronological order. If we wrote fewer than n lines, the ring
+	// is partially filled — start from index 0. Otherwise the oldest line
+	// lives at write%n.
+	count := min(write, n)
+	start := 0
+	if write > n {
+		start = write % n
+	}
+	for i := 0; i < count; i++ {
+		fmt.Println(ring[(start+i)%n])
 	}
 	return nil
 }
@@ -308,7 +326,9 @@ func runDaemonInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Success("Daemon service installed and started")
-	ui.Dim("Service file: %s", daemon.ServicePath())
+	if path, err := daemon.ServicePath(); err == nil {
+		ui.Dim("Service file: %s", path)
+	}
 	ui.Dim("The daemon will start automatically on login")
 
 	return nil

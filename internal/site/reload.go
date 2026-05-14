@@ -107,7 +107,7 @@ func Reload(name string) (*ReloadResult, error) {
 	case SiteTypePHP:
 		// Re-render nginx.conf + docker-compose.yml. The Dockerfile is also
 		// regenerated; if a rebuild is needed, the user must run `srv restart`.
-		if err := WritePHPSiteConfig(name, *meta, RawPHPDefaults(), true); err != nil {
+		if err := WritePHPSiteConfig(name, *meta, PHPSiteInfoFromMetadata(*meta), true); err != nil {
 			return res, fmt.Errorf("regenerate PHP config: %w", err)
 		}
 		res.NeedsRestart = true

@@ -148,9 +148,11 @@ func EnsureLocalCert(siteName string, domains []string, wildcard bool) (bool, er
 		return true, GenerateLocalCert(siteName, domains, wildcard)
 	}
 
-	// Check if cert needs renewal
+	// Check if cert needs renewal (also regenerate when the file is unparseable —
+	// the cert.Corrupt path catches truncated/damaged files that LocalCertsExist
+	// can't detect by stat alone).
 	cert := GetLocalCertInfo(siteName, primary)
-	if cert.IsExpired || cert.DaysLeft <= RenewThresholdDays {
+	if cert.Corrupt || cert.IsExpired || cert.DaysLeft <= RenewThresholdDays {
 		return true, GenerateLocalCert(siteName, domains, wildcard)
 	}
 
@@ -313,6 +315,11 @@ type CertInfo struct {
 	ExpiresAt time.Time
 	DaysLeft  int
 	IsExpired bool
+	// Corrupt is true when a cert file is present on disk but cannot be parsed
+	// as a valid X.509 certificate (bad PEM, truncated bytes, etc.). Callers
+	// can use this to surface the corruption to the user instead of treating
+	// it as "just regenerate quietly."
+	Corrupt bool
 }
 
 // GetLocalCertInfo returns information about a specific site's SSL certificate.
@@ -350,7 +357,11 @@ func ListLocalCerts() []CertInfo {
 }
 
 // parseCertFile reads a PEM certificate file and returns expiry info.
-// Returns Exists: false if the file doesn't exist or is malformed.
+//
+// Three outcomes:
+//   - file missing → Exists=false, Corrupt=false (the normal "issue a new cert" path)
+//   - file present but unparseable → Exists=false, Corrupt=true (the user should know)
+//   - valid cert → Exists=true, with ExpiresAt/DaysLeft/IsExpired populated
 func parseCertFile(certPath string) CertInfo {
 	data, err := os.ReadFile(certPath)
 	if err != nil {
@@ -359,14 +370,12 @@ func parseCertFile(certPath string) CertInfo {
 
 	block, _ := pem.Decode(data)
 	if block == nil {
-		// File exists but is not valid PEM - treat as missing/corrupt
-		return CertInfo{Exists: false}
+		return CertInfo{Exists: false, Corrupt: true}
 	}
 
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		// PEM decoded but certificate is invalid - treat as missing/corrupt
-		return CertInfo{Exists: false}
+		return CertInfo{Exists: false, Corrupt: true}
 	}
 
 	now := time.Now()

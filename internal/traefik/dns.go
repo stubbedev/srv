@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell"
 )
 
@@ -54,7 +54,7 @@ func DetectResolver() DNSResolverType {
 	}
 
 	// Check for macOS resolver directory capability
-	if runtime.GOOS == "darwin" {
+	if platform.IsDarwin() {
 		return ResolverMacOS
 	}
 

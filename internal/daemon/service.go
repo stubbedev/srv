@@ -6,11 +6,11 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/platform"
 )
 
 // Service file paths
@@ -27,10 +27,10 @@ const (
 
 // IsInstalled checks if the daemon service is installed.
 func IsInstalled() bool {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		return isSystemdInstalled()
-	case "darwin":
+	case platform.IsDarwin():
 		return isLaunchdInstalled()
 	default:
 		return false
@@ -39,53 +39,53 @@ func IsInstalled() bool {
 
 // Install installs the daemon as a system service.
 func Install() error {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		return installSystemd()
-	case "darwin":
+	case platform.IsDarwin():
 		return installLaunchd()
 	default:
-		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+		return platform.UnsupportedError("daemon installation")
 	}
 }
 
 // Uninstall removes the daemon system service.
 func Uninstall() error {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		return uninstallSystemd()
-	case "darwin":
+	case platform.IsDarwin():
 		return uninstallLaunchd()
 	default:
-		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+		return platform.UnsupportedError("daemon uninstall")
 	}
 }
 
 // Restart restarts the daemon service.
 func Restart() error {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		return restartSystemd()
-	case "darwin":
+	case platform.IsDarwin():
 		return restartLaunchd()
 	default:
-		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+		return platform.UnsupportedError("daemon restart")
 	}
 }
 
 // stopService stops the daemon service without uninstalling it.
 func stopService() error {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		return exec.Command("systemctl", "--user", "stop", SystemdServiceName).Run()
-	case "darwin":
+	case platform.IsDarwin():
 		plistPath, err := launchdPlistPath()
 		if err != nil {
 			return err
 		}
 		return exec.Command("launchctl", "unload", plistPath).Run()
 	default:
-		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+		return platform.UnsupportedError("daemon stop")
 	}
 }
 
@@ -373,25 +373,25 @@ func GetLaunchdStatus() (string, error) {
 }
 
 // ServicePath returns the path to the service file for the current OS.
-func ServicePath() string {
-	switch runtime.GOOS {
-	case "linux":
-		path, _ := systemdServicePath()
-		return path
-	case "darwin":
-		path, _ := launchdPlistPath()
-		return path
+// Returns an error on unsupported platforms or when the home directory
+// cannot be resolved — callers should not blindly pass an empty string to os.Stat.
+func ServicePath() (string, error) {
+	switch {
+	case platform.IsLinux():
+		return systemdServicePath()
+	case platform.IsDarwin():
+		return launchdPlistPath()
 	default:
-		return ""
+		return "", platform.UnsupportedError("service management")
 	}
 }
 
 // ServiceStatus returns the status of the daemon service.
 func ServiceStatus() (string, error) {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		return GetSystemdStatus()
-	case "darwin":
+	case platform.IsDarwin():
 		return GetLaunchdStatus()
 	default:
 		return "unsupported", nil

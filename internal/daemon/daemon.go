@@ -8,10 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	dockerevents "github.com/docker/docker/api/types/events"
 	dockerfilters "github.com/docker/docker/api/types/filters"
 	dockerclient "github.com/docker/docker/client"
@@ -283,8 +283,9 @@ func (d *Daemon) handleContainerStart(event dockerevents.Message) {
 
 	// Connect the container to our network
 	if err := docker.ConnectContainerToNetwork(containerName, d.networkName, containerName); err != nil {
-		if !strings.Contains(err.Error(), constants.ErrAlreadyExists) &&
-			!strings.Contains(err.Error(), constants.ErrEndpointExists) {
+		// docker.ConnectContainerToNetwork already swallows "already connected"
+		// conflicts; anything that reaches us here is a real failure worth logging.
+		if !cerrdefs.IsConflict(err) {
 			d.log("Failed to connect %s to network: %v", containerName, err)
 		}
 	} else {

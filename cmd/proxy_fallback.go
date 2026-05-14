@@ -8,12 +8,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/platform"
+	"github.com/stubbedev/srv/internal/ui"
 )
 
 // splitTargetURL extracts the host and port from a `http://host:port` URL.
@@ -97,7 +98,13 @@ func removeFallbackSidecar(cfg *config.Config, name string) error {
 		}
 		return err
 	}
-	_ = docker.ComposeDown(dir)
+	if err := docker.ComposeDown(dir); err != nil {
+		// Surface the failure so the user knows the container may still be
+		// running even after we remove its compose directory. We still proceed
+		// with the RemoveAll — leaving the dir on disk after a partial cleanup
+		// is worse than a stranded container the user can `docker rm` themselves.
+		ui.Warn("could not stop fallback sidecar %s: %v", fallbackContainerName(name), err)
+	}
 	return os.RemoveAll(dir)
 }
 
@@ -161,7 +168,7 @@ func renderFallbackNginx(spec fallbackSpec) (string, error) {
 // on Docker Desktop's automatic alias.
 func renderFallbackCompose(spec fallbackSpec, nginxConfDir, networkName string) string {
 	extraHosts := ""
-	if runtime.GOOS == "linux" && spec.PrimaryHost == constants.DockerHostInternal {
+	if platform.IsLinux() && spec.PrimaryHost == constants.DockerHostInternal {
 		extraHosts = `
     extra_hosts:
       - "host.docker.internal:host-gateway"`

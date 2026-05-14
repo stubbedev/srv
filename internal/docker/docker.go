@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -122,7 +123,9 @@ func CreateNetwork(name string) error {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("docker network create timed out")
 		}
-		if strings.Contains(err.Error(), constants.ErrAlreadyExists) {
+		// Network already exists → idempotent no-op. errdefs.IsConflict
+		// covers the HTTP 409 the daemon returns regardless of error wording.
+		if cerrdefs.IsConflict(err) {
 			return nil
 		}
 		return err
@@ -543,8 +546,10 @@ func connectContainerByID(ctx context.Context, containerID, networkName, alias s
 
 	err = cli.NetworkConnect(ctx, networkName, containerID, endpointCfg)
 	if err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, constants.ErrAlreadyExists) || strings.Contains(errStr, constants.ErrEndpointExists) {
+		// Container is already attached to the network → idempotent no-op.
+		// Docker returns HTTP 409 for both "already exists" and "endpoint with
+		// name <x> already exists" — errdefs.IsConflict catches both.
+		if cerrdefs.IsConflict(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to connect container to network: %w", err)

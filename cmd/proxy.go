@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
@@ -253,7 +253,7 @@ func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error
 		// IPv6 loopback (::1) — e.g. Nuxt, Vite — are also reachable.
 		// On Mac/Windows, Traefik runs in bridge mode and needs host.docker.internal.
 		host := constants.DockerHostInternal
-		if runtime.GOOS == "linux" {
+		if platform.IsLinux() {
 			host = constants.LocalhostAlias
 		}
 		return fmt.Sprintf("http://%s:%s", host, input.port), nil

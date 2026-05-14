@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"net/mail"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell"
 )
 
@@ -166,7 +167,7 @@ func DockerComposeTemplate(networkName, sitesDir, dnsUser, dnsPass string) strin
       - traefik`
 	hostRelay := ""
 
-	if runtime.GOOS == "linux" {
+	if platform.IsLinux() {
 		// Use host network mode on Linux - this gives Traefik access to localhost
 		// Traefik can still proxy to Docker containers via their published ports on localhost
 		networkMode = `
@@ -374,10 +375,16 @@ func EnsureConfig(email string) error {
 	return nil
 }
 
+// managedTraefikSections are the top-level keys that srv owns. The template
+// is authoritative for these; any user edits in the existing file are replaced.
+var managedTraefikSections = []string{"providers", "certificatesResolvers"}
+
 // writeOrMergeTraefikYML writes the traefik.yml file, merging with existing config if present.
-// User-customizable sections (api, log, accessLog, metrics, tracing) are preserved.
-// Managed sections (providers, certificatesResolvers) are always updated.
-// For entryPoints, user-added entries are preserved but web/websecure are ensured.
+// Managed sections (providers, certificatesResolvers) are always taken from the template.
+// entryPoints are merged: user additions preserved, web/websecure/internal ensured from template.
+// All other top-level keys (api, log, metrics, tracing, experimental, tls, …) are preserved
+// verbatim from the existing file. If the existing file is malformed YAML, the call fails
+// rather than silently overwriting it — the user's customizations are too valuable to drop.
 func writeOrMergeTraefikYML(path, networkName, email string) error {
 	// Prepare the template with substitutions
 	templateYML := strings.ReplaceAll(TraefikYML, "{{NETWORK}}", networkName)
@@ -393,11 +400,10 @@ func writeOrMergeTraefikYML(path, networkName, email string) error {
 		return fmt.Errorf("failed to read existing traefik.yml: %w", err)
 	}
 
-	// Parse existing config
+	// Parse existing config — refuse to clobber a file we cannot parse.
 	var existing map[string]any
 	if err := yaml.Unmarshal(existingData, &existing); err != nil {
-		// If parsing fails, overwrite with fresh config
-		return os.WriteFile(path, []byte(templateYML), constants.FilePermDefault)
+		return fmt.Errorf("existing traefik.yml at %s is not valid YAML: %w\n(refusing to overwrite — fix the file or delete it to regenerate)", path, err)
 	}
 
 	// Parse template config
@@ -419,25 +425,35 @@ func writeOrMergeTraefikYML(path, networkName, email string) error {
 }
 
 // mergeTraefikConfigs merges existing config with template.
-// - User sections (api, log, accessLog, metrics, tracing) are preserved from existing
 // - Managed sections (providers, certificatesResolvers) are taken from template
 // - entryPoints are merged: user additions preserved, web/websecure ensured from template
+// - Every other top-level key in either map is preserved (existing wins on conflict)
 func mergeTraefikConfigs(existing, template map[string]any) map[string]any {
-	result := make(map[string]any)
+	result := make(map[string]any, len(existing)+len(template))
 
-	// User-customizable sections - preserve from existing, fall back to template
-	userSections := []string{"api", "log", "accessLog", "metrics", "tracing"}
-	for _, section := range userSections {
-		if val, ok := existing[section]; ok {
-			result[section] = val
-		} else if val, ok := template[section]; ok {
-			result[section] = val
+	managed := make(map[string]struct{}, len(managedTraefikSections)+1)
+	for _, k := range managedTraefikSections {
+		managed[k] = struct{}{}
+	}
+	managed["entryPoints"] = struct{}{}
+
+	// Preserve every non-managed key from the template first (so it acts as a
+	// default), then let the existing file override — user edits win.
+	for k, v := range template {
+		if _, isManaged := managed[k]; isManaged {
+			continue
 		}
+		result[k] = v
+	}
+	for k, v := range existing {
+		if _, isManaged := managed[k]; isManaged {
+			continue
+		}
+		result[k] = v
 	}
 
 	// Managed sections - always use template
-	managedSections := []string{"providers", "certificatesResolvers"}
-	for _, section := range managedSections {
+	for _, section := range managedTraefikSections {
 		if val, ok := template[section]; ok {
 			result[section] = val
 		}
@@ -504,7 +520,7 @@ func GetEmail(prompt bool) (string, error) {
 				Placeholder("you@example.com").
 				Value(&email).
 				Validate(func(s string) error {
-					if !strings.Contains(s, "@") || !strings.Contains(s, ".") || strings.Index(s, "@") > strings.LastIndex(s, ".") {
+					if _, err := mail.ParseAddress(strings.TrimSpace(s)); err != nil {
 						return fmt.Errorf("please enter a valid email address")
 					}
 					return nil
