@@ -130,6 +130,37 @@ _release-checks:
         git commit -m "chore: update flake.lock for release"
         echo "Committed flake.lock update"
     fi
+    echo "Verifying nix build (refreshing vendorHash if stale)..."
+    for attempt in 1 2 3; do
+        BUILD_LOG=$(mktemp)
+        if nix build --no-link .#srv 2>"$BUILD_LOG"; then
+            rm "$BUILD_LOG"
+            break
+        fi
+        if ! grep -q 'hash mismatch in fixed-output derivation' "$BUILD_LOG"; then
+            cat "$BUILD_LOG" >&2
+            rm "$BUILD_LOG"
+            exit 1
+        fi
+        OLD=$(grep 'specified:' "$BUILD_LOG" | head -1 | awk '{print $NF}')
+        NEW=$(grep -E '^[[:space:]]*got:' "$BUILD_LOG" | head -1 | awk '{print $NF}')
+        rm "$BUILD_LOG"
+        if [ -z "$OLD" ] || [ -z "$NEW" ]; then
+            echo "Error: could not parse hash mismatch from nix output" >&2
+            exit 1
+        fi
+        echo "Updating vendorHash: $OLD -> $NEW"
+        sed -i "s|$OLD|$NEW|" flake.nix
+        if [ "$attempt" = "3" ]; then
+            echo "Error: nix build still failing after vendorHash updates" >&2
+            exit 1
+        fi
+    done
+    if [ -n "$(git status --porcelain flake.nix)" ]; then
+        git add flake.nix
+        git commit -m "chore: update vendorHash for release"
+        echo "Committed vendorHash update"
+    fi
 
 # Release a new major version (X.y.z -> X+1.0.0) with GitHub release
 release-major: _release-checks
