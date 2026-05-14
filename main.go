@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/mattn/go-isatty"
 	"github.com/stubbedev/srv/cmd"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/ui"
@@ -23,9 +24,10 @@ var (
 
 // restoreCursor outputs the ANSI escape sequence to show the cursor.
 // This ensures the cursor is visible after the program exits,
-// even if interrupted during interactive prompts.
+// even if interrupted during interactive prompts. Writes to stderr
+// so it never pollutes stdout (e.g. `srv completion zsh` output).
 func restoreCursor() {
-	fmt.Print("\033[?25h")
+	fmt.Fprint(os.Stderr, "\033[?25h")
 }
 
 func main() {
@@ -33,10 +35,12 @@ func main() {
 }
 
 func run() int {
-	// Skip cursor handling during shell completion to avoid polluting output
-	isCompletion := len(os.Args) > 1 && (os.Args[1] == "__complete" || os.Args[1] == "__completeNoDesc")
+	// Skip cursor handling when stderr isn't a TTY (e.g. shell completion,
+	// piped output, generated completion scripts) to avoid emitting escape
+	// sequences that would pollute the consumer.
+	skipCursor := !isatty.IsTerminal(os.Stderr.Fd())
 
-	if !isCompletion {
+	if !skipCursor {
 		// Ensure cursor is always restored on exit
 		defer restoreCursor()
 
