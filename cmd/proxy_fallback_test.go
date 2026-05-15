@@ -49,20 +49,3 @@ func TestRenderFallbackNginx_BadURL(t *testing.T) {
 		}
 	}
 }
-
-func TestSplitTargetURL(t *testing.T) {
-	host, port, err := splitTargetURL("http://host.docker.internal:3000")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if host != "host.docker.internal" || port != "3000" {
-		t.Errorf("got %s:%s, want host.docker.internal:3000", host, port)
-	}
-	host, port, err = splitTargetURL("http://redis")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if host != "redis" || port != "80" {
-		t.Errorf("default port for http: got %s:%s, want redis:80", host, port)
-	}
-}

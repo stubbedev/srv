@@ -127,29 +127,57 @@ func setupSystemdResolved() error {
 	return updateSystemdResolvedConfig(domains)
 }
 
+// isUnderLocalTLD reports whether domain is the same as, or a subdomain of,
+// one of the standard local TLDs (.test/.local/.localhost). Such domains are
+// already routed by the per-TLD entry, so they need no per-domain routing rule.
+func isUnderLocalTLD(domain string) bool {
+	for _, tld := range LocalDomains {
+		if domain == tld || strings.HasSuffix(domain, "."+tld) {
+			return true
+		}
+	}
+	return false
+}
+
 // updateSystemdResolvedConfig writes /etc/systemd/resolved.conf.d/srv-local.conf
 // so that systemd-resolved routes queries for each registered local domain
 // (and the standard local TLDs) through dnsmasq on 127.0.0.1:53.
 // It is called whenever the domain list changes.
+//
+// Restarting systemd-resolved disrupts DNS for the whole machine, so the
+// restart is skipped when the rendered config is byte-identical to what is
+// already on disk — which is the common case, since domains under a standard
+// local TLD (e.g. foo.test) are already covered by the ~test routing entry.
 func updateSystemdResolvedConfig(domains []string) error {
 	configFile := constants.SystemdResolvedConfigPath
 	configDir := filepath.Dir(configFile)
 
 	// Build the Domains= value: standard local TLDs plus one entry per
-	// registered domain. The ~ prefix tells systemd-resolved to route
-	// matching queries to this DNS server rather than to the default.
+	// registered domain that is NOT already covered by a local TLD entry.
+	// The ~ prefix tells systemd-resolved to route matching queries to this
+	// DNS server rather than to the default.
 	routingDomains := make([]string, 0, len(LocalDomains)+len(domains))
 	for _, tld := range LocalDomains {
 		routingDomains = append(routingDomains, "~"+tld)
 	}
 	for _, d := range domains {
-		routingDomains = append(routingDomains, "~"+BareDomain(d))
+		bare := BareDomain(d)
+		if isUnderLocalTLD(bare) {
+			continue
+		}
+		routingDomains = append(routingDomains, "~"+bare)
 	}
 
 	content := fmt.Sprintf("[Resolve]\nDNS=%s\nDomains=%s\n",
 		constants.LocalhostIP,
 		strings.Join(routingDomains, " "),
 	)
+
+	// Nothing to do — and crucially, no system-wide DNS restart — when the
+	// routing config has not actually changed.
+	if existing, err := os.ReadFile(configFile); err == nil && string(existing) == content {
+		return nil
+	}
 
 	if err := shell.SudoMkdir(configDir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
@@ -267,6 +295,10 @@ func setupNetworkManager() error {
 // updateNetworkManagerConfig writes /etc/NetworkManager/dnsmasq.d/srv-local.conf
 // so that NetworkManager's built-in dnsmasq routes queries for each registered
 // domain through srv's dnsmasq on 127.0.0.1:53.
+//
+// Restarting NetworkManager is disruptive, so it is skipped when the rendered
+// config is unchanged — which is the common case, since domains under a
+// standard local TLD are already covered by the per-TLD routing entry.
 func updateNetworkManagerConfig(domains []string) error {
 	configFile := constants.NetworkManagerConfigPath
 	configDir := filepath.Dir(configFile)
@@ -277,7 +309,15 @@ func updateNetworkManagerConfig(domains []string) error {
 		fmt.Fprintf(&content, "server=/%s/%s\n", tld, constants.LocalhostIP)
 	}
 	for _, d := range domains {
-		fmt.Fprintf(&content, "server=/%s/%s\n", BareDomain(d), constants.LocalhostIP)
+		bare := BareDomain(d)
+		if isUnderLocalTLD(bare) {
+			continue
+		}
+		fmt.Fprintf(&content, "server=/%s/%s\n", bare, constants.LocalhostIP)
+	}
+
+	if existing, err := os.ReadFile(configFile); err == nil && string(existing) == content.String() {
+		return nil
 	}
 
 	if err := shell.SudoMkdir(configDir); err != nil {
@@ -527,7 +567,65 @@ func UnregisterLocalDomain(domain string) error {
 	return nil
 }
 
-// UpdateDnsmasqConfig regenerates dnsmasq.conf based on registered domains and reloads DNS.
+// buildDnsmasqConf renders dnsmasq.conf. Only wildcard domains land here (via
+// address= directives); exact domains go into the hostsdir instead. dnsmasq
+// re-reads this file only on a full restart, so changing its content is what
+// makes a DNS container restart necessary.
+func buildDnsmasqConf(wildcards, upstreamDNS []string) string {
+	var b strings.Builder
+	b.WriteString("# Local domains managed by srv\n")
+	b.WriteString("# Do not edit manually - changes will be overwritten\n\n")
+	b.WriteString("# Exact (non-wildcard) domains are auto-reloaded from this directory\n")
+	b.WriteString("hostsdir=/etc/dnsmasq.hosts\n\n")
+
+	if len(wildcards) == 0 {
+		b.WriteString("# No wildcard domains registered\n")
+	} else {
+		b.WriteString("# Wildcard domains — match the apex and every subdomain\n")
+		for _, d := range wildcards {
+			fmt.Fprintf(&b, "address=/%s/127.0.0.1\n", d)
+		}
+	}
+
+	b.WriteString("\n# Forward all other queries to upstream DNS\n")
+	for _, server := range upstreamDNS {
+		fmt.Fprintf(&b, "server=%s\n", server)
+	}
+	b.WriteString("\n# Don't read /etc/resolv.conf\n")
+	b.WriteString("no-resolv\n")
+	return b.String()
+}
+
+// buildDnsmasqHosts renders the /etc/hosts-format file in the hostsdir. dnsmasq
+// auto-reloads this file without a restart. It always carries a header so the
+// file is never zero-length — dnsmasq cannot detect a change to an emptied
+// file, so removing the last domain still needs a non-empty file to land.
+func buildDnsmasqHosts(exact []string) string {
+	var b strings.Builder
+	b.WriteString("# Local domains managed by srv — auto-reloaded by dnsmasq\n")
+	b.WriteString("# Do not edit manually - changes will be overwritten\n")
+	for _, d := range exact {
+		fmt.Fprintf(&b, "127.0.0.1 %s\n", d)
+	}
+	return b.String()
+}
+
+// fileContentDiffers reports whether the file at path differs from want.
+// A missing or unreadable file counts as different.
+func fileContentDiffers(path, want string) bool {
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	return string(existing) != want
+}
+
+// UpdateDnsmasqConfig regenerates the dnsmasq config from the registered
+// domains. Exact domains are written to the hostsdir and applied with a
+// SIGHUP; wildcard domains and upstream servers go into dnsmasq.conf and need
+// a container restart. The container is only restarted when dnsmasq.conf
+// actually changed, so adding or removing an ordinary site no longer
+// interrupts DNS.
 func UpdateDnsmasqConfig() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -539,40 +637,43 @@ func UpdateDnsmasqConfig() error {
 		return err
 	}
 
-	// Generate dnsmasq.conf
-	var content strings.Builder
-	content.WriteString("# Local domains managed by srv\n")
-	content.WriteString("# Do not edit manually - changes will be overwritten\n\n")
-
-	if len(domains) == 0 {
-		content.WriteString("# No local domains registered\n")
-	} else {
-		for _, domain := range domains {
-			if IsWildcardEntry(domain) {
-				// address= matches the apex AND every subdomain — what
-				// users opt into via --wildcard.
-				fmt.Fprintf(&content, "address=/%s/127.0.0.1\n", BareDomain(domain))
-			} else {
-				// host-record creates an A record for the precise name only
-				// (like an /etc/hosts entry); subdomains are not matched.
-				fmt.Fprintf(&content, "host-record=%s,127.0.0.1\n", domain)
-			}
+	// Split registered domains: wildcards need an address= directive in the
+	// main config (restart to apply); exact names go into the auto-reloaded
+	// hostsdir (no restart). Entries are pre-sorted by SaveLocalDomains.
+	var wildcards, exact []string
+	for _, d := range domains {
+		if IsWildcardEntry(d) {
+			wildcards = append(wildcards, BareDomain(d))
+		} else {
+			exact = append(exact, d)
 		}
 	}
 
-	content.WriteString("\n# Forward all other queries to upstream DNS\n")
 	upstreamDNS := []string{constants.GoogleDNS1, constants.GoogleDNS2}
 	if userCfg, ucErr := cfg.LoadUserConfig(); ucErr == nil && len(userCfg.UpstreamDNS) > 0 {
 		upstreamDNS = userCfg.UpstreamDNS
 	}
-	for _, server := range upstreamDNS {
-		fmt.Fprintf(&content, "server=%s\n", server)
-	}
-	content.WriteString("\n# Don't read /etc/resolv.conf\n")
-	content.WriteString("no-resolv\n")
+
+	confBody := buildDnsmasqConf(wildcards, upstreamDNS)
+	hostsBody := buildDnsmasqHosts(exact)
 
 	dnsmasqPath := filepath.Join(cfg.TraefikDir, constants.DnsmasqConfFile)
-	if err := os.WriteFile(dnsmasqPath, []byte(content.String()), constants.FilePermDefault); err != nil {
+	hostsDir := filepath.Join(cfg.TraefikDir, constants.DnsmasqHostsDir)
+	hostsPath := filepath.Join(hostsDir, constants.DnsmasqHostsFile)
+
+	// Decide up front what kind of reload each file needs: a change to the
+	// main config requires a container restart, a change confined to the
+	// hostsdir only needs a SIGHUP.
+	confChanged := fileContentDiffers(dnsmasqPath, confBody)
+	hostsChanged := fileContentDiffers(hostsPath, hostsBody)
+
+	if err := os.MkdirAll(hostsDir, constants.DirPermDefault); err != nil {
+		return fmt.Errorf("failed to create dnsmasq hosts dir: %w", err)
+	}
+	if err := os.WriteFile(hostsPath, []byte(hostsBody), constants.FilePermDefault); err != nil {
+		return fmt.Errorf("failed to write dnsmasq hosts file: %w", err)
+	}
+	if err := os.WriteFile(dnsmasqPath, []byte(confBody), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
 	}
 
@@ -602,20 +703,51 @@ func UpdateDnsmasqConfig() error {
 	// Flush system DNS cache so the new routing takes effect immediately.
 	FlushDNSCache()
 
-	// Reload DNS container if running
-	if IsDNSRunning() {
+	if !IsDNSRunning() {
+		return nil
+	}
+
+	// A change to dnsmasq.conf (wildcard domains or upstream servers) needs a
+	// container restart — dnsmasq only re-reads the main config on restart.
+	if confChanged {
 		return ReloadDNS()
+	}
+
+	// A change confined to the hostsdir — the common case, an ordinary site
+	// add or remove — only needs a SIGHUP: dnsmasq re-reads the hosts files
+	// and flushes its cache without dropping the listening socket. If the
+	// signal fails for any reason, fall back to a full reload so the change
+	// still lands.
+	if hostsChanged {
+		if err := reloadDNSHosts(); err != nil {
+			return ReloadDNS()
+		}
 	}
 
 	return nil
 }
 
-// ReloadDNS restarts the DNS container to pick up config changes.
+// reloadDNSHosts sends SIGHUP to the running dnsmasq so it re-reads its
+// hostsdir and flushes its cache. This applies exact-domain adds and removes
+// instantly without restarting the container. It does NOT re-read the main
+// config file — wildcard/upstream changes still go through ReloadDNS.
+func reloadDNSHosts() error {
+	return docker.ExecNonInteractive(docker.ContainerDNS, "pkill", "-HUP", "dnsmasq")
+}
+
+// ReloadDNS recreates the DNS container so it picks up changes to dnsmasq.conf.
+// It first regenerates docker-compose.yml, then uses `up -d --force-recreate`
+// rather than `restart`, so that changes to the compose definition itself —
+// notably the hostsdir bind mount added by newer srv versions — also take
+// effect on an install created by an older version, without a full reinstall.
 func ReloadDNS() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	return docker.Compose(cfg.TraefikDir, "restart", "dns")
+	if err := writeTraefikCompose(cfg); err != nil {
+		return fmt.Errorf("refresh traefik compose: %w", err)
+	}
+	return docker.Compose(cfg.TraefikDir, "up", "-d", "--force-recreate", "dns")
 }

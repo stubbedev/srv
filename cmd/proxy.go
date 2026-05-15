@@ -315,16 +315,30 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 	// upstream so 5xx responses transparently re-proxy to the fallback URL.
 	// Traefik then routes to the sidecar instead of the original target.
 	if proxyAddFlags.fallbackURL != "" {
-		primaryHost, primaryPort, perr := splitTargetURL(targetURL)
-		if perr != nil {
-			return fmt.Errorf("internal: cannot parse primary target: %w", perr)
-		}
+		// The fallback sidecar must be able to reach the primary upstream the
+		// same way it would be reached without the sidecar — which depends on
+		// both the primary type and the platform.
 		spec := fallbackSpec{
 			Name:            input.name,
-			PrimaryHost:     primaryHost,
-			PrimaryPort:     primaryPort,
 			FallbackURL:     proxyAddFlags.fallbackURL,
 			FallbackTimeout: proxyAddFlags.fallbackTimeout,
+		}
+		switch {
+		case input.isContainer:
+			// Bridge sidecar on the srv network; reaches the primary by name.
+			spec.PrimaryHost = input.containerName
+			spec.PrimaryPort = input.containerPort
+		case platform.IsLinux():
+			// Localhost-port primary on Linux: a bridge container cannot reach
+			// a 127.0.0.1 host service, so the sidecar shares the host network
+			// namespace and dials the loopback directly.
+			spec.HostNetwork = true
+			spec.PrimaryHost = constants.LocalhostIP
+			spec.PrimaryPort = input.port
+		default:
+			// Docker Desktop: a bridge sidecar reaches the host via the alias.
+			spec.PrimaryHost = constants.DockerHostInternal
+			spec.PrimaryPort = input.port
 		}
 		sidecarURL, ferr := writeFallbackSidecar(cfg, spec)
 		if ferr != nil {

@@ -3,7 +3,12 @@
 package cmd
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
+	"net/http"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -125,15 +130,78 @@ func runMetricsDisable(cmd *cobra.Command, args []string) error {
 }
 
 func runMetricsStatus(cmd *cobra.Command, args []string) error {
-	if docker.IsContainerRunning(metrics.PrometheusContainer) {
+	promRunning := docker.IsContainerRunning(metrics.PrometheusContainer)
+	grafanaRunning := docker.IsContainerRunning(metrics.GrafanaContainer)
+
+	if promRunning {
 		ui.Success("Prometheus: running (%s)", metrics.PrometheusContainer)
 	} else {
 		ui.Warn("Prometheus: not running")
 	}
-	if docker.IsContainerRunning(metrics.GrafanaContainer) {
+	if grafanaRunning {
 		ui.Success("Grafana:    running (%s)", metrics.GrafanaContainer)
 	} else {
 		ui.Warn("Grafana:    not running")
 	}
+
+	if !promRunning && !grafanaRunning {
+		ui.Blank()
+		ui.Info("The metrics stack is not enabled. Start it with:")
+		ui.Dim("    srv metrics enable")
+		return nil
+	}
+
+	ui.Blank()
+	ui.Bold("Open in your browser:")
+	reportMetricsEndpoint("Grafana", metrics.GrafanaDomain)
+	reportMetricsEndpoint("Prometheus", metrics.PrometheusDomain)
+
+	ui.Blank()
+	ui.Dim("Grafana login:      admin / admin")
+	ui.Dim("Traefik dashboard:  in Grafana, Dashboards > New > Import > ID 17347")
+	ui.Dim("Prometheus check:   query  traefik_entrypoint_requests_total  to confirm scraping")
 	return nil
+}
+
+// reportMetricsEndpoint prints one metrics URL with a DNS + reachability probe
+// so `srv metrics status` makes clear whether the UI is actually viewable —
+// not just whether the container happens to be running.
+func reportMetricsEndpoint(label, domain string) {
+	url := "https://" + domain
+	switch {
+	case !traefik.CheckDNS(domain):
+		ui.Warn("  %-12s %s  - DNS not resolving (run 'srv dns setup')", label, url)
+	case metricsURLResponds(url):
+		ui.Success("  %-12s %s", label, url)
+	default:
+		ui.Warn("  %-12s %s  - not responding yet (containers may still be starting)", label, url)
+	}
+}
+
+// metricsURLResponds reports whether the URL returns a usable HTTP response.
+// The mkcert cert is not in this process's trust store, so TLS verification is
+// skipped — we only care that Traefik routed the request to a live backend.
+// A 502 means Traefik could not reach the container, which is exactly the
+// failure we want to surface, so it counts as "not responding".
+//
+// Every connection is dialed straight at Traefik on 127.0.0.1:443 so the probe
+// does not depend on the system resolver (which, unlike a browser, may not
+// route .local through dnsmasq for this process).
+func metricsURLResponds(url string) bool {
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	client := &http.Client{
+		Timeout: 4 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // local reachability probe only
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return dialer.DialContext(ctx, network, "127.0.0.1:443")
+			},
+		},
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode != http.StatusBadGateway
 }

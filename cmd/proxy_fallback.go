@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,40 +14,25 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
-	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/ui"
 )
-
-// splitTargetURL extracts the host and port from a `http://host:port` URL.
-// Used when we need to point the fallback sidecar at the original primary
-// upstream after `connectProxyContainer` has resolved it.
-func splitTargetURL(target string) (host, port string, err error) {
-	parsed, perr := url.Parse(target)
-	if perr != nil {
-		return "", "", perr
-	}
-	host = parsed.Hostname()
-	port = parsed.Port()
-	if host == "" {
-		return "", "", fmt.Errorf("missing host in target %q", target)
-	}
-	if port == "" {
-		if parsed.Scheme == "https" {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-	return host, port, nil
-}
 
 // fallbackSpec captures what the sidecar needs to know to generate its config.
 type fallbackSpec struct {
 	Name            string // proxy name (used in container + dir names)
-	PrimaryHost     string // e.g. host.docker.internal or container name
+	PrimaryHost     string // host the sidecar dials for the primary upstream
 	PrimaryPort     string
 	FallbackURL     string // e.g. https://kontainer.com
 	FallbackTimeout string // e.g. 2s
+	// HostNetwork runs the sidecar in the host network namespace so it can
+	// reach a primary upstream bound to 127.0.0.1. Required on Linux for a
+	// localhost-port proxy: a bridge container cannot reach host loopback
+	// services, and the host firewall blocks bridge->host traffic.
+	HostNetwork bool
+	// ListenPort is the loopback port the sidecar's nginx listens on when
+	// HostNetwork is set — it cannot use :80, which Traefik owns. Ignored for
+	// a bridge sidecar, which always listens on :80.
+	ListenPort int
 }
 
 // fallbackContainerName returns the container name for a fallback sidecar.
@@ -60,10 +46,35 @@ func fallbackSiteDir(cfg *config.Config, name string) string {
 	return filepath.Join(cfg.SitesDir, "_proxy-"+name+"-fallback")
 }
 
+// findFreeLoopbackPort asks the OS for an unused TCP port on 127.0.0.1 by
+// binding port 0 and reading back the assignment. There is an unavoidable
+// race between releasing the port and the sidecar binding it, but the window
+// is tiny and the sidecar starts immediately after.
+func findFreeLoopbackPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("allocate loopback port: %w", err)
+	}
+	defer func() { _ = l.Close() }()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected listener address type %T", l.Addr())
+	}
+	return addr.Port, nil
+}
+
 // writeFallbackSidecar renders the nginx.conf + docker-compose.yml for a
 // fallback sidecar and starts the container. Returns the URL Traefik should
-// route to (e.g. http://srv-proxy-<name>-fallback:80).
+// route to.
 func writeFallbackSidecar(cfg *config.Config, spec fallbackSpec) (string, error) {
+	if spec.HostNetwork {
+		port, err := findFreeLoopbackPort()
+		if err != nil {
+			return "", err
+		}
+		spec.ListenPort = port
+	}
+
 	dir := fallbackSiteDir(cfg, spec.Name)
 	if err := os.MkdirAll(dir, constants.DirPermDefault); err != nil {
 		return "", fmt.Errorf("create fallback dir: %w", err)
@@ -86,6 +97,11 @@ func writeFallbackSidecar(cfg *config.Config, spec fallbackSpec) (string, error)
 		return "", fmt.Errorf("start fallback sidecar: %w", err)
 	}
 
+	// A host-network sidecar is reached on the loopback port it binds; a
+	// bridge sidecar is reached by container name on the srv network.
+	if spec.HostNetwork {
+		return fmt.Sprintf("http://127.0.0.1:%d", spec.ListenPort), nil
+	}
 	return fmt.Sprintf("http://%s:80", fallbackContainerName(spec.Name)), nil
 }
 
@@ -109,9 +125,10 @@ func removeFallbackSidecar(cfg *config.Config, name string) error {
 }
 
 // renderFallbackNginx produces the nginx configuration for the sidecar.
-// On a 5xx from the primary upstream, nginx re-proxies to the fallback URL,
-// rewriting the Host header to the fallback domain so the remote TLS handshake
-// presents the correct SNI.
+// On a 5xx from the primary upstream — including a connection refused, which
+// nginx reports as 502 — nginx re-proxies to the fallback URL, rewriting the
+// Host header to the fallback domain so the remote TLS handshake presents the
+// correct SNI.
 func renderFallbackNginx(spec fallbackSpec) (string, error) {
 	fbURL, err := url.Parse(spec.FallbackURL)
 	if err != nil {
@@ -126,10 +143,17 @@ func renderFallbackNginx(spec fallbackSpec) (string, error) {
 		timeout = "2s"
 	}
 
+	// A host-network sidecar must not bind :80 (Traefik owns it) — it listens
+	// on its allocated loopback port instead.
+	listen := "listen 80;"
+	if spec.HostNetwork {
+		listen = fmt.Sprintf("listen 127.0.0.1:%d;", spec.ListenPort)
+	}
+
 	var b strings.Builder
 	b.WriteString("# Generated by srv — fallback proxy sidecar\n")
 	b.WriteString("server {\n")
-	b.WriteString("    listen 80;\n")
+	fmt.Fprintf(&b, "    %s\n", listen)
 	b.WriteString("    server_name _;\n")
 	b.WriteString("    resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;\n")
 	b.WriteString("\n")
@@ -163,15 +187,23 @@ func renderFallbackNginx(spec fallbackSpec) (string, error) {
 }
 
 // renderFallbackCompose produces the docker-compose.yml for the sidecar.
-// On Linux we add an explicit extra_hosts entry mapping host.docker.internal
-// to host-gateway so the sidecar can reach localhost ports without depending
-// on Docker Desktop's automatic alias.
+//
+// A HostNetwork sidecar joins the host network namespace — the only way to
+// reach a primary upstream bound to 127.0.0.1 — and is reached by Traefik on
+// its loopback listen port. A bridge sidecar joins the srv network, reaches a
+// container primary by name, and is reached by Traefik by its own name.
 func renderFallbackCompose(spec fallbackSpec, nginxConfDir, networkName string) string {
-	extraHosts := ""
-	if platform.IsLinux() && spec.PrimaryHost == constants.DockerHostInternal {
-		extraHosts = `
-    extra_hosts:
-      - "host.docker.internal:host-gateway"`
+	if spec.HostNetwork {
+		return fmt.Sprintf(`# Generated by srv — fallback proxy sidecar for %s
+services:
+  fallback:
+    image: %s
+    container_name: %s
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - %s/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+`, spec.Name, constants.ImageNginxAlpine, fallbackContainerName(spec.Name), nginxConfDir)
 	}
 
 	return fmt.Sprintf(`# Generated by srv — fallback proxy sidecar for %s
@@ -179,7 +211,7 @@ services:
   fallback:
     image: %s
     container_name: %s
-    restart: unless-stopped%s
+    restart: unless-stopped
     volumes:
       - %s/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
@@ -189,5 +221,5 @@ networks:
   traefik:
     name: %s
     external: true
-`, spec.Name, constants.ImageNginxAlpine, fallbackContainerName(spec.Name), extraHosts, nginxConfDir, networkName)
+`, spec.Name, constants.ImageNginxAlpine, fallbackContainerName(spec.Name), nginxConfDir, networkName)
 }

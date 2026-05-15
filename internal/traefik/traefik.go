@@ -120,6 +120,7 @@ const dockerComposeTemplate = `services:
       - HTTP_PASS={{DNS_HTTP_PASS}}
     volumes:
       - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
+      - ./dnsmasq.hosts:/etc/dnsmasq.hosts:ro
     logging:
       driver: none{{HOST_RELAY}}
 
@@ -206,6 +207,19 @@ func yamlSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// writeTraefikCompose regenerates traefik/docker-compose.yml from the current
+// template. It is idempotent — the content is stable across calls — and exists
+// so callers other than EnsureConfig (notably ReloadDNS) can pick up template
+// changes such as a newly added bind mount without a full reinstall.
+func writeTraefikCompose(cfg *config.Config) error {
+	dnsUser, dnsPass, err := loadOrGenerateDNSCredentials(cfg.EnvTraefikPath())
+	if err != nil {
+		return err
+	}
+	composeYML := DockerComposeTemplate(cfg.NetworkName, cfg.SitesDir, dnsUser, dnsPass)
+	return os.WriteFile(cfg.TraefikComposePath(), []byte(composeYML), constants.FilePermDefault)
+}
+
 // readEnvFile reads the env.traefik file and returns its key/value pairs.
 // Returns an empty map if the file does not exist.
 func readEnvFile(path string) map[string]string {
@@ -287,11 +301,19 @@ func loadOrGenerateDNSCredentials(envPath string) (user, pass string, err error)
 }
 
 // DnsmasqConf is the initial dnsmasq configuration (no domains).
-// Domains are added dynamically via UpdateDnsmasqConfig().
+// Domains are added dynamically via UpdateDnsmasqConfig(). It must stay
+// byte-identical to buildDnsmasqConf(nil, {GoogleDNS1, GoogleDNS2}) so a fresh
+// install does not see a spurious config change on the first domain add.
+//
+// Exact (non-wildcard) domains live in the hostsdir, which dnsmasq auto-reloads
+// without a restart; only wildcard domains land in this file.
 const DnsmasqConf = `# Local domains managed by srv
 # Do not edit manually - changes will be overwritten
 
-# No local domains registered
+# Exact (non-wildcard) domains are auto-reloaded from this directory
+hostsdir=/etc/dnsmasq.hosts
+
+# No wildcard domains registered
 
 # Forward all other queries to upstream DNS
 server=8.8.8.8
@@ -315,6 +337,7 @@ func EnsureConfig(email string) error {
 		cfg.TraefikConfDir(),
 		filepath.Join(cfg.TraefikDir, constants.CertsSubdir),
 		filepath.Join(cfg.TraefikDir, constants.LogsSubdir),
+		filepath.Join(cfg.TraefikDir, constants.DnsmasqHostsDir),
 		cfg.SitesDir,
 	}
 	for _, dir := range dirs {
@@ -357,6 +380,12 @@ func EnsureConfig(email string) error {
 	if _, statErr := os.Stat(dnsmasqPath); os.IsNotExist(statErr) {
 		if err := os.WriteFile(dnsmasqPath, []byte(DnsmasqConf), constants.FilePermDefault); err != nil {
 			return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
+		}
+		// Seed an (empty but non-empty-file) hosts file so dnsmasq's hostsdir
+		// has something to read on first start.
+		hostsPath := filepath.Join(cfg.TraefikDir, constants.DnsmasqHostsDir, constants.DnsmasqHostsFile)
+		if err := os.WriteFile(hostsPath, []byte(buildDnsmasqHosts(nil)), constants.FilePermDefault); err != nil {
+			return fmt.Errorf("failed to write dnsmasq hosts file: %w", err)
 		}
 	} else {
 		if err := UpdateDnsmasqConfig(); err != nil {

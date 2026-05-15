@@ -44,6 +44,13 @@ const (
 	ACMEJSONFile = "acme.json"
 	// DnsmasqConfFile is the dnsmasq configuration file.
 	DnsmasqConfFile = "dnsmasq.conf"
+	// DnsmasqHostsDir is the directory dnsmasq watches (via the hostsdir=
+	// directive) for auto-reloaded exact host records. dnsmasq picks up
+	// changes to files in it without a restart or a SIGHUP.
+	DnsmasqHostsDir = "dnsmasq.hosts"
+	// DnsmasqHostsFile is the srv-managed file inside DnsmasqHostsDir holding
+	// one /etc/hosts-format line per registered non-wildcard local domain.
+	DnsmasqHostsFile = "srv-domains"
 )
 
 // File extensions.
