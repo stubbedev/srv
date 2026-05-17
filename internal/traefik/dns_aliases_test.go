@@ -55,7 +55,7 @@ func TestScanRedirectAliases(t *testing.T) {
 		writeRedirectFile(t, "http-style", `http:
   routers:
     redirect-foo:
-      rule: Host(` + "`foo.test`" + `)
+      rule: Host(`+"`foo.test`"+`)
       service: noop
 `)
 		// Files without the redirect- prefix must be ignored.

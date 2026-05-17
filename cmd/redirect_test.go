@@ -302,17 +302,17 @@ func TestWriteRedirectConfig_HTTP(t *testing.T) {
 	content := string(data)
 
 	wants := []string{
-		"http:",                                     // Traefik schema
-		"redirect-old-test:",                        // router key
-		"Host(`old.test`)",                          // exact host rule
-		"- websecure",                               // HTTPS entrypoint
-		"- web",                                     // HTTP entrypoint
-		"tls: {}",                                   // TLS termination
-		"redirect-old-test-mw",                      // middleware ref
-		"redirectRegex:",                            // middleware type
-		"replacement: https://new.test/$1",          // target appended
-		"permanent: true",                           // 301
-		"http://127.0.0.1:1",                        // black-hole noop service
+		"http:",                            // Traefik schema
+		"redirect-old-test:",               // router key
+		"Host(`old.test`)",                 // exact host rule
+		"- websecure",                      // HTTPS entrypoint
+		"- web",                            // HTTP entrypoint
+		"tls: {}",                          // TLS termination
+		"redirect-old-test-mw",             // middleware ref
+		"redirectRegex:",                   // middleware type
+		"replacement: https://new.test/$1", // target appended
+		"permanent: true",                  // 301
+		"http://127.0.0.1:1",               // black-hole noop service
 	}
 	for _, w := range wants {
 		if !strings.Contains(content, w) {
