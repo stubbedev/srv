@@ -567,11 +567,11 @@ func UnregisterLocalDomain(domain string) error {
 	return nil
 }
 
-// buildDnsmasqConf renders dnsmasq.conf. Only wildcard domains land here (via
-// address= directives); exact domains go into the hostsdir instead. dnsmasq
-// re-reads this file only on a full restart, so changing its content is what
-// makes a DNS container restart necessary.
-func buildDnsmasqConf(wildcards, upstreamDNS []string) string {
+// buildDnsmasqConf renders dnsmasq.conf. Only wildcard domains and DNS-alias
+// redirects land here (via address= directives); exact local domains go into
+// the hostsdir instead. dnsmasq re-reads this file only on a full restart, so
+// changing its content is what makes a DNS container restart necessary.
+func buildDnsmasqConf(wildcards []string, aliases []ResolvedAlias, upstreamDNS []string) string {
 	var b strings.Builder
 	b.WriteString("# Local domains managed by srv\n")
 	b.WriteString("# Do not edit manually - changes will be overwritten\n\n")
@@ -584,6 +584,22 @@ func buildDnsmasqConf(wildcards, upstreamDNS []string) string {
 		b.WriteString("# Wildcard domains — match the apex and every subdomain\n")
 		for _, d := range wildcards {
 			fmt.Fprintf(&b, "address=/%s/127.0.0.1\n", d)
+		}
+	}
+
+	// DNS-alias redirects: each source name is pinned to the target's resolved
+	// IPv4 address. dnsmasq's --cname directive cannot follow chains to
+	// upstream names, so we emit an address= record instead — equivalent to
+	// what a CNAME chain would resolve to at request time.
+	if len(aliases) > 0 {
+		b.WriteString("\n# DNS-alias redirects (srv redirect add --dns-only)\n")
+		for _, a := range aliases {
+			if a.ResolveErr != nil || a.IP == "" {
+				fmt.Fprintf(&b, "# %s -> %s: resolution failed (%v); entry skipped\n", a.Source, a.Target, a.ResolveErr)
+				continue
+			}
+			fmt.Fprintf(&b, "# %s -> %s\n", a.Source, a.Target)
+			fmt.Fprintf(&b, "address=/%s/%s\n", a.Source, a.IP)
 		}
 	}
 
@@ -654,7 +670,17 @@ func UpdateDnsmasqConfig() error {
 		upstreamDNS = userCfg.UpstreamDNS
 	}
 
-	confBody := buildDnsmasqConf(wildcards, upstreamDNS)
+	// Pick up DNS-alias redirects from redirect-<name>.yml files. Resolution
+	// errors land as commented-out entries inside the conf so a single
+	// unreachable target degrades gracefully instead of taking down dnsmasq.
+	aliasDecls, aliasErr := ScanRedirectAliases()
+	if aliasErr != nil {
+		// Non-fatal: log and continue with whatever we have.
+		fmt.Fprintf(os.Stderr, "warning: failed to scan redirect aliases: %v\n", aliasErr)
+	}
+	resolvedAliases := ResolveAliases(aliasDecls)
+
+	confBody := buildDnsmasqConf(wildcards, resolvedAliases, upstreamDNS)
 	hostsBody := buildDnsmasqHosts(exact)
 
 	dnsmasqPath := filepath.Join(cfg.TraefikDir, constants.DnsmasqConfFile)

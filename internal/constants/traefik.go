@@ -21,6 +21,8 @@ const (
 	SiteConfigPrefix = "site-"
 	// ProxyConfigPrefix is the prefix for proxy configuration files.
 	ProxyConfigPrefix = "proxy-"
+	// RedirectConfigPrefix is the prefix for redirect configuration files.
+	RedirectConfigPrefix = "redirect-"
 	// RoutesConfigPrefix is the prefix for per-site extra route configuration files.
 	RoutesConfigPrefix = "routes-"
 	// ComposeProjectName groups every srv-managed compose project under one

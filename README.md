@@ -77,6 +77,15 @@ srv add /var/www/myapp --domain example.com
 | `srv proxy remove NAME` | Remove a proxy |
 | `srv proxy list` | List all proxies |
 
+### Redirect Management
+
+| Command | Description |
+|---------|-------------|
+| `srv redirect add` | 301/302 redirect a domain to another URL (path + query preserved). `--dns-only` for a DNS-layer A-record swap with no TLS or Traefik |
+| `srv redirect remove NAME` | Remove a redirect |
+| `srv redirect list` | List all redirects |
+| `srv redirect reload` | Re-apply every `redirect-*.yml` (re-resolves DNS-only targets, refreshes certs) |
+
 ### Import
 
 | Command | Description |
@@ -468,6 +477,79 @@ srv proxy remove api.test
 ```
 
 All proxies use local SSL (mkcert) and automatically register with the local DNS server.
+
+## Host-to-URL Redirects
+
+Issue a 301 (permanent) or 302 (temporary) redirect from a local domain to another URL. The request path and query string are appended to the target, so `https://jira.konform.com/browse/X?y=1` lands on `https://jira.kontainer.com/browse/X?y=1`.
+
+```bash
+# Permanent (301) redirect — default
+srv redirect add --domain jira.konform.com --to https://jira.kontainer.com
+
+# Temporary (302)
+srv redirect add -d old.test --to https://new.test --temporary
+
+# Wildcard subdomains also redirect to the same target
+srv redirect add -d legacy.test --to https://new.test --wildcard
+
+srv redirect list
+srv redirect remove jira-konform-com
+```
+
+A mkcert-signed certificate is provisioned for the source domain so browsers follow the redirect without a TLS warning. Both `http://` and `https://` requests are redirected in one hop. With `--wildcard`, every matching subdomain redirects to the same target — split into separate `srv redirect add` entries if you need per-subdomain targets.
+
+### `--dns-only` (DNS-layer redirect)
+
+Skip mkcert and Traefik entirely. The source hostname is pinned to the target's resolved IP via a dnsmasq `address=` record:
+
+```bash
+srv redirect add --domain jira.konform.com.test --to jira.kontainer.com --dns-only
+```
+
+What happens: at registration the target hostname is resolved (`net.LookupIP`) and the source is pinned to the same IPv4 address in `dnsmasq.conf`. The client never sees an HTTP 301 — it sends a request directly to the target's IP with `Host: jira.konform.com.test`. Whether the user-visible URL changes depends entirely on what the backend does with that `Host:` header (Jira, for example, 301-redirects to its configured Base URL).
+
+Trade-offs vs. HTTP redirect:
+
+| | `--dns-only` | default (HTTP 301/302) |
+|---|---|---|
+| Emits | `address=/source/IP` in dnsmasq.conf | Traefik router + redirectRegex middleware + mkcert cert |
+| Browser URL bar | depends on backend behavior | always switches to target |
+| Path / query preserved | yes (browser hits target IP directly) | yes (regex replacement) |
+| Works if target unreachable | no — DNS resolves but TCP fails | yes — redirect is the response |
+| Re-resolve target IP | `srv redirect reload` | not needed (HTTP-layer) |
+| Restrictions | `--to` must be a bare hostname; `--wildcard` and `--temporary` rejected | none |
+
+When the target's IP changes (rare for stable corporate hosts), hand-edit the yaml or just `srv redirect reload` — the IP is re-resolved fresh on every reload, not cached in the file.
+
+## Declarative Config Files
+
+Every redirect lives in a single yaml file under `~/.config/srv/traefik/conf/redirect-<name>.yml`. That file is the source of truth — `srv redirect list` and the dnsmasq + Traefik regeneration pipelines read it back. Hand-edit it (`source`, `target`, regex, middleware) and run `srv redirect reload` to re-apply:
+
+```yaml
+# DNS-only redirect — two-key schema
+dns:
+  source: jira.konform.com.test
+  target: jira.kontainer.com
+```
+
+```yaml
+# HTTP redirect — full Traefik dynamic config (the file provider hot-reloads on save)
+http:
+  routers:
+    redirect-jira-konform-com-test:
+      rule: Host(`jira.konform.com.test`)
+      entryPoints: [websecure]
+      service: redirect-jira-konform-com-test-noop
+      middlewares: [redirect-jira-konform-com-test-mw]
+      tls: {}
+    # ...
+  middlewares:
+    redirect-jira-konform-com-test-mw:
+      redirectRegex:
+        regex: ^https?://[^/]+/?(.*)$
+        replacement: https://jira.kontainer.com/$1
+        permanent: true
+```
 
 ## Multi-Domain Aliases
 

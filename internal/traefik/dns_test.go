@@ -204,7 +204,7 @@ func TestGenerateDnsmasqConfig(t *testing.T) {
 	// docker — and would recreate a real DNS container if one happens to be
 	// running on the machine executing the tests.
 	t.Run("buildDnsmasqConf renders hostsdir and wildcards", func(t *testing.T) {
-		conf := buildDnsmasqConf(nil, []string{"8.8.8.8", "8.8.4.4"})
+		conf := buildDnsmasqConf(nil, nil, []string{"8.8.8.8", "8.8.4.4"})
 		for _, want := range []string{
 			"hostsdir=/etc/dnsmasq.hosts",
 			"# No wildcard domains registered",
@@ -216,7 +216,7 @@ func TestGenerateDnsmasqConfig(t *testing.T) {
 				t.Errorf("buildDnsmasqConf missing %q in:\n%s", want, conf)
 			}
 		}
-		withWildcard := buildDnsmasqConf([]string{"foo.test"}, []string{"1.1.1.1"})
+		withWildcard := buildDnsmasqConf([]string{"foo.test"}, nil, []string{"1.1.1.1"})
 		if !strings.Contains(withWildcard, "address=/foo.test/127.0.0.1") {
 			t.Errorf("buildDnsmasqConf missing wildcard directive in:\n%s", withWildcard)
 		}
@@ -240,7 +240,7 @@ func TestGenerateDnsmasqConfig(t *testing.T) {
 		// EnsureConfig writes the DnsmasqConf constant on a fresh install;
 		// if it drifts from the builder, the first domain add sees a spurious
 		// config change and needlessly restarts the DNS container.
-		want := buildDnsmasqConf(nil, []string{constants.GoogleDNS1, constants.GoogleDNS2})
+		want := buildDnsmasqConf(nil, nil, []string{constants.GoogleDNS1, constants.GoogleDNS2})
 		if DnsmasqConf != want {
 			t.Errorf("DnsmasqConf drifted from buildDnsmasqConf:\n--- const ---\n%s\n--- builder ---\n%s", DnsmasqConf, want)
 		}
