@@ -262,6 +262,51 @@ srv proxy add --domain db.test --container postgres:5432
 srv proxy add -d myapp.test -p 8080
 ```
 
+### `srv redirect add`
+
+Issue an HTTP 301/302 redirect, or a DNS-layer A-record swap with `--dns-only`. Path and query string are preserved when present.
+
+```bash
+srv redirect add [flags]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--domain` | `-d` | | Source hostname (required) |
+| `--to` | | | Target URL for HTTP mode, or bare hostname for `--dns-only` (required) |
+| `--name` | `-n` | derived from domain | Redirect name |
+| `--permanent` | | `true` | Emit 301 (default). HTTP mode only |
+| `--temporary` | | `false` | Emit 302 instead. HTTP mode only; rejected with `--dns-only` |
+| `--wildcard` | | `false` | Match one-level subdomains. HTTP mode only; rejected with `--dns-only` |
+| `--dns-only` | | `false` | Skip mkcert + Traefik; pin source to target's resolved IP via dnsmasq |
+| `--force` | `-f` | `false` | Overwrite existing redirect configuration |
+
+#### Examples
+
+```bash
+# Permanent 301 — default
+srv redirect add --domain jira.konform.com --to https://jira.kontainer.com
+
+# Temporary 302
+srv redirect add -d old.test --to https://new.test --temporary
+
+# Wildcard: every *.legacy.test redirects to https://new.test
+srv redirect add -d legacy.test --to https://new.test --wildcard
+
+# DNS-only: dnsmasq returns the IP of jira.kontainer.com when asked for
+# jira.konform.com.test. No TLS, no Traefik. Backend's Host-header
+# handling decides what the browser ultimately shows.
+srv redirect add -d jira.konform.com.test --to jira.kontainer.com --dns-only
+```
+
+### `srv redirect reload`
+
+Re-scan every `redirect-<name>.yml` file and re-apply derived state — refreshes mkcert certs for HTTP redirects and re-resolves target IPs for `--dns-only` redirects. Run after hand-editing a redirect yaml.
+
+```bash
+srv redirect reload
+```
+
 ### `srv install`
 
 Install the srv environment: creates Docker network, generates Traefik configuration, and starts containers.
