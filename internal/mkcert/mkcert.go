@@ -22,6 +22,68 @@ var (
 	extractErr    error
 )
 
+// CommandRunner runs the embedded mkcert binary. The signature mirrors the
+// three production call shapes (stream / output-only / output+stderr) so a
+// test can stub all of them with one struct.
+type CommandRunner interface {
+	// Stream runs mkcert with stdin/stdout/stderr attached.
+	Stream(args ...string) error
+	// Output runs mkcert and returns stdout. Stderr is ignored.
+	Output(args ...string) ([]byte, error)
+	// Combined runs mkcert and returns the merged stdout+stderr along with
+	// the run error.
+	Combined(args ...string) ([]byte, error)
+}
+
+// defaultRunner is the production CommandRunner; it shells out to the
+// extracted binary via os/exec.
+type defaultRunner struct{}
+
+func (defaultRunner) Stream(args ...string) error {
+	path, err := extractBinary()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func (defaultRunner) Output(args ...string) ([]byte, error) {
+	path, err := extractBinary()
+	if err != nil {
+		return nil, err
+	}
+	return exec.Command(path, args...).Output()
+}
+
+func (defaultRunner) Combined(args ...string) ([]byte, error) {
+	path, err := extractBinary()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(path, args...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	runErr := cmd.Run()
+	return buf.Bytes(), runErr
+}
+
+// Runner is the active CommandRunner. Tests can replace this via SwapRunner.
+var Runner CommandRunner = defaultRunner{}
+
+// SwapRunner installs r and returns a function that restores the previous
+// runner. Intended for use with t.Cleanup.
+func SwapRunner(r CommandRunner) func() {
+	prev := Runner
+	Runner = r
+	return func() { Runner = prev }
+}
+
+
 // extractBinary writes the embedded binary to a temp file once and returns
 // its path. Subsequent calls return the cached path.
 func extractBinary() (string, error) {
@@ -51,15 +113,7 @@ func extractBinary() (string, error) {
 // Run executes the embedded mkcert binary with the given arguments.
 // stdout and stderr are inherited from the current process.
 func Run(args ...string) error {
-	path, err := extractBinary()
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command(path, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
+	return Runner.Stream(args...)
 }
 
 // RunQuiet executes the embedded mkcert binary suppressing its stderr.
@@ -68,22 +122,13 @@ func Run(args ...string) error {
 // srv has already handled CA installation. Only a non-zero exit code is
 // treated as an error.
 func RunQuiet(args ...string) error {
-	path, err := extractBinary()
-	if err != nil {
-		return err
-	}
-	out, err := exec.Command(path, args...).Output()
-	_ = out // stdout intentionally discarded for cert generation
+	_, err := Runner.Output(args...)
 	return err
 }
 
 // Output executes the embedded mkcert binary and returns combined output.
 func Output(args ...string) ([]byte, error) {
-	path, err := extractBinary()
-	if err != nil {
-		return nil, err
-	}
-	return exec.Command(path, args...).Output()
+	return Runner.Output(args...)
 }
 
 // Available reports whether the embedded mkcert binary is available on this
@@ -110,17 +155,18 @@ type InstallResult struct {
 // Install runs `mkcert -install` and parses its output into an InstallResult.
 // stdout/stderr are captured rather than streamed to the user.
 func Install() (InstallResult, error) {
-	path, err := extractBinary()
-	if err != nil {
-		return InstallResult{}, err
+	out, runErr := Runner.Combined("-install")
+	res := parseInstallOutput(string(out))
+	if caRoot, cerr := caRootDir(); cerr == nil {
+		res.CARootPath = filepath.Join(caRoot, "rootCA.pem")
 	}
-	cmd := exec.Command(path, "-install")
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	runErr := cmd.Run()
-	out := buf.String()
+	return res, runErr
+}
 
+// parseInstallOutput is the pure-logic half of Install — given the combined
+// stdout/stderr of `mkcert -install`, it returns the populated result struct
+// (without the CARootPath, which requires another mkcert invocation).
+func parseInstallOutput(out string) InstallResult {
 	res := InstallResult{RawOutput: out}
 	for _, line := range strings.Split(out, "\n") {
 		switch {
@@ -141,18 +187,13 @@ func Install() (InstallResult, error) {
 			res.CertutilMissing = true
 		}
 	}
-
-	if caRoot, cerr := caRootDir(); cerr == nil {
-		res.CARootPath = filepath.Join(caRoot, "rootCA.pem")
-	}
-
-	return res, runErr
+	return res
 }
 
 // caRootDir returns the mkcert CAROOT directory by invoking the embedded
 // binary. Falls back to the empty string on error.
 func caRootDir() (string, error) {
-	out, err := Output("-CAROOT")
+	out, err := Runner.Output("-CAROOT")
 	if err != nil {
 		return "", err
 	}

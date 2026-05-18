@@ -82,6 +82,24 @@ test-cover: mkcert
     go tool cover -html=coverage.out -o coverage.html
     @echo "Coverage report: coverage.html"
 
+# Coverage gate: fail if total statement coverage drops below THRESHOLD.
+# Per-package thresholds enforce we don't regress in pkgs we've invested in.
+COVERAGE_THRESHOLD := "79"
+
+cover-check: mkcert
+    #!/usr/bin/env bash
+    set -euo pipefail
+    go test -covermode=atomic -coverprofile=coverage.out ./... >/dev/null
+    TOTAL=$(go tool cover -func=coverage.out | awk '/^total:/ {print $NF}' | sed 's/%//')
+    THRESHOLD={{COVERAGE_THRESHOLD}}
+    echo "Total coverage: ${TOTAL}% (threshold ${THRESHOLD}%)"
+    awk -v t="$TOTAL" -v th="$THRESHOLD" 'BEGIN { if (t+0 < th+0) exit 1 }'
+    if [ $? -ne 0 ]; then
+        echo "FAIL: coverage ${TOTAL}% below threshold ${THRESHOLD}%" >&2
+        exit 1
+    fi
+    echo "OK"
+
 # Download and tidy Go modules
 mod:
     go mod download

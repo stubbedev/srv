@@ -91,6 +91,45 @@ func TestValidatePort(t *testing.T) {
 	}
 }
 
+func TestValidateContainerName(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantErr bool
+	}{
+		{"redis", false},
+		{"redis-1", false},
+		{"redis_1", false},
+		{"redis.1", false},
+		{"redis-1.2.3", false},
+		{"", true},
+		{"-bad", true},
+		{"bad name", true},
+		{"bad@name", true},
+	}
+	for _, c := range cases {
+		err := ValidateContainerName(c.in)
+		if (err != nil) != c.wantErr {
+			t.Errorf("ValidateContainerName(%q) err = %v, wantErr %v", c.in, err, c.wantErr)
+		}
+	}
+}
+
+func TestValidateProxyNameBranches(t *testing.T) {
+	if err := ValidateProxyName(""); err == nil {
+		t.Error("expected err for empty")
+	}
+	if err := ValidateProxyName("bad name"); err == nil {
+		t.Error("expected err for spaces")
+	}
+	if err := ValidateProxyName("kontainer.com"); err != nil {
+		t.Errorf("kontainer.com should be valid, got %v", err)
+	}
+	long := strings.Repeat("a", 254)
+	if err := ValidateProxyName(long); err == nil {
+		t.Error("expected err for too long")
+	}
+}
+
 func TestValidateSiteName(t *testing.T) {
 	tests := []struct {
 		name     string

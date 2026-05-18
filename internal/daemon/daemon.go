@@ -156,19 +156,10 @@ func (d *Daemon) refreshContainerMapping() error {
 	return nil
 }
 
-// isDockerAvailable checks if the Docker daemon is reachable via the SDK.
-func isDockerAvailable() bool {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
-	if err != nil {
-		return false
-	}
-	defer func() { _ = cli.Close() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err = cli.Ping(ctx)
-	return err == nil
+// isDockerAvailable checks if the Docker daemon is reachable. Tests swap
+// the docker package's SDK client factory to control the answer.
+var isDockerAvailable = func() bool {
+	return docker.EnsureRunning() == nil
 }
 
 // waitForDocker waits for Docker daemon to become available with exponential backoff.
