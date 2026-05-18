@@ -2,12 +2,25 @@ package traefik
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
+
+// uniqueDomain returns a non-local-TLD domain that cannot match any pre-existing
+// /etc/systemd/resolved.conf.d/srv-local.conf content on a CI runner — that
+// would otherwise trigger the byte-identical early-return in
+// updateSystemdResolvedConfig and bypass the faked shell error.
+func uniqueDomain(t *testing.T) []string {
+	t.Helper()
+	return []string{fmt.Sprintf("srv-test-%d.dev", time.Now().UnixNano())}
+}
 
 func swapShell(t *testing.T, r shell.Runner) {
 	t.Helper()
@@ -61,7 +74,7 @@ func TestUpdateSystemdResolvedConfigMkdirErr(t *testing.T) {
 		"sudo:mkdir": {Err: errors.New("boom")},
 	})
 	swapShell(t, fake)
-	if err := updateSystemdResolvedConfig(nil); err == nil {
+	if err := updateSystemdResolvedConfig(uniqueDomain(t)); err == nil {
 		t.Error("expected mkdir err to propagate")
 	}
 }
@@ -71,7 +84,7 @@ func TestUpdateSystemdResolvedConfigWriteErr(t *testing.T) {
 		"sudo:tee": {Err: errors.New("boom")},
 	})
 	swapShell(t, fake)
-	if err := updateSystemdResolvedConfig(nil); err == nil {
+	if err := updateSystemdResolvedConfig(uniqueDomain(t)); err == nil {
 		t.Error("expected write err")
 	}
 }
@@ -81,7 +94,7 @@ func TestUpdateSystemdResolvedConfigSystemctlErr(t *testing.T) {
 		"sudo:systemctl": {Err: errors.New("nope")},
 	})
 	swapShell(t, fake)
-	if err := updateSystemdResolvedConfig(nil); err == nil {
+	if err := updateSystemdResolvedConfig(uniqueDomain(t)); err == nil {
 		t.Error("expected systemctl err")
 	}
 }
@@ -186,7 +199,20 @@ func TestFlushDNSCache(t *testing.T) {
 }
 
 func TestSetupSystemdResolvedCallsUpdate(t *testing.T) {
-	t.Setenv("SRV_ROOT", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("SRV_ROOT", root)
+	// Seed a unique registered domain so the rendered config cannot match any
+	// pre-existing /etc/systemd/resolved.conf.d/srv-local.conf — otherwise the
+	// byte-identical early-return in updateSystemdResolvedConfig would silence
+	// the shell calls this test is asserting on.
+	traefikDir := filepath.Join(root, "traefik")
+	if err := os.MkdirAll(traefikDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	domain := fmt.Sprintf("srv-test-%d.dev", time.Now().UnixNano())
+	if err := os.WriteFile(filepath.Join(traefikDir, "local-domains.txt"), []byte(domain+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	fake := shelltest.New(nil)
 	swapShell(t, fake)
 	_ = setupSystemdResolved()
