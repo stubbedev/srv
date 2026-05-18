@@ -150,17 +150,22 @@ func TestPackageContextShims(t *testing.T) {
 	}
 }
 
-// OSRunner sudo methods shell out to real sudo. Pointing at a non-existent
-// binary makes them fail without prompting. We don't assert anything; the
-// call just exercises the seam.
-func TestOSRunnerSudoMethodsExercise(t *testing.T) {
-	r := OSRunner{}
-	_ = r.SudoRun("false-binary-srv-12345")
-	_, _ = r.SudoRunQuiet("false-binary-srv-12345")
-	_ = r.SudoWrite("/tmp/srv-sudo-test-12345", "data")
-	_ = r.SudoMkdir("/tmp/srv-sudo-mkdir-12345")
-	_ = r.SudoRemove("/tmp/srv-sudo-rm-12345")
-	_ = r.SudoSystemctl("status", "false-service-srv-12345")
+// OSRunner sudo methods shell out to real sudo. The earlier version of this
+// test invoked them directly to "exercise the seam", but sudo authenticates
+// the user BEFORE checking the target binary, so on a machine without
+// passwordless sudo the test hangs on a password prompt. The coverage is
+// already provided through SwapDefault-backed tests elsewhere; this test is
+// kept as a compile-time guard that the sudo methods exist on OSRunner.
+func TestOSRunnerSudoMethodsCompile(t *testing.T) {
+	var r Runner = OSRunner{}
+	// Reference each method without invoking real sudo. The closures are
+	// never called; this is purely a type-check.
+	_ = func() error { return r.SudoRun("noop") }
+	_ = func() ([]byte, error) { return r.SudoRunQuiet("noop") }
+	_ = func() error { return r.SudoWrite("/dev/null", "") }
+	_ = func() error { return r.SudoMkdir("/dev/null") }
+	_ = func() error { return r.SudoRemove("/dev/null") }
+	_ = func() error { return r.SudoSystemctl("status", "noop") }
 }
 
 func TestPackageHelpersDelegate(t *testing.T) {
