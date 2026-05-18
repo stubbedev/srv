@@ -83,7 +83,6 @@ func SwapRunner(r CommandRunner) func() {
 	return func() { Runner = prev }
 }
 
-
 // extractBinary writes the embedded binary to a temp file once and returns
 // its path. Subsequent calls return the cached path.
 func extractBinary() (string, error) {

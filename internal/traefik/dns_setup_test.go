@@ -38,7 +38,7 @@ func TestUpdateSystemdResolvedConfigWrites(t *testing.T) {
 			sawRestart = true
 		}
 	}
-	if !(sawMkdir && sawWrite && sawRestart) {
+	if !sawMkdir || !sawWrite || !sawRestart {
 		t.Errorf("missing calls: mkdir=%v write=%v restart=%v", sawMkdir, sawWrite, sawRestart)
 	}
 }

@@ -120,7 +120,7 @@ func TestDetectRubySiteMissing(t *testing.T) {
 func TestDetectRubySiteRails(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
-		"Gemfile":        `gem "rails", "~> 7.0"`,
+		"Gemfile":       `gem "rails", "~> 7.0"`,
 		".ruby-version": "3.3.0\n",
 	})
 	info, err := DetectRubySite(dir)

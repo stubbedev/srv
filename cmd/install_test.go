@@ -29,4 +29,3 @@ func TestStartSitesEmpty(t *testing.T) {
 	// startSites with no sites should be a noop.
 	startSites(nil)
 }
-

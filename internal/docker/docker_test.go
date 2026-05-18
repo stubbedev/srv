@@ -738,16 +738,11 @@ func TestConnectServiceToNetworkEmptyID(t *testing.T) {
 }
 
 func TestSwapNewClientErr(t *testing.T) {
-	prev := newClientFn
 	restore := SwapNewClientErr(errors.New("x"))
 	defer restore()
 	_, err := newClientFn()
 	if err == nil {
 		t.Error("expected err")
-	}
-	restore()
-	if &newClientFn == nil || newClientFn == nil {
-		_ = prev
 	}
 }
 
@@ -781,28 +776,29 @@ func TestSwapNewClientOK(t *testing.T) {
 		t.Fatal("nil client")
 	}
 	// Exercise every noopSDK method.
-	if _, err := cli.Ping(nil); err != nil {
+	ctx := context.Background()
+	if _, err := cli.Ping(ctx); err != nil {
 		t.Errorf("Ping err: %v", err)
 	}
-	if _, err := cli.NetworkList(nil, network.ListOptions{}); err != nil {
+	if _, err := cli.NetworkList(ctx, network.ListOptions{}); err != nil {
 		t.Errorf("NetworkList err: %v", err)
 	}
-	if _, err := cli.NetworkCreate(nil, "x", network.CreateOptions{}); err != nil {
+	if _, err := cli.NetworkCreate(ctx, "x", network.CreateOptions{}); err != nil {
 		t.Errorf("NetworkCreate err: %v", err)
 	}
-	if err := cli.NetworkRemove(nil, "x"); err != nil {
+	if err := cli.NetworkRemove(ctx, "x"); err != nil {
 		t.Errorf("NetworkRemove err: %v", err)
 	}
-	if err := cli.NetworkConnect(nil, "n", "c", nil); err != nil {
+	if err := cli.NetworkConnect(ctx, "n", "c", nil); err != nil {
 		t.Errorf("NetworkConnect err: %v", err)
 	}
-	if _, err := cli.ContainerInspect(nil, "c"); err == nil {
+	if _, err := cli.ContainerInspect(ctx, "c"); err == nil {
 		t.Error("expected ContainerInspect err")
 	}
-	if _, err := cli.ContainerList(nil, container.ListOptions{}); err != nil {
+	if _, err := cli.ContainerList(ctx, container.ListOptions{}); err != nil {
 		t.Errorf("ContainerList err: %v", err)
 	}
-	r, err := cli.ImagePull(nil, "x", image.PullOptions{})
+	r, err := cli.ImagePull(ctx, "x", image.PullOptions{})
 	if err != nil {
 		t.Errorf("ImagePull err: %v", err)
 	}

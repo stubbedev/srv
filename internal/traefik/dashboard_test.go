@@ -50,8 +50,8 @@ func TestCheckPortConflicts(t *testing.T) {
 // mkcertHappyStub satisfies mkcert.CommandRunner with successful defaults.
 type mkcertHappyStub struct{}
 
-func (mkcertHappyStub) Stream(args ...string) error            { return nil }
-func (mkcertHappyStub) Output(args ...string) ([]byte, error)  { return []byte("/tmp/ca\n"), nil }
+func (mkcertHappyStub) Stream(args ...string) error           { return nil }
+func (mkcertHappyStub) Output(args ...string) ([]byte, error) { return []byte("/tmp/ca\n"), nil }
 func (mkcertHappyStub) Combined(args ...string) ([]byte, error) {
 	return []byte("Created a new local CA"), nil
 }

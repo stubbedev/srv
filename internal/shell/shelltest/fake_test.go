@@ -43,10 +43,10 @@ func TestFakeDefaultResponse(t *testing.T) {
 
 func TestFakeSudoKey(t *testing.T) {
 	f := New(map[string]Response{
-		"sudo:ufw":      {Out: []byte("ok"), Err: nil},
-		"sudo:tee":      {Err: nil},
-		"sudo:mkdir":    {Err: nil},
-		"sudo:rm":       {Err: nil},
+		"sudo:ufw":       {Out: []byte("ok"), Err: nil},
+		"sudo:tee":       {Err: nil},
+		"sudo:mkdir":     {Err: nil},
+		"sudo:rm":        {Err: nil},
 		"sudo:systemctl": {Err: nil},
 	})
 
@@ -97,7 +97,8 @@ func TestFakePort(t *testing.T) {
 	if !inUse {
 		t.Error("expected in use")
 	}
-	if _, _ = f.CheckPortOnAddr("127.0.0.1", "80"); false {
+	if _, err := f.CheckPortOnAddr("127.0.0.1", "80"); err != nil {
+		t.Errorf("CheckPortOnAddr err: %v", err)
 	}
 	if got := f.IdentifyPortProcess("80"); got != "nginx" {
 		t.Errorf("Process = %q", got)

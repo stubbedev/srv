@@ -191,7 +191,7 @@ func TestWriteFilesSortsMembers(t *testing.T) {
 	idxAlpha := strings.Index(body, "/srv/alpha")
 	idxMike := strings.Index(body, "/srv/mike")
 	idxZulu := strings.Index(body, "/srv/zulu")
-	if !(idxAlpha < idxMike && idxMike < idxZulu) {
+	if idxAlpha >= idxMike || idxMike >= idxZulu {
 		t.Errorf("members not sorted: alpha=%d mike=%d zulu=%d", idxAlpha, idxMike, idxZulu)
 	}
 }

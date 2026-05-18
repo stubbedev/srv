@@ -25,8 +25,8 @@ func TestCollectPoolMembersSingleSite(t *testing.T) {
 func TestCollectPoolMembersFindsSameFingerprint(t *testing.T) {
 	withSRVRoot(t)
 	// Register a second PHP site with the same PHPVersion + extensions.
-	writeTestSite_php(t, "other", "8.3", []string{"redis"})
-	writeTestSite_php(t, "different", "8.4", []string{"redis"})
+	writeTestSitePhp(t, "other", "8.3", []string{"redis"})
+	writeTestSitePhp(t, "different", "8.4", []string{"redis"})
 
 	exts := []string{"redis"}
 	info := &PHPSiteInfo{PHPVersion: "8.3", Extensions: exts}
@@ -132,7 +132,7 @@ func TestRemoveSiteFromPoolEmptyTearsDown(t *testing.T) {
 	withSRVRoot(t)
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
 
-	writeTestSite_php(t, "solo", "8.3", []string{"redis"})
+	writeTestSitePhp(t, "solo", "8.3", []string{"redis"})
 
 	if err := RemoveSiteFromPool("solo"); err != nil {
 		t.Errorf("err: %v", err)
@@ -159,8 +159,8 @@ func TestRemoveSiteFromPoolNonPHP(t *testing.T) {
 func TestRemoveSiteFromPoolWithSiblings(t *testing.T) {
 	withSRVRoot(t)
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	writeTestSite_php(t, "a", "8.3", []string{"redis"})
-	writeTestSite_php(t, "b", "8.3", []string{"redis"})
+	writeTestSitePhp(t, "a", "8.3", []string{"redis"})
+	writeTestSitePhp(t, "b", "8.3", []string{"redis"})
 
 	// Remove one; pool should be rewritten with remaining member.
 	if err := RemoveSiteFromPool("a"); err != nil {
@@ -168,9 +168,9 @@ func TestRemoveSiteFromPoolWithSiblings(t *testing.T) {
 	}
 }
 
-// writeTestSite_php is a convenience helper that creates a PHP site with the
+// writeTestSitePhp is a convenience helper that creates a PHP site with the
 // supplied version + extensions and a real project dir.
-func writeTestSite_php(t *testing.T, name, version string, exts []string) {
+func writeTestSitePhp(t *testing.T, name, version string, exts []string) {
 	t.Helper()
 	root, _ := os.UserHomeDir()
 	_ = root

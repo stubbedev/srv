@@ -21,9 +21,9 @@ type caRootStub struct {
 	out []byte
 }
 
-func (caRootStub) Stream(args ...string) error               { return nil }
-func (s caRootStub) Output(args ...string) ([]byte, error)   { return s.out, nil }
-func (caRootStub) Combined(args ...string) ([]byte, error)   { return nil, nil }
+func (caRootStub) Stream(args ...string) error             { return nil }
+func (s caRootStub) Output(args ...string) ([]byte, error) { return s.out, nil }
+func (caRootStub) Combined(args ...string) ([]byte, error) { return nil, nil }
 
 func mkcertSwapRunner(r mkcert.CommandRunner) func() {
 	return mkcert.SwapRunner(r)

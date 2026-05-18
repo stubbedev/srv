@@ -386,7 +386,9 @@ func (e *errAfter) SudoRemove(path string) error         { return e.fake.SudoRem
 func (e *errAfter) SudoSystemctl(action, service string) error {
 	return e.fake.SudoSystemctl(action, service)
 }
-func (e *errAfter) Exists(name string) bool                                    { return e.fake.Exists(name) }
-func (e *errAfter) CheckPort(port string) (bool, error)                        { return e.fake.CheckPort(port) }
-func (e *errAfter) CheckPortOnAddr(addr, port string) (bool, error)            { return e.fake.CheckPortOnAddr(addr, port) }
-func (e *errAfter) IdentifyPortProcess(port string) string                     { return e.fake.IdentifyPortProcess(port) }
+func (e *errAfter) Exists(name string) bool             { return e.fake.Exists(name) }
+func (e *errAfter) CheckPort(port string) (bool, error) { return e.fake.CheckPort(port) }
+func (e *errAfter) CheckPortOnAddr(addr, port string) (bool, error) {
+	return e.fake.CheckPortOnAddr(addr, port)
+}
+func (e *errAfter) IdentifyPortProcess(port string) string { return e.fake.IdentifyPortProcess(port) }

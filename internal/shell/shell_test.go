@@ -291,18 +291,20 @@ type stubRunner struct {
 	exists bool
 }
 
-func (s stubRunner) Run(string, ...string) error                                       { return s.err }
-func (s stubRunner) RunWithContext(context.Context, string, ...string) error           { return s.err }
-func (s stubRunner) RunQuiet(string, ...string) ([]byte, error)                        { return s.out, s.err }
-func (s stubRunner) RunQuietWithContext(context.Context, string, ...string) ([]byte, error) { return s.out, s.err }
-func (s stubRunner) RunWithStdin(string, string, ...string) error                      { return s.err }
-func (s stubRunner) SudoRun(...string) error                                           { return s.err }
-func (s stubRunner) SudoRunQuiet(...string) ([]byte, error)                            { return s.out, s.err }
-func (s stubRunner) SudoWrite(string, string) error                                    { return s.err }
-func (s stubRunner) SudoMkdir(string) error                                            { return s.err }
-func (s stubRunner) SudoRemove(string) error                                           { return s.err }
-func (s stubRunner) SudoSystemctl(string, string) error                                { return s.err }
-func (s stubRunner) Exists(string) bool                                                { return s.exists }
-func (s stubRunner) CheckPort(string) (bool, error)                                    { return false, s.err }
-func (s stubRunner) CheckPortOnAddr(string, string) (bool, error)                      { return false, s.err }
-func (s stubRunner) IdentifyPortProcess(string) string                                 { return "" }
+func (s stubRunner) Run(string, ...string) error                             { return s.err }
+func (s stubRunner) RunWithContext(context.Context, string, ...string) error { return s.err }
+func (s stubRunner) RunQuiet(string, ...string) ([]byte, error)              { return s.out, s.err }
+func (s stubRunner) RunQuietWithContext(context.Context, string, ...string) ([]byte, error) {
+	return s.out, s.err
+}
+func (s stubRunner) RunWithStdin(string, string, ...string) error { return s.err }
+func (s stubRunner) SudoRun(...string) error                      { return s.err }
+func (s stubRunner) SudoRunQuiet(...string) ([]byte, error)       { return s.out, s.err }
+func (s stubRunner) SudoWrite(string, string) error               { return s.err }
+func (s stubRunner) SudoMkdir(string) error                       { return s.err }
+func (s stubRunner) SudoRemove(string) error                      { return s.err }
+func (s stubRunner) SudoSystemctl(string, string) error           { return s.err }
+func (s stubRunner) Exists(string) bool                           { return s.exists }
+func (s stubRunner) CheckPort(string) (bool, error)               { return false, s.err }
+func (s stubRunner) CheckPortOnAddr(string, string) (bool, error) { return false, s.err }
+func (s stubRunner) IdentifyPortProcess(string) string            { return "" }

@@ -103,7 +103,6 @@ func TestRunStartNotInitialized(t *testing.T) {
 	}
 }
 
-
 func TestRunStopDockerDown(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientErr(errors.New("offline")))
