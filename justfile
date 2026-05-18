@@ -72,9 +72,11 @@ schemas:
 # Run all checks (fmt, vet, lint, test) - useful for CI
 check: fmt vet lint test
 
-# Run tests (builds mkcert first if not present)
+# Run tests (builds mkcert first if not present).
+# -timeout 60s caps every package so a hung test is visible in seconds
+# instead of go's 10-minute default.
 test: mkcert
-    go test ./...
+    go test -timeout 60s ./...
 
 # Run tests with coverage
 test-cover: mkcert
