@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/shell"
+	"github.com/stubbedev/srv/internal/shell/shelltest"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -15,6 +17,9 @@ func setupSrvRoot(t *testing.T) string {
 	t.Setenv("SRV_ROOT", root)
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
+	// Fake shell so any handler path that registers a local domain (and thus
+	// hits SetupDNS → sudo) cannot escape into the real system during tests.
+	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
 	if err := os.MkdirAll(filepath.Join(root, "traefik", "conf"), 0o755); err != nil {
 		t.Fatal(err)
 	}
