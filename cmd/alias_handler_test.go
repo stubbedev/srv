@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 	"github.com/stubbedev/srv/internal/site"
@@ -20,6 +21,10 @@ func setupSrvRoot(t *testing.T) string {
 	// Fake shell so any handler path that registers a local domain (and thus
 	// hits SetupDNS → sudo) cannot escape into the real system during tests.
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
+	// Fake mkcert so certificate-generating handlers don't invoke the real
+	// `mkcert -install` (which prompts for sudo on NixOS) or pollute the
+	// developer's user-scoped CAROOT directory.
+	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
 	if err := os.MkdirAll(filepath.Join(root, "traefik", "conf"), 0o755); err != nil {
 		t.Fatal(err)
 	}
