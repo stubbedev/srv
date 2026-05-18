@@ -220,6 +220,20 @@ func writeFile2(path, content string) error {
 }
 
 func TestPromptForProfileMissingTTY(t *testing.T) {
+	// `go test` inherits the developer's TTY on stdin when invoked from a
+	// terminal, so huh.Form.Run would actually try to read input. Replace
+	// stdin with a closed pipe to force a non-TTY error regardless of how
+	// the test binary is launched.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	t.Cleanup(func() { _ = r.Close() })
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+
 	setup := &siteSetup{}
 	if err := promptForProfile(setup, []string{"dev", "prod"}); err == nil {
 		t.Error("expected TTY err in test env")
