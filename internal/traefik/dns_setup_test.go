@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
@@ -201,6 +202,8 @@ func TestFlushDNSCache(t *testing.T) {
 func TestSetupSystemdResolvedCallsUpdate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SRV_ROOT", root)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
 	// Seed a unique registered domain so the rendered config cannot match any
 	// pre-existing /etc/systemd/resolved.conf.d/srv-local.conf — otherwise the
 	// byte-identical early-return in updateSystemdResolvedConfig would silence
