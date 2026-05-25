@@ -219,15 +219,33 @@ func writeFile2(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-func TestPromptForProfileMissingTTY(t *testing.T) {
-	// promptForProfile delegates to huh.Form.Run, which uses bubbletea.
-	// bubbletea opens /dev/tty directly instead of reading os.Stdin, so
-	// faking stdin is not enough — when `go test` is run from an interactive
-	// terminal the form happily reads keystrokes and never returns. There is
-	// no portable way to disconnect /dev/tty from the test process, so we
-	// skip this test rather than hang the entire suite. Coverage of the
-	// non-TTY path is achieved through the parsing/validation helpers below.
-	t.Skip("huh.Form.Run reads /dev/tty directly; cannot be exercised reliably in go test")
+func TestPromptForProfileNoFlagFails(t *testing.T) {
+	resetAddFlags()
+	setup := &siteSetup{}
+	if err := promptForProfile(setup, []string{"dev", "prod"}); err == nil {
+		t.Fatal("expected error when --profile is missing for multi-profile service")
+	}
+}
+
+func TestPromptForProfileWrongFlagFails(t *testing.T) {
+	resetAddFlags()
+	addFlags.profile = "staging"
+	setup := &siteSetup{}
+	if err := promptForProfile(setup, []string{"dev", "prod"}); err == nil {
+		t.Fatal("expected error when --profile doesn't match any known profile")
+	}
+}
+
+func TestPromptForProfileFlagMatches(t *testing.T) {
+	resetAddFlags()
+	addFlags.profile = "prod"
+	setup := &siteSetup{}
+	if err := promptForProfile(setup, []string{"dev", "prod"}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if setup.profile != "prod" {
+		t.Errorf("setup.profile = %q, want prod", setup.profile)
+	}
 }
 
 func TestPromptForMissingConfigNodeOverrides(t *testing.T) {
