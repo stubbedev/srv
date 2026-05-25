@@ -16,8 +16,10 @@ import (
 )
 
 var importFlags struct {
-	valetDir string
-	apply    bool
+	valetDir  string
+	apply     bool
+	dryRun    bool
+	listSites bool
 }
 
 var importCmd = &cobra.Command{
@@ -39,14 +41,19 @@ command via the same shell.`,
 }
 
 func init() {
-	importValetCmd.Flags().StringVar(&importFlags.valetDir, "valet-dir", "", "Path to valet config dir (default ~/.valet)")
+	importValetCmd.Flags().StringVar(&importFlags.valetDir, "valet-dir", "", "Path to valet config dir (default ~/.valet or ~/.config/valet, whichever has content)")
 	importValetCmd.Flags().BoolVar(&importFlags.apply, "apply", false, "Execute the generated srv commands instead of just printing them")
+	importValetCmd.Flags().BoolVar(&importFlags.dryRun, "dry-run", false, "Explicit no-op alias for the default print-only mode (mutually exclusive with --apply)")
+	importValetCmd.Flags().BoolVar(&importFlags.listSites, "list-sites", false, "List discovered Valet sites and exit; build no plan")
 	importCmd.AddCommand(importValetCmd)
 	importCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(importCmd)
 }
 
 func runImportValet(cmd *cobra.Command, args []string) error {
+	if importFlags.apply && importFlags.dryRun {
+		return ui.UsageError("srv import valet", "--apply and --dry-run are mutually exclusive")
+	}
 	valetDir, err := resolveValetDir(importFlags.valetDir)
 	if err != nil {
 		return err
@@ -68,6 +75,11 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 	}
 	if len(sites) == 0 {
 		ui.Dim("No Valet configurations found in %s", nginxDir)
+		return nil
+	}
+
+	if importFlags.listSites {
+		listValetSites(sites)
 		return nil
 	}
 
@@ -119,9 +131,12 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveValetDir picks a valet config directory. Order: explicit --valet-dir,
-// then ~/.config/valet (XDG), then ~/.valet (legacy). The chosen directory
-// must exist and contain an `Nginx/` subdirectory.
+// resolveValetDir picks a valet config directory. When --valet-dir is given it
+// is honoured verbatim. Otherwise both `~/.valet` and `~/.config/valet` are
+// probed and the one with the most non-empty `Nginx/*.conf` entries wins —
+// users on some distros end up with an empty stub at one path while the real
+// configs live at the other, and the previous "first one with an Nginx subdir"
+// heuristic happily picked the empty stub.
 func resolveValetDir(explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, validateValetDir(explicit)
@@ -131,18 +146,43 @@ func resolveValetDir(explicit string) (string, error) {
 		return "", err
 	}
 	candidates := []string{
-		filepath.Join(home, ".config", "valet"),
 		filepath.Join(home, ".valet"),
+		filepath.Join(home, ".config", "valet"),
 	}
+	type scored struct {
+		dir   string
+		count int
+	}
+	var found []scored
 	var firstErr error
 	for _, c := range candidates {
-		if err := validateValetDir(c); err == nil {
-			return c, nil
-		} else if firstErr == nil {
-			firstErr = err
+		if err := validateValetDir(c); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		found = append(found, scored{dir: c, count: nginxConfigCount(c)})
+	}
+	if len(found) == 0 {
+		return "", fmt.Errorf("could not find a valet config dir; tried %v: %w", candidates, firstErr)
+	}
+	// Pick the highest count; on tie, the first probed (~/.valet) wins.
+	best := found[0]
+	for _, f := range found[1:] {
+		if f.count > best.count {
+			best = f
 		}
 	}
-	return "", fmt.Errorf("could not find a valet config dir; tried %v: %w", candidates, firstErr)
+	if len(found) > 1 && best.count > 0 {
+		// Tell the user which lost, so they can override with --valet-dir if needed.
+		for _, f := range found {
+			if f.dir != best.dir && f.count > 0 {
+				ui.Dim("ignoring %s (%d Nginx config(s)); chose %s (%d)", f.dir, f.count, best.dir, best.count)
+			}
+		}
+	}
+	return best.dir, nil
 }
 
 func validateValetDir(dir string) error {
@@ -150,6 +190,52 @@ func validateValetDir(dir string) error {
 		return fmt.Errorf("%s has no Nginx/ subdir: %w", dir, err)
 	}
 	return nil
+}
+
+// nginxConfigCount returns the number of *.conf files in the dir's Nginx/
+// subdirectory (zero on errors). Snippets starting with `_` are still counted
+// because the importer expands them when referenced from a main site config.
+func nginxConfigCount(valetDir string) int {
+	entries, err := os.ReadDir(filepath.Join(valetDir, "Nginx"))
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".conf") {
+			n++
+		}
+	}
+	return n
+}
+
+// listValetSites prints the discovered Valet sites without building or
+// applying any plan. Used by `--list-sites` to triage import candidates.
+func listValetSites(sites []*valet.Site) {
+	ui.Info("Discovered %d Valet site(s):", len(sites))
+	for _, s := range sites {
+		kind := "static"
+		switch {
+		case s.IsPHP:
+			kind = "php"
+		case s.ProxyTarget != "":
+			kind = "proxy → " + s.ProxyTarget
+		}
+		ui.Print("  %-40s %s", s.Domain, kind)
+		if s.ProjectPath != "" {
+			ui.IndentedDim(2, "project: %s", s.ProjectPath)
+		}
+		if s.FallbackURL != "" {
+			ui.IndentedDim(2, "fallback: %s", s.FallbackURL)
+		}
+		if len(s.Aliases) > 0 {
+			ui.IndentedDim(2, "aliases: %s", strings.Join(s.Aliases, ", "))
+		}
+		ui.IndentedDim(2, "source: %s", filepath.Base(s.File))
+	}
 }
 
 // importStep is one srv invocation produced by the planner. `line` is the
