@@ -74,6 +74,16 @@ type Fallback struct {
 	Timeout string `yaml:"timeout,omitempty" jsonschema:"description=Fallback request timeout (e.g. '2s')."`
 }
 
+// VolumeMount is an extra bind-mount the user added to a site so its container
+// can reach host paths beyond the project root (TEMP dirs, nix-profile
+// binaries, demo asset trees, etc.). Source and Target are absolute paths;
+// the source must already exist on the host.
+type VolumeMount struct {
+	Source   string `yaml:"source" jsonschema:"description=Absolute host path."`
+	Target   string `yaml:"target" jsonschema:"description=Absolute path inside the container."`
+	ReadOnly bool   `yaml:"read_only,omitempty" jsonschema:"description=Mount the bind read-only."`
+}
+
 // CurrentMetadataSchema is the version written to new metadata.yml files. Bump
 // when introducing a breaking, non-additive change.
 const CurrentMetadataSchema = 1
@@ -93,6 +103,7 @@ type SiteMetadata struct {
 	Wildcard           bool      `yaml:"wildcard,omitempty" jsonschema:"description=Match apex + one-level subdomains (*.example.com)."`
 	NetworkName        string    `yaml:"network_name" jsonschema:"description=Docker network the site joins."`
 	ExtraNetworks      []string  `yaml:"extra_networks,omitempty" jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)."`
+	Volumes            []VolumeMount `yaml:"volumes,omitempty" jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile, TEMP dirs)."`
 	Listeners          []string  `yaml:"listeners,omitempty" jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."`
 	Limits             *Limits   `yaml:"limits,omitempty" jsonschema:"description=Request-body / timeout overrides."`
 	Routes             []Route   `yaml:"routes,omitempty" jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."`

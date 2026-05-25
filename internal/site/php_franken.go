@@ -195,6 +195,14 @@ func renderPHPCompose(name string, meta SiteMetadata, info *PHPSiteInfo, siteDir
 			Consistency: volumeConsistencyForHost(),
 		},
 	}
+	for _, v := range meta.Volumes {
+		volumes = append(volumes, phpVolumeConfig{
+			Type:     "bind",
+			Source:   v.Source,
+			Target:   v.Target,
+			ReadOnly: v.ReadOnly,
+		})
+	}
 
 	serviceNetworks := append([]string{constants.TraefikSubdir}, meta.ExtraNetworks...)
 	service := phpServiceConfig{

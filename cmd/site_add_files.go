@@ -121,6 +121,14 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		meta.ServiceName = "srv-" + setup.siteName + "-app"
 	}
 
+	for _, spec := range addFlags.volumes {
+		mount, err := ParseVolumeSpec(spec)
+		if err != nil {
+			return fmt.Errorf("invalid --volume %q: %w", spec, err)
+		}
+		meta.Volumes = append(meta.Volumes, mount)
+	}
+
 	if err := site.WriteSiteMetadata(setup.siteName, meta); err != nil {
 		return fmt.Errorf("failed to write site metadata: %w", err)
 	}

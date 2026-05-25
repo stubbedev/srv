@@ -47,6 +47,8 @@ var addFlags struct {
 	phpExtensions string
 	// Node.js site options
 	nodeVersion string
+	// Extra mounts
+	volumes []string
 }
 
 var addCmd = &cobra.Command{
@@ -130,6 +132,11 @@ func init() {
 	})
 	// Node.js site options
 	addCmd.Flags().StringVar(&addFlags.nodeVersion, "node-version", "", "Node.js version (auto-detected from .nvmrc / package.json; use 'lts' for latest LTS)")
+	// Extra bind-mounts
+	addCmd.Flags().StringSliceVar(&addFlags.volumes, "volume", nil, "Extra bind-mount in HOST:CONTAINER[:ro] form; repeatable")
+	_ = addCmd.RegisterFlagCompletionFunc("volume", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveDefault
+	})
 	// Type override
 	addCmd.Flags().StringVar(&addFlags.typeOverride, "type", "", "Force site type: php, node, ruby, python, dockerfile, static, compose")
 	_ = addCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
