@@ -1,10 +1,10 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
-	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -61,7 +61,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Confirmation prompt unless --force is used
+	// Confirmation gate. Without --force the command refuses to run so a
+	// script that fat-fingers `srv uninstall` can't accidentally torch
+	// everything.
 	if !uninstallFlags.force {
 		ui.Warn("This will completely remove srv from your system:")
 		ui.Blank()
@@ -77,25 +79,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		}
 		ui.Blank()
 		ui.Dim("Site directories and their contents will NOT be removed.")
-		ui.Blank()
-
-		var confirmed bool
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title("Are you sure you want to uninstall srv?").
-					Description("This action cannot be undone").
-					Value(&confirmed),
-			),
-		)
-		if err := form.Run(); err != nil {
-			return err
-		}
-
-		if !confirmed {
-			ui.Info("Uninstall cancelled")
-			return nil
-		}
+		return fmt.Errorf("uninstall refused: re-run with --force to proceed")
 	}
 
 	ui.Blank()

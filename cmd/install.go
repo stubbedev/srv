@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -21,6 +20,7 @@ import (
 
 var installFlags struct {
 	fresh bool
+	yes   bool
 }
 
 var installCmd = &cobra.Command{
@@ -39,6 +39,7 @@ Use --fresh to remove all existing configuration and start fresh.`,
 
 func init() {
 	installCmd.Flags().BoolVar(&installFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
+	installCmd.Flags().BoolVarP(&installFlags.yes, "yes", "y", false, "Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry). Required for non-interactive runs.")
 	installCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(installCmd)
 }
@@ -100,29 +101,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		steps.Next("Configuring firewall (%s)", fwStatus.Firewall)
 		ui.Dim("Ports 80 and 443 need to be opened for HTTP/HTTPS traffic")
 
-		var openPorts bool
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title("Open ports 80 and 443?").
-					Description("This requires sudo privileges").
-					Value(&openPorts),
-			),
-		)
-		if err := form.Run(); err != nil {
-			return err
-		}
-
-		if openPorts {
-			if err := firewall.OpenPorts(); err != nil {
-				ui.Warn("Failed to configure firewall: %v", err)
-				ui.Dim("You may need to manually open ports 80 and 443")
-			} else {
-				steps.Done("Firewall configured")
-			}
-		} else {
-			steps.Skip("Firewall configuration skipped")
+		if !installFlags.yes {
+			steps.Skip("Firewall configuration skipped (pass --yes to open ports 80/443 via sudo)")
 			ui.Warn("Note: Traefik may not be accessible without opening ports 80/443")
+		} else if err := firewall.OpenPorts(); err != nil {
+			ui.Warn("Failed to configure firewall: %v", err)
+			ui.Dim("You may need to manually open ports 80 and 443")
+		} else {
+			steps.Done("Firewall configured")
 		}
 	}
 
@@ -238,10 +224,9 @@ func startSites(sites []site.Site) {
 }
 
 // stopValetIfActive detects a running Valet install (config dir + systemd
-// units owning ports 80/443/53) and offers to stop the units interactively
-// so srv can proceed. Returns an error only when the user accepts but the
-// stop fails — declining is a soft "no" that leaves Valet running and lets
-// the later port-conflict step decide what to do.
+// units owning ports 80/443/53). With --yes it stops the listed units;
+// without --yes it logs a warning so the user knows why the next port-bind
+// step will fail.
 func stopValetIfActive() error {
 	units, configDir := valet.Active()
 	if len(units) == 0 {
@@ -253,20 +238,8 @@ func stopValetIfActive() error {
 	}
 	ui.Dim("  units:  %s", strings.Join(units, ", "))
 
-	var doStop bool
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Stop Valet now?").
-				Description("Stops the listed systemd units so srv can bind ports 80/443/53. Requires sudo. The units stay disabled-not-stopped so you can `sudo systemctl start <unit>` later if you want to roll back.").
-				Value(&doStop),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return fmt.Errorf("valet pre-flight aborted: %w", err)
-	}
-	if !doStop {
-		ui.Dim("Continuing with Valet still running — srv will likely fail at the port-bind step.")
+	if !installFlags.yes {
+		ui.Dim("Pass --yes to stop these units via sudo. Without it, srv will fail at the port-bind step.")
 		return nil
 	}
 	if err := valet.Stop(units); err != nil {
@@ -276,20 +249,23 @@ func stopValetIfActive() error {
 	return nil
 }
 
-// installCAWithRetry runs `mkcert -install` and, on sudo denial or a failed
-// system-trust install, offers the user up to two retries via huh.Confirm.
-// Returns nil on success or a hard error after the user declines retry — srv
-// without a trusted local CA can't serve usable *.test URLs, so the install
-// must fail loudly instead of warning and continuing.
+// installCAWithRetry runs `mkcert -install`. With --yes it retries up to two
+// times on sudo denial or a missing system-trust outcome (mkcert's own sudo
+// re-prompt absorbs each retry). Without --yes a single attempt is made; any
+// failure becomes a hard error. srv without a trusted local CA can't serve
+// usable *.test URLs, so the install must fail loudly rather than warn and
+// continue.
 func installCAWithRetry() error {
-	const maxAttempts = 3
+	maxAttempts := 1
+	if installFlags.yes {
+		maxAttempts = 3
+	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		res, err := traefik.InstallCA()
 		if err == nil && res.SystemTrustOK && !res.SudoDenied {
 			reportCAInstall(res, true)
 			return nil
 		}
-		// Surface the failure mode to the user.
 		switch {
 		case res.SudoDenied:
 			ui.Warn("mkcert CA install: sudo authentication failed")
@@ -305,27 +281,11 @@ func installCAWithRetry() error {
 				ui.Dim("%s", strings.TrimSpace(res.RawOutput))
 			}
 		}
-
-		if attempt == maxAttempts {
-			break
-		}
-		var retry bool
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title("Try mkcert CA install again?").
-					Description("Local TLS for *.test requires sudo to install the root CA. Decline to fail this install and finish CA setup yourself.").
-					Value(&retry),
-			),
-		)
-		if err := form.Run(); err != nil {
-			return fmt.Errorf("mkcert CA install aborted: %w", err)
-		}
-		if !retry {
-			break
-		}
 	}
 	reportCAInstall(mkcert.InstallResult{}, true)
+	if !installFlags.yes {
+		return fmt.Errorf("mkcert CA was not installed; re-run `srv install --yes` to retry the sudo prompt up to three times, or install the CA manually")
+	}
 	return fmt.Errorf("mkcert CA was not installed — browsers will reject every *.test URL; install it manually and re-run `srv install`")
 }
 
@@ -360,7 +320,7 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 		return fmt.Errorf("%s", msg)
 	}
 
-	// For fixable conflicts, describe them and offer to fix.
+	// For fixable conflicts, describe them and bail unless --yes is passed.
 	ui.Warn("The following ports are in use by processes srv can fix automatically:")
 	for _, c := range fixable {
 		ui.Dim("  :%d (%s) held by %s", c.Port, c.Name, c.Process)
@@ -368,20 +328,8 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 	}
 	ui.Blank()
 
-	var doFix bool
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Fix these conflicts automatically?").
-				Description("This requires sudo privileges").
-				Value(&doFix),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return err
-	}
-	if !doFix {
-		return fmt.Errorf("port conflicts not resolved; run 'srv install' again after freeing the ports above")
+	if !installFlags.yes {
+		return fmt.Errorf("port conflicts detected; re-run with --yes to auto-fix via sudo or stop the listed processes manually")
 	}
 
 	for _, c := range fixable {
