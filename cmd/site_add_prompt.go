@@ -218,4 +218,3 @@ func normalizeAliases(canonical string, aliases []string) ([]string, error) {
 	}
 	return out, nil
 }
-

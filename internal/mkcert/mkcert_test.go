@@ -278,4 +278,3 @@ func TestDefaultRunnerErrorsWhenMkcertMissing(t *testing.T) {
 		t.Errorf("Combined err = %v, want ErrNotInstalled", err)
 	}
 }
-

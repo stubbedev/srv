@@ -528,7 +528,6 @@ func planLooseSite(s *valet.Site) (importStep, bool) {
 	return importStep{}, false
 }
 
-
 func routeFlags(r valet.Route) string {
 	parts := []string{}
 	if r.Path != "" {

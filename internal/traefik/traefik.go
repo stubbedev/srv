@@ -512,4 +512,3 @@ func mergeEntryPoints(existing, template map[string]any) map[string]any {
 
 	return result
 }
-
