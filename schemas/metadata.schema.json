@@ -2,42 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/metadata.schema.json",
   "$defs": {
-    "Fallback": {
-      "properties": {
-        "url": {
-          "type": "string",
-          "description": "Remote URL to fall back to on 5xx (e.g. https://prod.example.com)."
-        },
-        "timeout": {
-          "type": "string",
-          "description": "Fallback request timeout (e.g. '2s')."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "Limits": {
-      "properties": {
-        "max_body": {
-          "type": "string",
-          "description": "Maximum request body size (e.g. '2G' '128M' '500k')."
-        },
-        "read_timeout": {
-          "type": "string",
-          "description": "Read timeout (e.g. '300s' '5m')."
-        },
-        "send_timeout": {
-          "type": "string",
-          "description": "Send timeout (e.g. '300s')."
-        },
-        "connect_timeout": {
-          "type": "string",
-          "description": "Upstream connect timeout (e.g. '5s')."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
     "Route": {
       "properties": {
         "id": {
@@ -70,10 +34,6 @@
         "priority": {
           "type": "integer",
           "description": "Traefik router priority override."
-        },
-        "limits": {
-          "$ref": "#/$defs/Limits",
-          "description": "Per-route limits override."
         }
       },
       "additionalProperties": false,
@@ -199,24 +159,12 @@
       "type": "array",
       "description": "Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."
     },
-    "limits": {
-      "$ref": "#/$defs/Limits",
-      "description": "Request-body / timeout overrides."
-    },
     "routes": {
       "items": {
         "$ref": "#/$defs/Route"
       },
       "type": "array",
       "description": "Extra Traefik routers (path-prefix / regex-rewrite splits)."
-    },
-    "upstream": {
-      "$ref": "#/$defs/Upstream",
-      "description": "Primary backend (proxy-type sites only)."
-    },
-    "fallback": {
-      "$ref": "#/$defs/Fallback",
-      "description": "Remote 5xx fallback target."
     },
     "spa": {
       "type": "boolean",
