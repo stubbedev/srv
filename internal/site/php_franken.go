@@ -121,7 +121,13 @@ func FrankenPHPBaseImage(version string) string {
 // WritePHPSiteConfig generates the Dockerfile and docker-compose.yml for a PHP
 // site into the srv config directory under ~/.config/srv/sites/<name>/.
 //
-// If force is false, existing files are left untouched so user edits are preserved.
+// If the project has a Dockerfile.srv (or .srv/Dockerfile) at its root the
+// contents are copied verbatim instead of generating the default template.
+// The override must FROM dunglas/frankenphp:... so srv's runtime assumptions
+// (HTTP on :80, Caddy + embedded PHP) still hold.
+//
+// If force is false, existing files are left untouched so user edits are
+// preserved.
 func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force bool) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -133,7 +139,10 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 		return fmt.Errorf("failed to create site config directory: %w", err)
 	}
 
-	dockerfile := generatePHPDockerfile(info)
+	dockerfile, _, err := resolvePHPDockerfile(meta, info)
+	if err != nil {
+		return err
+	}
 	if err := writeFile(SitePHPDockerfilePath(cfg, name), []byte(dockerfile), force); err != nil {
 		return fmt.Errorf("failed to write Dockerfile: %w", err)
 	}
@@ -143,6 +152,88 @@ func WritePHPSiteConfig(name string, meta SiteMetadata, info *PHPSiteInfo, force
 		return fmt.Errorf("render compose: %w", err)
 	}
 	return writeFile(SiteComposePath(cfg, name), composeYAML, force)
+}
+
+// resolvePHPDockerfile returns the Dockerfile contents to write for a PHP
+// site. It checks the project root for `Dockerfile.srv` then `.srv/Dockerfile`;
+// the first match wins and is returned verbatim after validating the FROM
+// line. The second return value is the source path of the override (empty
+// when no override was used).
+func resolvePHPDockerfile(meta SiteMetadata, info *PHPSiteInfo) (string, string, error) {
+	candidates := []string{
+		meta.ProjectPath + "/Dockerfile.srv",
+		meta.ProjectPath + "/.srv/Dockerfile",
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path) //nolint:gosec // path derived from site metadata
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", "", fmt.Errorf("read %s: %w", path, err)
+		}
+		if err := validateFrankenPHPBaseImage(data, path); err != nil {
+			return "", "", err
+		}
+		return string(data), path, nil
+	}
+	return generatePHPDockerfile(info), "", nil
+}
+
+// validateFrankenPHPBaseImage scans a Dockerfile for the first uncommented
+// FROM instruction and confirms it points at dunglas/frankenphp. srv's
+// runtime expectations (HTTP on :80, Caddy + embedded PHP) only hold for
+// that image family.
+func validateFrankenPHPBaseImage(data []byte, path string) error {
+	for line := range splitLines(string(data)) {
+		t := trimSpaceASCII(line)
+		if t == "" || t[0] == '#' {
+			continue
+		}
+		// Match "FROM image[:tag]" case-insensitively.
+		if len(t) < 5 || (t[:5] != "FROM " && t[:5] != "from " && t[:5] != "From ") {
+			continue
+		}
+		rest := trimSpaceASCII(t[5:])
+		if !startsWith(rest, "dunglas/frankenphp") {
+			return fmt.Errorf("%s: FROM must be dunglas/frankenphp[:tag], got %q", path, rest)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s: no FROM instruction found", path)
+}
+
+// splitLines yields each line of s without allocating a slice.
+func splitLines(s string) func(yield func(string) bool) {
+	return func(yield func(string) bool) {
+		start := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] == '\n' {
+				if !yield(s[start:i]) {
+					return
+				}
+				start = i + 1
+			}
+		}
+		if start < len(s) {
+			yield(s[start:])
+		}
+	}
+}
+
+func trimSpaceASCII(s string) string {
+	start, end := 0, len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
+}
+
+func startsWith(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // WritePHPDockerConfig regenerates the Dockerfile + docker-compose.yml after a
