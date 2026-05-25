@@ -17,7 +17,12 @@ import (
 func TestMain(m *testing.M) {
 	restoreShell := shell.SwapDefault(shelltest.New(nil))
 	restoreMkcert := mkcert.SwapRunner(noopMkcertRunner{})
+	// Pretend mkcert is on PATH so CheckMkcert() succeeds without a real
+	// binary. Tests that want to assert "mkcert missing" override this
+	// per-test via mkcert.SwapLookPath.
+	restoreLookPath := mkcert.SwapLookPath(func(string) (string, error) { return "/fake/mkcert", nil })
 	code := m.Run()
+	restoreLookPath()
 	restoreMkcert()
 	restoreShell()
 	os.Exit(code)

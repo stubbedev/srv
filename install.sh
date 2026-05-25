@@ -166,6 +166,13 @@ install_binary() {
 
 # Verify installation
 verify() {
+  if ! command -v mkcert >/dev/null 2>&1; then
+    warn "mkcert is required at runtime but not on PATH."
+    warn "  brew install mkcert   # macOS"
+    warn "  apt install mkcert    # Debian/Ubuntu"
+    warn "  nix profile install nixpkgs#mkcert"
+  fi
+
   if command -v srv >/dev/null 2>&1; then
     info "Installed $(srv version 2>/dev/null || echo "srv")"
     info "Run 'srv install' to get started"

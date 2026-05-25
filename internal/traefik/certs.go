@@ -14,10 +14,10 @@ import (
 	"github.com/stubbedev/srv/internal/mkcert"
 )
 
-// CheckMkcert verifies mkcert is available (embedded or system).
+// CheckMkcert verifies mkcert is available on $PATH.
 func CheckMkcert() error {
 	if !mkcert.Available() {
-		return fmt.Errorf("mkcert is not available on this platform (embedded binary missing)")
+		return fmt.Errorf("mkcert not found on $PATH. Install it: `brew install mkcert` / `nix profile install nixpkgs#mkcert` / your distro package manager")
 	}
 	return nil
 }

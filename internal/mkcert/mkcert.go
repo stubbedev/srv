@@ -1,30 +1,23 @@
-// Package mkcert embeds the mkcert binary and provides a way to run it
-// without requiring mkcert to be installed on the host system.
+// Package mkcert shells out to the system `mkcert` binary. Users must have
+// it on $PATH (`brew install mkcert`, `nix profile install nixpkgs#mkcert`,
+// distro package manager) — srv no longer vendors / embeds it.
 package mkcert
 
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
-// ErrUnsupported is returned when the current platform has no embedded binary.
-var ErrUnsupported = errors.New("mkcert is not available on this platform")
+// ErrNotInstalled is returned when `mkcert` is not on $PATH.
+var ErrNotInstalled = errors.New("mkcert not installed (`brew install mkcert` / `nix profile install nixpkgs#mkcert` / distro package)")
 
-var (
-	extractOnce   sync.Once
-	extractedPath string
-	extractErr    error
-)
-
-// CommandRunner runs the embedded mkcert binary. The signature mirrors the
-// three production call shapes (stream / output-only / output+stderr) so a
-// test can stub all of them with one struct.
+// CommandRunner runs the mkcert binary. The signature mirrors the three
+// production call shapes (stream / output-only / output+stderr) so a test
+// can stub all of them with one struct.
 type CommandRunner interface {
 	// Stream runs mkcert with stdin/stdout/stderr attached.
 	Stream(args ...string) error
@@ -36,11 +29,11 @@ type CommandRunner interface {
 }
 
 // defaultRunner is the production CommandRunner; it shells out to the
-// extracted binary via os/exec.
+// system `mkcert` binary via os/exec.
 type defaultRunner struct{}
 
 func (defaultRunner) Stream(args ...string) error {
-	path, err := extractBinary()
+	path, err := mkcertPath()
 	if err != nil {
 		return err
 	}
@@ -52,7 +45,7 @@ func (defaultRunner) Stream(args ...string) error {
 }
 
 func (defaultRunner) Output(args ...string) ([]byte, error) {
-	path, err := extractBinary()
+	path, err := mkcertPath()
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +53,7 @@ func (defaultRunner) Output(args ...string) ([]byte, error) {
 }
 
 func (defaultRunner) Combined(args ...string) ([]byte, error) {
-	path, err := extractBinary()
+	path, err := mkcertPath()
 	if err != nil {
 		return nil, err
 	}
@@ -83,57 +76,50 @@ func SwapRunner(r CommandRunner) func() {
 	return func() { Runner = prev }
 }
 
-// extractBinary writes the embedded binary to a temp file once and returns
-// its path. Subsequent calls return the cached path.
-func extractBinary() (string, error) {
-	extractOnce.Do(func() {
-		if len(binary) == 0 {
-			extractErr = ErrUnsupported
-			return
-		}
-
-		dir := filepath.Join(os.TempDir(), fmt.Sprintf("srv-mkcert-%d", os.Getpid()))
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			extractErr = fmt.Errorf("mkcert: failed to create temp dir: %w", err)
-			return
-		}
-
-		path := filepath.Join(dir, "mkcert")
-		if err := os.WriteFile(path, binary, 0o700); err != nil {
-			extractErr = fmt.Errorf("mkcert: failed to write binary: %w", err)
-			return
-		}
-
-		extractedPath = path
-	})
-	return extractedPath, extractErr
+// mkcertPath returns the resolved $PATH location of the mkcert binary, or
+// ErrNotInstalled if it isn't on the host.
+func mkcertPath() (string, error) {
+	path, err := lookPath("mkcert")
+	if err != nil {
+		return "", ErrNotInstalled
+	}
+	return path, nil
 }
 
-// Run executes the embedded mkcert binary with the given arguments.
-// stdout and stderr are inherited from the current process.
+// Run executes mkcert with the given arguments. stdout/stderr are inherited.
 func Run(args ...string) error {
 	return Runner.Stream(args...)
 }
 
-// RunQuiet executes the embedded mkcert binary suppressing its stderr.
-// mkcert prints advisory warnings to stderr (e.g. "the local CA is not
-// installed in the system trust store") that are stale or misleading when
-// srv has already handled CA installation. Only a non-zero exit code is
-// treated as an error.
+// RunQuiet executes mkcert suppressing its stderr. mkcert prints advisory
+// warnings to stderr (e.g. "the local CA is not installed in the system
+// trust store") that are stale or misleading when srv has already handled
+// CA installation. Only a non-zero exit code is treated as an error.
 func RunQuiet(args ...string) error {
 	_, err := Runner.Output(args...)
 	return err
 }
 
-// Output executes the embedded mkcert binary and returns combined output.
+// Output executes mkcert and returns its stdout.
 func Output(args ...string) ([]byte, error) {
 	return Runner.Output(args...)
 }
 
-// Available reports whether the embedded mkcert binary is available on this
-// platform.
+// lookPath is the exec.LookPath indirection so tests can fake the host's PATH.
+var lookPath = exec.LookPath
+
+// SwapLookPath replaces the lookPath used by Available + mkcertPath. Returns a
+// restore func; tests use it via t.Cleanup.
+func SwapLookPath(fn func(string) (string, error)) func() {
+	prev := lookPath
+	lookPath = fn
+	return func() { lookPath = prev }
+}
+
+// Available reports whether mkcert is on $PATH.
 func Available() bool {
-	return len(binary) > 0
+	_, err := lookPath("mkcert")
+	return err == nil
 }
 
 // InstallResult describes the outcome of running `mkcert -install`. mkcert
@@ -195,8 +181,8 @@ func parseInstallOutput(out string) InstallResult {
 	return res
 }
 
-// caRootDir returns the mkcert CAROOT directory by invoking the embedded
-// binary. Falls back to the empty string on error.
+// caRootDir returns the mkcert CAROOT directory by invoking the binary.
+// Falls back to the empty string on error.
 func caRootDir() (string, error) {
 	out, err := Runner.Output("-CAROOT")
 	if err != nil {
@@ -205,10 +191,3 @@ func caRootDir() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Cleanup removes the extracted binary from the temp directory.
-// Safe to call multiple times; intended for use in process shutdown hooks.
-func Cleanup() {
-	if extractedPath != "" {
-		_ = os.RemoveAll(filepath.Dir(extractedPath))
-	}
-}

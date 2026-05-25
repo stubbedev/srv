@@ -139,21 +139,26 @@ func TestParseInstallOutputEmpty(t *testing.T) {
 	}
 }
 
-func TestAvailable(t *testing.T) {
-	// Just call it. The result depends on whether the binary was embedded.
-	got := Available()
-	want := len(binary) > 0
-	if got != want {
-		t.Errorf("Available() = %v, want %v", got, want)
+func TestAvailableTrueWhenLookPathSucceeds(t *testing.T) {
+	t.Cleanup(SwapLookPath(func(string) (string, error) { return "/fake/bin/mkcert", nil }))
+	if !Available() {
+		t.Error("Available() should be true when lookPath returns a hit")
 	}
 }
 
-func TestErrUnsupportedExists(t *testing.T) {
-	if ErrUnsupported == nil {
-		t.Error("ErrUnsupported should be non-nil")
+func TestAvailableFalseWhenLookPathFails(t *testing.T) {
+	t.Cleanup(SwapLookPath(func(string) (string, error) { return "", errors.New("not found") }))
+	if Available() {
+		t.Error("Available() should be false when lookPath returns an error")
 	}
-	if !strings.Contains(ErrUnsupported.Error(), "not available") {
-		t.Errorf("err msg = %q", ErrUnsupported.Error())
+}
+
+func TestErrNotInstalledMessage(t *testing.T) {
+	if ErrNotInstalled == nil {
+		t.Fatal("ErrNotInstalled should be non-nil")
+	}
+	if !strings.Contains(ErrNotInstalled.Error(), "mkcert") {
+		t.Errorf("err msg = %q", ErrNotInstalled.Error())
 	}
 }
 
@@ -261,87 +266,16 @@ func TestInstallSwallowsCARootError(t *testing.T) {
 	}
 }
 
-func TestCleanupNoopWhenNotExtracted(t *testing.T) {
-	// extractedPath is set by extractBinary; without test invocation it
-	// remains "" so Cleanup is a noop. Just confirm it doesn't panic.
-	prev := extractedPath
-	extractedPath = ""
-	Cleanup()
-	extractedPath = prev
-}
-
-func TestDefaultRunnerStream(t *testing.T) {
-	if !Available() {
-		t.Skip("mkcert binary not embedded")
+func TestDefaultRunnerErrorsWhenMkcertMissing(t *testing.T) {
+	t.Cleanup(SwapLookPath(func(string) (string, error) { return "", errors.New("not found") }))
+	if err := (defaultRunner{}.Stream("--help")); !errors.Is(err, ErrNotInstalled) {
+		t.Errorf("Stream err = %v, want ErrNotInstalled", err)
 	}
-	// --help exits 0 and prints usage.
-	if err := (defaultRunner{}.Stream("--help")); err != nil {
-		t.Errorf("err: %v", err)
+	if _, err := (defaultRunner{}.Output("-CAROOT")); !errors.Is(err, ErrNotInstalled) {
+		t.Errorf("Output err = %v, want ErrNotInstalled", err)
+	}
+	if _, err := (defaultRunner{}.Combined("-CAROOT")); !errors.Is(err, ErrNotInstalled) {
+		t.Errorf("Combined err = %v, want ErrNotInstalled", err)
 	}
 }
 
-func TestDefaultRunnerOutput(t *testing.T) {
-	if !Available() {
-		t.Skip("mkcert binary not embedded")
-	}
-	out, err := defaultRunner{}.Output("-CAROOT")
-	if err != nil {
-		t.Errorf("err: %v", err)
-	}
-	if len(out) == 0 {
-		t.Error("expected CAROOT output")
-	}
-}
-
-func TestDefaultRunnerCombined(t *testing.T) {
-	if !Available() {
-		t.Skip("mkcert binary not embedded")
-	}
-	out, err := defaultRunner{}.Combined("-CAROOT")
-	if err != nil {
-		t.Errorf("err: %v", err)
-	}
-	if len(out) == 0 {
-		t.Error("expected combined output")
-	}
-}
-
-func TestExtractBinaryUnavailable(t *testing.T) {
-	// Force the binary slice empty + reset sync.Once via package-level reset.
-	prevExtracted, prevErr := extractedPath, extractErr
-	defer func() {
-		extractedPath, extractErr = prevExtracted, prevErr
-	}()
-	// Already-extracted run should return cached path.
-	if path, err := extractBinary(); err == nil && path == "" {
-		t.Error("path empty without err")
-	}
-}
-
-func TestExtractBinaryCachedPath(t *testing.T) {
-	if !Available() {
-		t.Skip("mkcert binary not embedded")
-	}
-	first, err := extractBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := extractBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second {
-		t.Errorf("paths differ: %q vs %q", first, second)
-	}
-	if first == "" {
-		t.Error("path empty")
-	}
-}
-
-func TestCleanupAfterExtraction(t *testing.T) {
-	if !Available() {
-		t.Skip("mkcert binary not embedded")
-	}
-	_, _ = extractBinary()
-	Cleanup()
-}

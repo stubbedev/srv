@@ -16,7 +16,9 @@ Download the binary for your platform from [releases](https://github.com/stubbed
 
 **Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (amd64, arm64)
 
-**Requirements:** Docker
+**Runtime requirements:**
+- Docker
+- [mkcert](https://github.com/FiloSottile/mkcert) — for local TLS. Install via `brew install mkcert`, `nix profile install nixpkgs#mkcert`, or your distro package manager. srv shells out to it; no embedded copy.
 
 ## Quick Start
 

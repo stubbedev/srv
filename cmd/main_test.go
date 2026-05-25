@@ -19,6 +19,9 @@ import (
 func TestMain(m *testing.M) {
 	restoreShell := shell.SwapDefault(shelltest.New(nil))
 	restoreMkcert := mkcert.SwapRunner(stubMkcertRunner{})
+	// Pretend mkcert is on PATH so CheckMkcert() succeeds without a real
+	// binary. Tests that assert "mkcert missing" override per-test.
+	restoreLookPath := mkcert.SwapLookPath(func(string) (string, error) { return "/fake/mkcert", nil })
 	restoreCompose := docker.SwapComposeExec(func(string, bool, ...string) error {
 		return errors.New("docker compose disabled in tests; SwapComposeExec in your test")
 	})
@@ -28,6 +31,7 @@ func TestMain(m *testing.M) {
 
 	restoreDocker()
 	restoreCompose()
+	restoreLookPath()
 	restoreMkcert()
 	restoreShell()
 	os.Exit(code)
