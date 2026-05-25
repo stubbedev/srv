@@ -24,6 +24,10 @@ import (
 // doctor command
 // =============================================================================
 
+var doctorFlags struct {
+	fixPerms bool
+}
+
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Run diagnostic checks",
@@ -35,11 +39,15 @@ Checks performed:
   - Docker network existence
   - Traefik container status
   - Local SSL certificate validity
-  - mkcert installation`,
+  - mkcert installation
+  - Site metadata validity
+  - PHP site .env host-loopback references
+  - Ownership of ~/.config/srv (use --fix-perms to repair)`,
 	RunE: runDoctor,
 }
 
 func init() {
+	doctorCmd.Flags().BoolVar(&doctorFlags.fixPerms, "fix-perms", false, "Interactively sudo chown ~/.config/srv back to the current user when files are root-owned")
 	doctorCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(doctorCmd)
 }
@@ -59,6 +67,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	issues += checkCertificates()
 	issues += checkSitesValid()
 	issues += checkPHPEnvHostLoopback()
+	issues += checkConfigDirOwnership(doctorFlags.fixPerms)
 
 	// Summary
 	ui.Blank()
@@ -427,6 +436,102 @@ func scanEnvForHostLoopback(path string) []string {
 		}
 	}
 	return hits
+}
+
+// checkConfigDirOwnership walks ~/.config/srv looking for root-owned files
+// when the current user is not root. Such files break every subsequent write
+// (site metadata, generated Dockerfile, compose YAML). With --fix-perms it
+// prompts the user once and runs `sudo chown -R <user>:<group> <root>`.
+//
+// Skipped on non-Linux/Darwin platforms where os.Stat doesn't yield Unix
+// uid/gid info.
+func checkConfigDirOwnership(fix bool) int {
+	ui.Bold("Config dir ownership")
+
+	if currentUID() == 0 {
+		ui.IndentedDim(1, "Running as root — ownership checks skipped")
+		ui.Blank()
+		return 0
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		ui.IndentedWarn(1, "Could not load config: %v", err)
+		ui.Blank()
+		return 1
+	}
+
+	wrong, err := findRootOwnedPaths(cfg.Root)
+	if err != nil {
+		ui.IndentedWarn(1, "Could not walk config dir: %v", err)
+		ui.Blank()
+		return 1
+	}
+	if len(wrong) == 0 {
+		ui.IndentedSuccess(1, "All files in %s are owned by the current user", cfg.Root)
+		ui.Blank()
+		return 0
+	}
+
+	ui.IndentedWarn(1, "%d path(s) in %s are root-owned", len(wrong), cfg.Root)
+	preview := wrong
+	if len(preview) > 5 {
+		preview = preview[:5]
+	}
+	for _, p := range preview {
+		ui.IndentedDim(2, "%s", p)
+	}
+	if len(wrong) > len(preview) {
+		ui.IndentedDim(2, "… and %d more", len(wrong)-len(preview))
+	}
+
+	if !fix {
+		ui.IndentedDim(1, "Re-run with --fix-perms to chown them back to the current user")
+		ui.Blank()
+		return 1
+	}
+
+	if err := sudoChownTree(cfg.Root); err != nil {
+		ui.IndentedError(1, "chown failed: %v", err)
+		ui.Blank()
+		return 1
+	}
+	ui.IndentedSuccess(1, "Repaired ownership of %s", cfg.Root)
+	ui.Blank()
+	return 0
+}
+
+// findRootOwnedPaths walks root and collects paths whose owning uid is 0 (or
+// whose uid does not match the current user). Stops after collecting a small
+// cap so we don't blow up on misconfigured systems with thousands of files.
+func findRootOwnedPaths(root string) ([]string, error) {
+	const maxFindings = 256
+	currentUser := uint32(currentUID())
+	var hits []string
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil, nil
+	}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // best-effort; skip unreadable entries
+		}
+		if len(hits) >= maxFindings {
+			return filepath.SkipDir
+		}
+		if uid, ok := statUID(info); ok && uid != currentUser {
+			hits = append(hits, path)
+		}
+		return nil
+	})
+	return hits, err
+}
+
+// sudoChownTree runs `sudo chown -R <uid>:<gid> <root>` so the entire srv
+// config tree returns to the invoking user's ownership. Uses the shared
+// shell.Default runner so tests can swap it.
+func sudoChownTree(root string) error {
+	user := fmt.Sprintf("%d:%d", currentUID(), currentGID())
+	return shell.Default.SudoRun("chown", "-R", user, root)
 }
 
 // =============================================================================
