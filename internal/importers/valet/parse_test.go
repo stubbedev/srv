@@ -3,6 +3,7 @@ package valet
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -230,6 +231,63 @@ func TestResolveValetProjectPath_ExactFlag(t *testing.T) {
 	}
 	if _, exact := resolveValetProjectPath("kontainer-8080.test", sitesDir, nil); exact {
 		t.Errorf("prefix-peel match should report exact=false")
+	}
+}
+
+func TestExpandIncludes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "_snippet.conf"), []byte("location /app { proxy_pass http://127.0.0.1:6001; }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	block := "server { listen 443;\n  include _snippet.conf;\n  server_name a.test;\n}"
+	out := expandIncludes(block, dir)
+	if !strings.Contains(out, "proxy_pass http://127.0.0.1:6001") {
+		t.Errorf("expected snippet contents inline, got:\n%s", out)
+	}
+	if strings.Contains(out, "include _snippet.conf") {
+		t.Errorf("original include directive should be replaced, got:\n%s", out)
+	}
+}
+
+func TestExpandIncludesMissingKeptVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	block := "server { include _missing.conf; }"
+	out := expandIncludes(block, dir)
+	if !strings.Contains(out, "include _missing.conf") {
+		t.Errorf("missing include should stay in the block so downstream code can flag it, got:\n%s", out)
+	}
+}
+
+func TestParseFileExpandsIncludes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "_video.conf"), []byte("location ~ ^/videos/(.+)$ { rewrite ^/videos/(.+)$ /abs/videos/$1 break; proxy_pass http://127.0.0.1:9080; }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site := `server {
+        listen 443 ssl;
+        server_name app.test;
+        client_max_body_size 2G;
+        fastcgi_pass unix:/run/valet.sock;
+        include _video.conf;
+        location / { try_files $uri $uri/ /index.php?$query_string; }
+}`
+	confPath := filepath.Join(dir, "app.test.conf")
+	if err := os.WriteFile(confPath, []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := ParseFile(confPath, "", nil)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !s.IsPHP {
+		t.Error("expected IsPHP=true")
+	}
+	if len(s.Routes) == 0 {
+		t.Fatalf("expected at least 1 route from include, got 0")
+	}
+	r := s.Routes[0]
+	if r.PathRegex == "" || r.Port != 9080 {
+		t.Errorf("unexpected route from include: %+v", r)
 	}
 }
 

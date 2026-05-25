@@ -136,6 +136,11 @@ func ParseFile(path, sitesDir string, parkedPaths []string) (*Site, error) {
 		return site, fmt.Errorf("no recognisable server block in %s", path)
 	}
 
+	// Expand `include` snippets inline before parsing the block so location
+	// definitions that live in a sibling file (e.g. _kontainer-video-bypass.conf)
+	// surface as routes on this site.
+	primary = expandIncludes(primary, filepath.Dir(path))
+
 	parsePrimaryBlock(primary, site)
 
 	if site.IsPHP {
@@ -500,4 +505,45 @@ var (
 	proxyPassRe             = regexp.MustCompile(`proxy_pass\s+([^;\s]+)\s*;`)
 	rewriteRe               = regexp.MustCompile(`rewrite\s+([^\s]+)\s+([^\s]+)\s+(?:last|break|redirect|permanent)\s*;`)
 	nginxSetRe              = regexp.MustCompile(`(?m)^\s*set\s+\$([A-Za-z_][A-Za-z0-9_]*)\s+("[^"]*"|[^;\s]+)\s*;`)
+	includeRe               = regexp.MustCompile(`(?m)^\s*include\s+([^\s;]+)\s*;`)
 )
+
+// expandIncludes resolves nginx `include FILE.conf;` directives inside the
+// given block, replacing each include with the file's contents. Paths are
+// resolved relative to baseDir (the directory of the parent nginx file). The
+// expansion is one level deep — nested includes inside the snippet are
+// surfaced as UnknownNotes by the caller via leftover `include` lines, not
+// recursively expanded. Snippets that fail to read are silently skipped so
+// importer never fails on a missing include.
+func expandIncludes(block, baseDir string) string {
+	matches := includeRe.FindAllStringSubmatchIndex(block, -1)
+	if len(matches) == 0 {
+		return block
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		matchStart, matchEnd := m[0], m[1]
+		pathStart, pathEnd := m[2], m[3]
+		inc := strings.TrimSpace(block[pathStart:pathEnd])
+		if !filepath.IsAbs(inc) {
+			inc = filepath.Join(baseDir, inc)
+		}
+		data, err := os.ReadFile(inc) //nolint:gosec // path comes from valet config
+		if err != nil {
+			// Keep the original `include …;` directive in place so downstream
+			// code can flag it as unhandled if relevant; don't drop the rest
+			// of the block.
+			b.WriteString(block[last:matchEnd])
+			last = matchEnd
+			continue
+		}
+		b.WriteString(block[last:matchStart])
+		b.WriteByte('\n')
+		b.Write(data)
+		b.WriteByte('\n')
+		last = matchEnd
+	}
+	b.WriteString(block[last:])
+	return b.String()
+}
