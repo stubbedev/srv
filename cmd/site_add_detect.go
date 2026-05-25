@@ -80,27 +80,35 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 	return setup, nil
 }
 
+// languageMarkers maps a language label to the project-root files that would
+// have made srv claim it before the runtime strip. Probed in declaration
+// order; first hit wins. PHP also falls back to a `.php` file scan via
+// site.DetectRawPHPSite (covers projects without composer.json).
+var languageMarkers = []struct {
+	lang  string
+	files []string
+}{
+	{"php", []string{"composer.json"}},
+	{"node", []string{"package.json", "deno.json"}},
+	{"ruby", []string{"Gemfile"}},
+	{"python", []string{"requirements.txt", "pyproject.toml", "Pipfile"}},
+}
+
 // detectLanguageProject returns the language label (php/node/ruby/python) of
 // a project at dir that srv would have previously managed a runtime for.
 // Returns "" when none of the language markers are present. Used to surface
 // a hard error in `srv add` directing the user at `srv scaffold` or --type.
 func detectLanguageProject(dir string) string {
-	if hasPHPProject(dir) {
-		return "php"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "package.json")); err == nil {
-		return "node"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "deno.json")); err == nil {
-		return "node"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "Gemfile")); err == nil {
-		return "ruby"
-	}
-	for _, marker := range []string{"requirements.txt", "pyproject.toml", "Pipfile"} {
-		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
-			return "python"
+	for _, m := range languageMarkers {
+		for _, f := range m.files {
+			if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+				return m.lang
+			}
 		}
+	}
+	// PHP fallback: raw .php files at the root without composer.json.
+	if ok, _ := site.DetectRawPHPSite(dir); ok {
+		return "php"
 	}
 	return ""
 }
@@ -127,20 +135,6 @@ func applyTypeOverride(setup *siteSetup, sitePath, typeStr string) (*siteSetup, 
 		return nil, fmt.Errorf("unknown site type %q — valid types: dockerfile, static, compose (language runtimes are user-owned now; use `srv scaffold` to generate a Dockerfile)", typeStr)
 	}
 	return setup, nil
-}
-
-// hasPHPProject reports whether dir looks like a PHP project that srv would
-// previously have managed (composer.json or a top-level .php / .phtml file).
-// Used to surface a hard error when there's no Dockerfile/compose to drive
-// the runtime — srv no longer manages PHP runtimes directly.
-func hasPHPProject(dir string) bool {
-	if _, err := os.Stat(filepath.Join(dir, "composer.json")); err == nil {
-		return true
-	}
-	if hasRawPHP, _ := site.DetectRawPHPSite(dir); hasRawPHP {
-		return true
-	}
-	return false
 }
 
 // detectionSummary returns a human-readable summary of what was detected for a site.
