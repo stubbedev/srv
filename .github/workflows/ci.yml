@@ -7,12 +7,66 @@ on:
     branches: ["**"]
 
 jobs:
+  autofix:
+    # Attempt to auto-correct mechanically-fixable issues (gofmt + golangci-lint --fix).
+    # If anything was fixed, commit and push back so subsequent jobs (which re-checkout)
+    # validate the fixed tree. Skipped on bot-authored commits to prevent loops, and
+    # on PRs from forks where pushing back is impossible.
+    if: github.event.pusher.name != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      pushed_sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          # Use ref/ref_name so we check out the actual branch (not detached HEAD)
+          # so `git push` has somewhere to go.
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run gofmt -w
+        run: gofmt -w $(go list -f '{{.Dir}}' ./...)
+
+      - name: Run golangci-lint --fix
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --fix
+        continue-on-error: true
+
+      - name: Commit and push fixes
+        id: commit
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No auto-fixable issues found."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m "style: auto-fix gofmt and golangci-lint issues [skip ci]"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "::notice::CI auto-fixed formatting/lint issues and pushed commit $(git rev-parse --short HEAD)."
+
   test:
+    needs: autofix
+    if: always() && (needs.autofix.result == 'success' || needs.autofix.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - uses: actions/setup-go@v6
         with:
@@ -53,11 +107,14 @@ jobs:
           fi
 
   lint:
+    needs: autofix
+    if: always() && (needs.autofix.result == 'success' || needs.autofix.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - uses: actions/setup-go@v6
         with:
