@@ -1,13 +1,13 @@
-// Package cmd — site_add_prompt.go owns the interactive `srv add` prompts
-// (domain, service, profile) and the alias/limits flag-normalisation helpers
-// they need.
+// Package cmd — site_add_prompt.go owns the flag-driven `srv add`
+// configuration assembly (domain, service, profile) and the alias/limits
+// normalisation helpers. Previously this file relied on huh prompts when
+// flags were missing; it now requires every decision to come via a flag so
+// `srv add` is scriptable end-to-end.
 package cmd
 
 import (
 	"fmt"
 	"strings"
-
-	"charm.land/huh/v2"
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/site"
@@ -147,37 +147,15 @@ func promptForService(setup *siteSetup) error {
 		// Single service - use it automatically
 		selectedService = &services[0]
 	} else {
-		// Multiple services - prompt for selection
-		options := make([]huh.Option[int], len(services))
+		// Multiple services and no --service flag: refuse to guess.
+		labels := make([]string, len(services))
 		for i, svc := range services {
-			label := svc.ContainerName
+			labels[i] = svc.ContainerName
 			if svc.ServiceName != svc.ContainerName {
-				label = fmt.Sprintf("%s (service: %s)", svc.ContainerName, svc.ServiceName)
+				labels[i] = fmt.Sprintf("%s (service: %s)", svc.ContainerName, svc.ServiceName)
 			}
-			if len(svc.Profiles) > 0 {
-				label = fmt.Sprintf("%s [%s]", label, strings.Join(svc.Profiles, ","))
-			}
-			// Show discovered port in selection
-			if svc.Port > 0 {
-				label = fmt.Sprintf("%s (port: %d)", label, svc.Port)
-			}
-			options[i] = huh.NewOption(label, i)
 		}
-
-		var selectedIdx int
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[int]().
-					Title("Select container").
-					Description("Which container should Traefik route to?").
-					Options(options...).
-					Value(&selectedIdx),
-			),
-		)
-		if err := form.Run(); err != nil {
-			return err
-		}
-		selectedService = &services[selectedIdx]
+		return fmt.Errorf("compose file declares %d services (%s); pass --service to pick one", len(services), strings.Join(labels, ", "))
 	}
 
 	// Set the service info
@@ -198,53 +176,31 @@ func promptForService(setup *siteSetup) error {
 	return nil
 }
 
-// promptForProfile prompts the user to select a profile when multiple are available
+// promptForProfile resolves the compose profile from --profile. When the
+// selected service declares multiple profiles, --profile must be set and
+// must match one of them.
 func promptForProfile(setup *siteSetup, profiles []string) error {
-	options := make([]huh.Option[string], len(profiles))
-	for i, profile := range profiles {
-		options[i] = huh.NewOption(profile, profile)
+	flag := addFlags.profile
+	if flag == "" {
+		return fmt.Errorf("compose service declares %d profiles (%s); pass --profile to pick one", len(profiles), strings.Join(profiles, ", "))
 	}
-
-	var selected string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Select profile").
-				Description("Which Docker Compose profile should be used?").
-				Options(options...).
-				Value(&selected),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return err
+	for _, p := range profiles {
+		if p == flag {
+			setup.profile = flag
+			return nil
+		}
 	}
-
-	setup.profile = selected
-	return nil
+	return fmt.Errorf("--profile %q is not one of the service's profiles (%s)", flag, strings.Join(profiles, ", "))
 }
 
-// promptForDomain prompts for domain input if not provided
+// promptForDomain pulls the domain from --domain. Missing is a hard error;
+// the command level already enforces --domain at PreRun, so this is a belt
+// for callers that bypass the flag.
 func promptForDomain(setup *siteSetup) error {
 	setup.domain = addFlags.domain
-	if setup.domain != "" {
-		return nil
+	if setup.domain == "" {
+		return ui.UsageError("srv add PATH --domain DOMAIN", "--domain is required")
 	}
-
-	var domain string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Domain").
-				Description("Enter the domain for this site").
-				Placeholder("example.com or myapp.test").
-				Value(&domain).
-				Validate(ValidateDomain),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return err
-	}
-	setup.domain = domain
 	return nil
 }
 

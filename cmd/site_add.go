@@ -47,6 +47,8 @@ var addFlags struct {
 	phpExtensions string
 	// Node.js site options
 	nodeVersion string
+	// Compose profile selection
+	profile string
 	// Extra mounts
 	volumes []string
 }
@@ -132,6 +134,8 @@ func init() {
 	})
 	// Node.js site options
 	addCmd.Flags().StringVar(&addFlags.nodeVersion, "node-version", "", "Node.js version (auto-detected from .nvmrc / package.json; use 'lts' for latest LTS)")
+	// Compose profile (required when the selected service has multiple)
+	addCmd.Flags().StringVar(&addFlags.profile, "profile", "", "Docker Compose profile (required when the selected service declares multiple)")
 	// Extra bind-mounts
 	addCmd.Flags().StringSliceVar(&addFlags.volumes, "volume", nil, "Extra bind-mount in HOST:CONTAINER[:ro] form; repeatable")
 	_ = addCmd.RegisterFlagCompletionFunc("volume", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
