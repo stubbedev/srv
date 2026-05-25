@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
+	"github.com/stubbedev/srv/internal/valet"
 )
 
 var installFlags struct {
@@ -60,6 +61,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
+		return err
+	}
+
+	// Pre-flight: a previously-installed Valet will own :80/:443/:53 and break
+	// the port-bind step further down. Offer to stop its systemd units first
+	// so the install can proceed without the user having to retry.
+	if err := stopValetIfActive(); err != nil {
 		return err
 	}
 
@@ -227,6 +235,45 @@ func startSites(sites []site.Site) {
 	_ = runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
 		return docker.ComposeUp(s.ComposeDir)
 	})
+}
+
+// stopValetIfActive detects a running Valet install (config dir + systemd
+// units owning ports 80/443/53) and offers to stop the units interactively
+// so srv can proceed. Returns an error only when the user accepts but the
+// stop fails — declining is a soft "no" that leaves Valet running and lets
+// the later port-conflict step decide what to do.
+func stopValetIfActive() error {
+	units, configDir := valet.Active()
+	if len(units) == 0 {
+		return nil
+	}
+	ui.Warn("Laravel Valet appears to be running")
+	if configDir != "" {
+		ui.Dim("  config: %s", configDir)
+	}
+	ui.Dim("  units:  %s", strings.Join(units, ", "))
+
+	var doStop bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Stop Valet now?").
+				Description("Stops the listed systemd units so srv can bind ports 80/443/53. Requires sudo. The units stay disabled-not-stopped so you can `sudo systemctl start <unit>` later if you want to roll back.").
+				Value(&doStop),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return fmt.Errorf("valet pre-flight aborted: %w", err)
+	}
+	if !doStop {
+		ui.Dim("Continuing with Valet still running — srv will likely fail at the port-bind step.")
+		return nil
+	}
+	if err := valet.Stop(units); err != nil {
+		return fmt.Errorf("stop valet units: %w", err)
+	}
+	ui.Success("Stopped Valet units")
+	return nil
 }
 
 // installCAWithRetry runs `mkcert -install` and, on sudo denial or a failed
