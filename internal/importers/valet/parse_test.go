@@ -201,10 +201,35 @@ func TestResolveValetProjectPath(t *testing.T) {
 		{"site-kontainer-extra.test", project}, // multi-segment, kontainer is in the middle
 	}
 	for _, tc := range tests {
-		got := resolveValetProjectPath(tc.domain, sitesDir, nil)
+		got, _ := resolveValetProjectPath(tc.domain, sitesDir, nil)
 		if got != tc.want {
 			t.Errorf("resolveValetProjectPath(%q) = %q, want %q", tc.domain, got, tc.want)
 		}
+	}
+}
+
+func TestResolveValetProjectPath_ExactFlag(t *testing.T) {
+	dir := t.TempDir()
+	project := filepath.Join(dir, "kontainer")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sitesDir := filepath.Join(dir, "Sites")
+	if err := os.MkdirAll(sitesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(project, filepath.Join(sitesDir, "kontainer")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, exact := resolveValetProjectPath("kontainer.test", sitesDir, nil); !exact {
+		t.Errorf("exact label should report exact=true")
+	}
+	if _, exact := resolveValetProjectPath("cms-kontainer.test", sitesDir, nil); exact {
+		t.Errorf("suffix-peel match should report exact=false")
+	}
+	if _, exact := resolveValetProjectPath("kontainer-8080.test", sitesDir, nil); exact {
+		t.Errorf("prefix-peel match should report exact=false")
 	}
 }
 
@@ -215,17 +240,23 @@ func TestResolveValetProjectPath_ParkedPath(t *testing.T) {
 	if err := os.MkdirAll(myapp, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got := resolveValetProjectPath("myapp.test", "", []string{parked})
+	got, exact := resolveValetProjectPath("myapp.test", "", []string{parked})
 	if got != myapp {
 		t.Errorf("got %q, want %q", got, myapp)
 	}
+	if !exact {
+		t.Errorf("exact label should be exact=true")
+	}
 	// Subdomain stripping for parked mode too.
-	got = resolveValetProjectPath("api-myapp.test", "", []string{parked})
+	got, exact = resolveValetProjectPath("api-myapp.test", "", []string{parked})
 	if got != myapp {
 		t.Errorf("strip: got %q, want %q", got, myapp)
 	}
+	if exact {
+		t.Errorf("stripped match should be exact=false")
+	}
 	// Unknown host returns "".
-	got = resolveValetProjectPath("nothing.test", "", []string{parked})
+	got, _ = resolveValetProjectPath("nothing.test", "", []string{parked})
 	if got != "" {
 		t.Errorf("got %q, want empty", got)
 	}

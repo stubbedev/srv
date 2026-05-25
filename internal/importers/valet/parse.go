@@ -50,6 +50,12 @@ type Site struct {
 	FallbackURL  string   // From a @fallback location's proxy_pass (if any)
 	Routes       []Route  // Extra location blocks attached to the site
 	UnknownNotes []string // Anything the parser saw but couldn't translate
+	// Stale is set when this is a Valet "park stub" the resolver could only
+	// match by stripping hyphen-segments off the domain (e.g. the project
+	// `kontainer` happened to be reachable as `kontainer-8080.test` via prefix
+	// stripping). Such stubs are typically vestigial and should not be folded
+	// into the canonical site as aliases.
+	Stale bool
 }
 
 // Route is an extra Traefik router derived from a non-root location block.
@@ -133,9 +139,30 @@ func ParseFile(path, sitesDir string, parkedPaths []string) (*Site, error) {
 	parsePrimaryBlock(primary, site)
 
 	if site.IsPHP {
-		site.ProjectPath = resolveValetProjectPath(site.Domain, sitesDir, parkedPaths)
+		path, exact := resolveValetProjectPath(site.Domain, sitesDir, parkedPaths)
+		site.ProjectPath = path
+		// A park stub looks like: PHP via valet.sock, one host on server_name,
+		// no aliases, no proxy_pass, no extra routes/internal listener — the
+		// archetypal "drop a folder, get a vhost" Valet auto-mount. If we had
+		// to strip hyphen-segments to find a project dir, this is most likely
+		// vestigial; mark it stale so the planner can skip it instead of
+		// folding it into a real site as an alias.
+		if isParkStub(site) && path != "" && !exact {
+			site.Stale = true
+		}
 	}
 	return site, nil
+}
+
+// isParkStub returns true when site looks like a Valet park stub: PHP via
+// valet.sock with a single host, no proxy_pass, no aliases, no extra routes
+// or :88 internal listener.
+func isParkStub(s *Site) bool {
+	return s.IsPHP &&
+		s.ProxyTarget == "" &&
+		len(s.Aliases) == 0 &&
+		len(s.Routes) == 0 &&
+		!s.Internal
 }
 
 // parsePrimaryBlock extracts directives and named locations from the HTTPS
@@ -278,9 +305,11 @@ func parsePrimaryBlock(block string, site *Site) {
 //     is reachable as `<dirname>.test` automatically.
 //
 // We try every hyphen-split substring of the first label against both the
-// Sites symlink table and each parked path. Returns "" when no candidate
-// resolves.
-func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) string {
+// Sites symlink table and each parked path. The second return value is true
+// when the resolution used the unstripped first label verbatim (an "exact"
+// match); false when hyphen-segments had to be stripped to find a project.
+// Returns ("", false) when no candidate resolves.
+func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) (string, bool) {
 	base := domain
 	if idx := strings.Index(domain, "."); idx >= 0 {
 		base = domain[:idx]
@@ -318,7 +347,7 @@ func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) stri
 		for _, c := range candidates {
 			p := filepath.Join(sitesDir, c)
 			if resolved, err := filepath.EvalSymlinks(p); err == nil {
-				return resolved
+				return resolved, c == base
 			}
 		}
 	}
@@ -331,11 +360,11 @@ func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) stri
 		for _, c := range candidates {
 			p := filepath.Join(parked, c)
 			if info, err := os.Stat(p); err == nil && info.IsDir() {
-				return p
+				return p, c == base
 			}
 		}
 	}
-	return ""
+	return "", false
 }
 
 // splitServerBlocks returns each top-level `server { … }` block as a string.

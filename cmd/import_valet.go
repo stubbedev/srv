@@ -259,10 +259,21 @@ func buildImportPlan(sites []*valet.Site) []importStep {
 	// Group by project path so multi-host kontainer-style sites collapse into
 	// one srv add with --alias entries. Proxies are not grouped (their target
 	// upstream is what makes them unique).
+	//
+	// Stale park stubs (sites whose project path was only found by stripping
+	// hyphen-segments off the domain) are NOT folded as aliases — the user's
+	// stack typically has `kontainer-8080.test`, `kontainer-canva.test`, etc.
+	// that all resolve to the same `kontainer` project by coincidence. They
+	// should be skipped, not silently aliased.
 	groups := map[string]*importGroup{}
 	var order []string
 	var loose []*valet.Site
+	var stale []*valet.Site
 	for _, s := range sites {
+		if s.Stale {
+			stale = append(stale, s)
+			continue
+		}
 		if !s.IsPHP || s.ProjectPath == "" {
 			loose = append(loose, s)
 			continue
@@ -285,6 +296,15 @@ func buildImportPlan(sites []*valet.Site) []importStep {
 		if step, ok := planLooseSite(s); ok {
 			plan = append(plan, step)
 		}
+	}
+	for _, s := range stale {
+		plan = append(plan, importStep{
+			line: fmt.Sprintf("# skipped (stale park stub): %s → %s", s.Domain, filepath.Base(s.File)),
+			args: nil,
+			notes: []string{
+				fmt.Sprintf("inferred project: %s — only matched by stripping hyphen segments; pass --valet-dir or add manually if real", s.ProjectPath),
+			},
+		})
 	}
 	return plan
 }
