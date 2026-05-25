@@ -29,6 +29,7 @@ var (
 
 	// Root command flags
 	verbose bool
+	quiet   bool
 )
 
 // RootCmd is the root command for srv.
@@ -36,6 +37,7 @@ var RootCmd = &cobra.Command{
 	Use: constants.AppName,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		ui.Verbose = verbose
+		ui.Quiet = quiet
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -43,6 +45,7 @@ var RootCmd = &cobra.Command{
 
 func init() {
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	RootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress informational diagnostic output (errors still printed)")
 
 	// Define command groups
 	RootCmd.AddGroup(
