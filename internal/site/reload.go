@@ -227,9 +227,6 @@ func ValidateMetadata(meta *SiteMetadata) error {
 			return fmt.Errorf("route %q: upstream.kind must be one of localhost|container|url, got %q", r.ID, r.Upstream.Kind)
 		}
 	}
-	if meta.Fallback != nil && meta.Fallback.URL == "" {
-		return fmt.Errorf("fallback.url is required when fallback is set")
-	}
 	return nil
 }
 

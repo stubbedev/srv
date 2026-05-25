@@ -53,11 +53,6 @@ func promptForMissingConfig(setup *siteSetup) error {
 		setup.aliases = aliases
 	}
 
-	// Limits: collect any user-supplied overrides. Empty values are omitted.
-	if l := limitsFromFlags(); l != nil {
-		setup.limits = l
-	}
-
 	if addFlags.internalHTTP {
 		setup.listeners = append(setup.listeners, constants.ListenerInternal)
 	}
@@ -224,16 +219,3 @@ func normalizeAliases(canonical string, aliases []string) ([]string, error) {
 	return out, nil
 }
 
-// limitsFromFlags returns a *site.Limits populated from any non-empty
-// --max-body / --*-timeout flags, or nil if none were supplied.
-func limitsFromFlags() *site.Limits {
-	if addFlags.maxBody == "" && addFlags.readTimeout == "" && addFlags.sendTimeout == "" && addFlags.connectTimeout == "" {
-		return nil
-	}
-	return &site.Limits{
-		MaxBody:        addFlags.maxBody,
-		ReadTimeout:    addFlags.readTimeout,
-		SendTimeout:    addFlags.sendTimeout,
-		ConnectTimeout: addFlags.connectTimeout,
-	}
-}

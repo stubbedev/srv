@@ -47,26 +47,6 @@ func TestRouteFlags(t *testing.T) {
 	}
 }
 
-func TestAddLimitFlags(t *testing.T) {
-	args := []string{"add", "/srv/x"}
-	s := &valet.Site{MaxBody: "2G", ReadTimeout: "60s", SendTimeout: "30s", ConnTimeout: "5s"}
-	addLimitFlags(&args, s)
-	joined := strings.Join(args, " ")
-	for _, want := range []string{"--max-body 2G", "--read-timeout 60s", "--send-timeout 30s", "--connect-timeout 5s"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("missing %q in %q", want, joined)
-		}
-	}
-}
-
-func TestAddLimitFlagsAllEmpty(t *testing.T) {
-	args := []string{"add"}
-	addLimitFlags(&args, &valet.Site{})
-	if len(args) != 1 {
-		t.Errorf("expected no flags added, got %v", args)
-	}
-}
-
 func TestValidateValetDirMissing(t *testing.T) {
 	dir := t.TempDir()
 	if err := validateValetDir(dir); err == nil {

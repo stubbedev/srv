@@ -52,7 +52,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		Wildcard:           setup.wildcard,
 		NetworkName:        cfg.NetworkName,
 		Listeners:          setup.listeners,
-		Limits:             setup.limits,
 		SPA:                setup.spa,
 		Cache:              setup.cache,
 		CORS:               setup.cors,

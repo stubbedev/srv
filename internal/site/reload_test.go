@@ -99,14 +99,6 @@ func TestValidateMetadata(t *testing.T) {
 				}},
 			},
 		},
-		{
-			name: "fallback without url",
-			meta: &SiteMetadata{
-				Domains:  []string{"a.test"},
-				Fallback: &Fallback{},
-			},
-			wantErr: "fallback.url is required",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

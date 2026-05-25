@@ -36,11 +36,6 @@ var addFlags struct {
 	spa   bool
 	cache bool
 	cors  bool
-	// Limits
-	maxBody        string
-	readTimeout    string
-	sendTimeout    string
-	connectTimeout string
 	// Compose profile selection
 	profile string
 	// Extra mounts
@@ -106,20 +101,6 @@ func init() {
 	addCmd.Flags().BoolVar(&addFlags.spa, "spa", true, "Enable SPA mode (fallback to index.html)")
 	addCmd.Flags().BoolVar(&addFlags.cache, "cache", true, "Enable caching headers for static assets")
 	addCmd.Flags().BoolVar(&addFlags.cors, "cors", false, "Enable CORS headers (allow all origins)")
-	// Limits
-	addCmd.Flags().StringVar(&addFlags.maxBody, "max-body", "", "Maximum request body size (e.g. 128M, 2G)")
-	_ = addCmd.RegisterFlagCompletionFunc("max-body", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"1M", "10M", "100M", "128M", "1G", "2G"}, cobra.ShellCompDirectiveNoFileComp
-	})
-	addCmd.Flags().StringVar(&addFlags.readTimeout, "read-timeout", "", "Upstream read timeout (e.g. 30s, 300s)")
-	addCmd.Flags().StringVar(&addFlags.sendTimeout, "send-timeout", "", "Upstream send timeout (e.g. 30s, 300s)")
-	addCmd.Flags().StringVar(&addFlags.connectTimeout, "connect-timeout", "", "Upstream connect timeout (e.g. 5s)")
-	for _, name := range []string{"read-timeout", "send-timeout", "connect-timeout"} {
-		_ = addCmd.RegisterFlagCompletionFunc(name, func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return []string{"1s", "5s", "10s", "30s", "60s", "300s"}, cobra.ShellCompDirectiveNoFileComp
-		})
-	}
-	// Node.js site options
 	// Compose profile (required when the selected service has multiple)
 	addCmd.Flags().StringVar(&addFlags.profile, "profile", "", "Docker Compose profile (required when the selected service declares multiple)")
 	// Extra bind-mounts
@@ -204,7 +185,6 @@ type siteSetup struct {
 	domain             string   // canonical/primary domain
 	aliases            []string // extra hostnames mapped to the same site
 	listeners          []string // extra Traefik entrypoints (e.g. "internal")
-	limits             *site.Limits
 	port               int
 	isLocal            bool
 	wildcard           bool // true if wildcard subdomain matching is enabled

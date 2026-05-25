@@ -55,10 +55,6 @@ func TestWriteSiteMetadataRoundtrip(t *testing.T) {
 		Port:        9000,
 		IsLocal:     true,
 		NetworkName: "test_net",
-		Upstream: &Upstream{
-			Kind: "container",
-			Port: 80,
-		},
 	}
 	if err := WriteSiteMetadata("app", want); err != nil {
 		t.Fatalf("WriteSiteMetadata: %v", err)
@@ -72,9 +68,6 @@ func TestWriteSiteMetadataRoundtrip(t *testing.T) {
 	}
 	if got.Type != want.Type || got.Port != want.Port || got.NetworkName != want.NetworkName {
 		t.Errorf("roundtrip mismatch:\n got: %+v\nwant: %+v", got, want)
-	}
-	if got.Upstream == nil || got.Upstream.Kind != "container" || got.Upstream.Port != 80 {
-		t.Errorf("Upstream lost in roundtrip: %+v", got.Upstream)
 	}
 	if len(got.Domains) != 2 || got.Domains[0] != "app.test" {
 		t.Errorf("Domains lost in roundtrip: %+v", got.Domains)

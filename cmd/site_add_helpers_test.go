@@ -9,24 +9,6 @@ import (
 	"github.com/stubbedev/srv/internal/site"
 )
 
-func TestLimitsFromFlagsNil(t *testing.T) {
-	resetAddFlags()
-	if got := limitsFromFlags(); got != nil {
-		t.Errorf("empty flags -> %+v, want nil", got)
-	}
-}
-
-func TestLimitsFromFlagsSet(t *testing.T) {
-	resetAddFlags()
-	addFlags.maxBody = "2G"
-	addFlags.readTimeout = "60s"
-	defer resetAddFlags()
-	got := limitsFromFlags()
-	if got == nil || got.MaxBody != "2G" || got.ReadTimeout != "60s" {
-		t.Errorf("got %+v", got)
-	}
-}
-
 func TestDetectionSummaryCompose(t *testing.T) {
 	setup := &siteSetup{composePath: "/x/docker-compose.yml"}
 	got := detectionSummary(setup)
@@ -161,10 +143,6 @@ func TestValidateSiteInputsOK(t *testing.T) {
 func resetAddFlags() {
 	addFlags.name = ""
 	addFlags.domain = ""
-	addFlags.maxBody = ""
-	addFlags.readTimeout = ""
-	addFlags.sendTimeout = ""
-	addFlags.connectTimeout = ""
 	addFlags.service = ""
 	addFlags.local = false
 	addFlags.wildcard = false

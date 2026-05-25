@@ -272,16 +272,6 @@ func TestValidateMetadataRouteBadUpstreamKind(t *testing.T) {
 	}
 }
 
-func TestValidateMetadataFallbackMissingURL(t *testing.T) {
-	meta := &SiteMetadata{
-		Domains:  []string{"a.local"},
-		Fallback: &Fallback{},
-	}
-	if err := ValidateMetadata(meta); err == nil {
-		t.Error("expected err: fallback without URL")
-	}
-}
-
 func TestValidateMetadataValidComplete(t *testing.T) {
 	meta := &SiteMetadata{
 		Domains:   []string{"a.local"},
@@ -290,7 +280,6 @@ func TestValidateMetadataValidComplete(t *testing.T) {
 			{ID: "r1", Path: "/", Upstream: Upstream{Kind: "localhost", Port: 80}},
 			{ID: "r2", PathRegex: "^/v1/(.+)$", Rewrite: "/$1", Upstream: Upstream{Kind: "url", URL: "https://api.example.com"}},
 		},
-		Fallback: &Fallback{URL: "https://backup.example.com"},
 	}
 	if err := ValidateMetadata(meta); err != nil {
 		t.Errorf("unexpected err: %v", err)

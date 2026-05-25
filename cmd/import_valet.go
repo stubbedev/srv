@@ -430,7 +430,6 @@ func planPHPSite(g *importGroup) []importStep {
 	for _, a := range s.Aliases {
 		addArgs = append(addArgs, "--alias", a)
 	}
-	addLimitFlags(&addArgs, s)
 
 	addNotes := []string{}
 	for _, r := range s.Routes {
@@ -515,7 +514,6 @@ func planLooseSite(s *valet.Site) (importStep, bool) {
 		for _, a := range s.Aliases {
 			args = append(args, "--alias", a)
 		}
-		addLimitFlags(&args, s)
 		notes := []string{}
 		for _, r := range s.Routes {
 			notes = append(notes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
@@ -530,20 +528,6 @@ func planLooseSite(s *valet.Site) (importStep, bool) {
 	return importStep{}, false
 }
 
-func addLimitFlags(args *[]string, s *valet.Site) {
-	if s.MaxBody != "" {
-		*args = append(*args, "--max-body", s.MaxBody)
-	}
-	if s.ReadTimeout != "" {
-		*args = append(*args, "--read-timeout", s.ReadTimeout)
-	}
-	if s.SendTimeout != "" {
-		*args = append(*args, "--send-timeout", s.SendTimeout)
-	}
-	if s.ConnTimeout != "" {
-		*args = append(*args, "--connect-timeout", s.ConnTimeout)
-	}
-}
 
 func routeFlags(r valet.Route) string {
 	parts := []string{}

@@ -29,18 +29,8 @@ const (
 	SiteTypeDockerfile SiteType = constants.SiteTypeDockerfile // Dockerfile site (user-owned Dockerfile)
 )
 
-// Limits holds optional per-site/per-route timeout and request-body limits.
-// All fields use string forms ("2G", "300s") so YAML stays human-readable and
-// the values pass through to nginx/Traefik in their native syntax.
-type Limits struct {
-	MaxBody        string `yaml:"max_body,omitempty" jsonschema:"description=Maximum request body size (e.g. '2G' '128M' '500k')."`
-	ReadTimeout    string `yaml:"read_timeout,omitempty" jsonschema:"description=Read timeout (e.g. '300s' '5m')."`
-	SendTimeout    string `yaml:"send_timeout,omitempty" jsonschema:"description=Send timeout (e.g. '300s')."`
-	ConnectTimeout string `yaml:"connect_timeout,omitempty" jsonschema:"description=Upstream connect timeout (e.g. '5s')."`
-}
-
-// Upstream points a route or proxy at a backend. Exactly one of Port/Container/URL
-// is set per Kind.
+// Upstream points a route at a backend. Exactly one of Port/Container/URL is
+// set per Kind.
 type Upstream struct {
 	Kind      string `yaml:"kind" jsonschema:"enum=localhost,enum=container,enum=url,description=Upstream target type."`
 	Port      int    `yaml:"port,omitempty" jsonschema:"description=Port when kind=localhost or kind=container."`
@@ -59,15 +49,6 @@ type Route struct {
 	PreserveHost     *bool    `yaml:"preserve_host,omitempty" jsonschema:"description=Whether to preserve the Host header (default true)."`
 	PassRangeHeaders bool     `yaml:"pass_range_headers,omitempty" jsonschema:"description=Forward Range/If-Range headers for byte-range requests."`
 	Priority         int      `yaml:"priority,omitempty" jsonschema:"description=Traefik router priority override."`
-	Limits           *Limits  `yaml:"limits,omitempty" jsonschema:"description=Per-route limits override."`
-}
-
-// Fallback configures a remote upstream that takes over when the primary
-// upstream returns a 5xx response. Implemented via a small nginx sidecar in
-// front of the main upstream.
-type Fallback struct {
-	URL     string `yaml:"url" jsonschema:"description=Remote URL to fall back to on 5xx (e.g. https://prod.example.com)."`
-	Timeout string `yaml:"timeout,omitempty" jsonschema:"description=Fallback request timeout (e.g. '2s')."`
 }
 
 // VolumeMount is an extra bind-mount the user added to a site so its container
@@ -101,10 +82,7 @@ type SiteMetadata struct {
 	ExtraNetworks      []string      `yaml:"extra_networks,omitempty" jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)."`
 	Volumes            []VolumeMount `yaml:"volumes,omitempty" jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile, TEMP dirs)."`
 	Listeners          []string      `yaml:"listeners,omitempty" jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."`
-	Limits             *Limits       `yaml:"limits,omitempty" jsonschema:"description=Request-body / timeout overrides."`
 	Routes             []Route       `yaml:"routes,omitempty" jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."`
-	Upstream           *Upstream     `yaml:"upstream,omitempty" jsonschema:"description=Primary backend (proxy-type sites only)."`
-	Fallback           *Fallback     `yaml:"fallback,omitempty" jsonschema:"description=Remote 5xx fallback target."`
 	// Static site options
 	SPA   bool `yaml:"spa,omitempty" jsonschema:"description=Single-page-app mode (fall back to /index.html)."`
 	Cache bool `yaml:"cache,omitempty" jsonschema:"description=Emit aggressive caching headers for static assets."`
