@@ -21,7 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
           # Use ref/ref_name so we check out the actual branch (not detached HEAD)
           # so `git push` has somewhere to go.
           ref: ${{ github.head_ref || github.ref_name }}
@@ -32,12 +31,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install just
-        uses: taiki-e/install-action@just
-
-      - name: Download mkcert binaries for embedding
-        run: just mkcert
 
       - name: Run gofmt -w
         run: gofmt -w .
@@ -74,19 +67,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
           ref: ${{ github.head_ref || github.ref_name }}
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install just
-        uses: taiki-e/install-action@just
-
-      - name: Download mkcert binaries for embedding
-        run: just mkcert
 
       - name: Build
         run: go build ./...
@@ -122,19 +108,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
           ref: ${{ github.head_ref || github.ref_name }}
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install just
-        uses: taiki-e/install-action@just
-
-      - name: Download mkcert binaries for embedding
-        run: just mkcert
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
