@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
@@ -11,6 +12,7 @@ import (
 	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/firewall"
+	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
@@ -169,11 +171,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		ui.Dim("Install mkcert to enable %s", traefik.DashboardLocalURL())
 	} else {
 		if !traefik.IsCAInstalled() {
-			res, err := traefik.InstallCA()
-			if err != nil {
-				ui.Warn("Failed to install mkcert CA: %v", err)
-			} else {
-				reportCAInstall(res, true)
+			if err := installCAWithRetry(); err != nil {
+				return err
 			}
 		}
 		if err := traefik.SetupDashboardProxy(); err != nil {
@@ -215,6 +214,59 @@ func startSites(sites []site.Site) {
 	_ = runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
 		return docker.ComposeUp(s.ComposeDir)
 	})
+}
+
+// installCAWithRetry runs `mkcert -install` and, on sudo denial or a failed
+// system-trust install, offers the user up to two retries via huh.Confirm.
+// Returns nil on success or a hard error after the user declines retry — srv
+// without a trusted local CA can't serve usable *.test URLs, so the install
+// must fail loudly instead of warning and continuing.
+func installCAWithRetry() error {
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		res, err := traefik.InstallCA()
+		if err == nil && res.SystemTrustOK && !res.SudoDenied {
+			reportCAInstall(res, true)
+			return nil
+		}
+		// Surface the failure mode to the user.
+		switch {
+		case res.SudoDenied:
+			ui.Warn("mkcert CA install: sudo authentication failed")
+		case err != nil:
+			ui.Warn("mkcert CA install: %v", err)
+		case res.SystemUnsupported:
+			ui.Warn("mkcert CA install: system trust store not supported on this platform")
+			reportCAInstall(res, true)
+			return fmt.Errorf("mkcert cannot install the CA on this platform — install it manually and re-run `srv install`")
+		default:
+			ui.Warn("mkcert CA install: did not land in the system trust store")
+			if res.RawOutput != "" {
+				ui.Dim("%s", strings.TrimSpace(res.RawOutput))
+			}
+		}
+
+		if attempt == maxAttempts {
+			break
+		}
+		var retry bool
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Try mkcert CA install again?").
+					Description("Local TLS for *.test requires sudo to install the root CA. Decline to fail this install and finish CA setup yourself.").
+					Value(&retry),
+			),
+		)
+		if err := form.Run(); err != nil {
+			return fmt.Errorf("mkcert CA install aborted: %w", err)
+		}
+		if !retry {
+			break
+		}
+	}
+	reportCAInstall(mkcert.InstallResult{}, true)
+	return fmt.Errorf("mkcert CA was not installed — browsers will reject every *.test URL; install it manually and re-run `srv install`")
 }
 
 // resolvePortConflicts handles port conflicts detected before starting Traefik.

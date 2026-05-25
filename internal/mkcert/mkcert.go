@@ -148,6 +148,7 @@ type InstallResult struct {
 	BrowserUnavailable bool   // Firefox/Chrome NSS support unavailable (no profiles or no certutil)
 	CertutilMissing    bool   // certutil binary not found, needed for browser trust
 	NewCA              bool   // A fresh local CA was created during this run
+	SudoDenied         bool   // sudo password prompt failed or was refused; CA install aborted
 	RawOutput          string // Captured combined output (for debugging)
 }
 
@@ -184,6 +185,11 @@ func parseInstallOutput(out string) InstallResult {
 		case strings.Contains(line, "no \"certutil\" tool") ||
 			strings.Contains(line, "warning: \"certutil\" is not available"):
 			res.CertutilMissing = true
+		case strings.Contains(line, "Authentication failed") ||
+			strings.Contains(line, "incorrect authentication attempts") ||
+			strings.Contains(line, "sudo: a password is required") ||
+			strings.Contains(line, "sudo-rs:"):
+			res.SudoDenied = true
 		}
 	}
 	return res

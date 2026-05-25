@@ -102,6 +102,20 @@ func TestParseInstallOutputCertutilMissing(t *testing.T) {
 	}
 }
 
+func TestParseInstallOutputSudoDenied(t *testing.T) {
+	cases := []string{
+		`sudo: Authentication failed, try again.`,
+		`sudo-rs: 3 incorrect authentication attempts`,
+		`sudo: a password is required`,
+	}
+	for _, in := range cases {
+		res := parseInstallOutput(in)
+		if !res.SudoDenied {
+			t.Errorf("SudoDenied should be true for %q", in)
+		}
+	}
+}
+
 func TestParseInstallOutputCombination(t *testing.T) {
 	in := strings.Join([]string{
 		"Created a new local CA at \"~/.mkcert\"",
