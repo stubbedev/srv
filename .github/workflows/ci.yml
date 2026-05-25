@@ -40,7 +40,7 @@ jobs:
         run: just mkcert
 
       - name: Run gofmt -w
-        run: gofmt -w $(go list -f '{{.Dir}}' ./...)
+        run: gofmt -w .
 
       - name: Run golangci-lint --fix
         uses: golangci/golangci-lint-action@v9

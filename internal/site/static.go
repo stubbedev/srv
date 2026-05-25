@@ -135,7 +135,7 @@ server {
 }
 
 // =============================================================================
-// Static Site Configuration Types
+// Shared compose-generation types (used by static.go + dockerfile.go)
 // =============================================================================
 
 // volumeConsistencyForHost returns "cached" on macOS so bind mounts trade
@@ -148,8 +148,8 @@ func volumeConsistencyForHost() string {
 	return ""
 }
 
-// staticVolumeConfig represents a volume in docker-compose.
-type staticVolumeConfig struct {
+// composeVolume represents one bind mount in a generated docker-compose.yml.
+type composeVolume struct {
 	Type        string `yaml:"type"`
 	Source      string `yaml:"source"`
 	Target      string `yaml:"target"`
@@ -157,20 +157,27 @@ type staticVolumeConfig struct {
 	Consistency string `yaml:"consistency,omitempty"`
 }
 
-// staticServiceConfig represents a service in docker-compose.
-type staticServiceConfig struct {
-	ContainerName string               `yaml:"container_name"`
-	Image         string               `yaml:"image"`
-	Volumes       []staticVolumeConfig `yaml:"volumes"`
-	Labels        map[string]string    `yaml:"labels"`
-	Networks      []string             `yaml:"networks"`
-	Restart       string               `yaml:"restart"`
-	HealthCheck   *staticHealthCheck   `yaml:"healthcheck,omitempty"`
+// composeBuild is the build context block; only set on dockerfile-type sites.
+type composeBuild struct {
+	Context    string `yaml:"context"`
+	Dockerfile string `yaml:"dockerfile"`
 }
 
-// staticHealthCheck mirrors the compose healthcheck shape. Kept separate from
-// phpHealthCheck so static sites don't pull in the FPM-specific helper.
-type staticHealthCheck struct {
+// composeService represents one service in a generated docker-compose.yml.
+// Image XOR Build is set depending on whether the site has a Dockerfile.
+type composeService struct {
+	ContainerName string            `yaml:"container_name"`
+	Image         string            `yaml:"image,omitempty"`
+	Build         *composeBuild     `yaml:"build,omitempty"`
+	Volumes       []composeVolume   `yaml:"volumes,omitempty"`
+	Labels        map[string]string `yaml:"labels"`
+	Networks      []string          `yaml:"networks"`
+	Restart       string            `yaml:"restart"`
+	HealthCheck   *composeHealthCheck `yaml:"healthcheck,omitempty"`
+}
+
+// composeHealthCheck mirrors the compose healthcheck shape.
+type composeHealthCheck struct {
 	Test        []string `yaml:"test"`
 	Interval    string   `yaml:"interval,omitempty"`
 	Timeout     string   `yaml:"timeout,omitempty"`
@@ -178,10 +185,10 @@ type staticHealthCheck struct {
 	Retries     int      `yaml:"retries,omitempty"`
 }
 
-// makeStaticHealthCheck builds a TCP-probe healthcheck for the given port.
+// makeComposeHealthCheck builds a TCP-probe healthcheck for the given port.
 // busybox `nc` ships in every alpine image srv currently uses.
-func makeStaticHealthCheck(port int) *staticHealthCheck {
-	return &staticHealthCheck{
+func makeComposeHealthCheck(port int) *composeHealthCheck {
+	return &composeHealthCheck{
 		Test:        []string{"CMD-SHELL", fmt.Sprintf("nc -z 127.0.0.1 %d || exit 1", port)},
 		Interval:    "30s",
 		Timeout:     "3s",
@@ -190,27 +197,29 @@ func makeStaticHealthCheck(port int) *staticHealthCheck {
 	}
 }
 
-// staticNetworkConfig represents a network in docker-compose.
-type staticNetworkConfig struct {
+// composeNetwork represents one network entry in the top-level networks: map.
+type composeNetwork struct {
 	Name     string `yaml:"name"`
 	External bool   `yaml:"external"`
 }
 
-// staticComposeConfig represents a docker-compose.yml for static sites.
-type staticComposeConfig struct {
-	Name     string                         `yaml:"name,omitempty"`
-	Services map[string]staticServiceConfig `yaml:"services"`
-	Networks map[string]staticNetworkConfig `yaml:"networks"`
+// composeFile is the generated docker-compose.yml top-level shape.
+type composeFile struct {
+	Name     string                    `yaml:"name,omitempty"`
+	Services map[string]composeService `yaml:"services"`
+	Networks map[string]composeNetwork `yaml:"networks"`
 }
 
-// buildStaticTraefikLabels builds Traefik labels for a static site.
-func buildStaticTraefikLabels(name string, domains []string, isLocal, wildcard bool) map[string]string {
+// buildTraefikLabels emits the Traefik label set for a single-router site
+// pointing at `port` inside the container. Used by both static (port 80)
+// and dockerfile (port from EXPOSE) sites.
+func buildTraefikLabels(name string, domains []string, isLocal, wildcard bool, port int) map[string]string {
 	labels := map[string]string{
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domains, wildcard),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
-		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): "80",
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): fmt.Sprintf("%d", port),
 	}
 	if !isLocal {
 		labels[fmt.Sprintf("traefik.http.routers.%s.tls.certresolver", name)] = "letsencrypt"
@@ -248,14 +257,14 @@ func StampSrvLabels(labels map[string]string, siteName, siteType string) {
 }
 
 // buildStaticComposeConfig builds the docker-compose configuration for a static site.
-func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) staticComposeConfig {
-	return staticComposeConfig{
+func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) composeFile {
+	return composeFile{
 		Name: constants.ComposeProjectName,
-		Services: map[string]staticServiceConfig{
+		Services: map[string]composeService{
 			"web": {
 				ContainerName: containerName,
 				Image:         constants.ImageNginxAlpine,
-				Volumes: []staticVolumeConfig{
+				Volumes: []composeVolume{
 					{
 						Type:        "bind",
 						Source:      projectPath,
@@ -273,10 +282,10 @@ func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, network
 				Labels:      labels,
 				Networks:    []string{constants.TraefikSubdir},
 				Restart:     constants.RestartUnlessStopped,
-				HealthCheck: makeStaticHealthCheck(80),
+				HealthCheck: makeComposeHealthCheck(80),
 			},
 		},
-		Networks: map[string]staticNetworkConfig{
+		Networks: map[string]composeNetwork{
 			constants.TraefikSubdir: {
 				Name:     networkName,
 				External: true,
@@ -322,7 +331,7 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) error {
 
 	// Build and write docker-compose.yml
 	containerName := generateStaticContainerName(name)
-	labels := buildStaticTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard)
+	labels := buildTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, 80)
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}

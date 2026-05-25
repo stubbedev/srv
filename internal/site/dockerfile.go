@@ -1,4 +1,6 @@
-// Package site handles site management operations.
+// Package site — dockerfile.go handles the SiteTypeDockerfile path: project
+// has a Dockerfile in the root, srv generates a thin docker-compose.yml that
+// builds from it and attaches the Traefik routing labels.
 package site
 
 import (
@@ -15,10 +17,6 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 )
-
-// =============================================================================
-// Dockerfile Site Detection
-// =============================================================================
 
 // DockerfileSiteInfo holds detected configuration for a project with a bare Dockerfile.
 type DockerfileSiteInfo struct {
@@ -42,11 +40,11 @@ func DetectDockerfileSite(dir string) (*DockerfileSiteInfo, error) {
 	if port == 0 {
 		port = constants.DockerfileDefaultPort
 	}
-
 	return &DockerfileSiteInfo{Port: port}, nil
 }
 
-// parseDockerfileExposePort scans a Dockerfile for the first EXPOSE directive and returns the port.
+// parseDockerfileExposePort scans a Dockerfile for the first EXPOSE directive
+// and returns the port. Returns 0 if no EXPOSE is found.
 func parseDockerfileExposePort(f io.Reader) int {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -54,7 +52,6 @@ func parseDockerfileExposePort(f io.Reader) int {
 		if !strings.HasPrefix(strings.ToUpper(line), "EXPOSE") {
 			continue
 		}
-		// "EXPOSE 8080" or "EXPOSE 8080/tcp"
 		parts := strings.Fields(line)
 		if len(parts) < 2 {
 			continue
@@ -67,47 +64,8 @@ func parseDockerfileExposePort(f io.Reader) int {
 	return 0
 }
 
-// =============================================================================
-// Docker Compose generation (Dockerfile)
-// =============================================================================
-
-type dockerfileServiceConfig struct {
-	ContainerName string             `yaml:"container_name"`
-	Build         dockerfileBuild    `yaml:"build"`
-	WorkingDir    string             `yaml:"working_dir,omitempty"`
-	Labels        map[string]string  `yaml:"labels,omitempty"`
-	Networks      []string           `yaml:"networks"`
-	Restart       string             `yaml:"restart"`
-	HealthCheck   *staticHealthCheck `yaml:"healthcheck,omitempty"`
-}
-
-type dockerfileBuild struct {
-	Context    string `yaml:"context"`
-	Dockerfile string `yaml:"dockerfile"`
-}
-
-type dockerfileNetworkConfig struct {
-	Name     string `yaml:"name"`
-	External bool   `yaml:"external"`
-}
-
-type dockerfileComposeConfig struct {
-	Name     string                             `yaml:"name,omitempty"`
-	Services map[string]dockerfileServiceConfig `yaml:"services"`
-	Networks map[string]dockerfileNetworkConfig `yaml:"networks"`
-}
-
-// buildDockerfileTraefikLabels builds Traefik labels for a dockerfile site,
-// pointing the loadbalancer at the user-supplied port (from the Dockerfile's
-// EXPOSE directive or the --port flag).
-func buildDockerfileTraefikLabels(name string, domains []string, isLocal, wildcard bool, port int) map[string]string {
-	labels := buildStaticTraefikLabels(name, domains, isLocal, wildcard)
-	labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name)] = fmt.Sprintf("%d", port)
-	return labels
-}
-
-// WriteDockerfileSiteConfig generates and writes docker-compose.yml for a Dockerfile site.
-// The compose file instructs Docker Compose to build from the project's Dockerfile.
+// WriteDockerfileSiteConfig writes the per-site docker-compose.yml that
+// builds from the project's Dockerfile and attaches Traefik labels.
 func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileSiteInfo, force bool) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -120,36 +78,33 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	}
 
 	containerName := "srv-" + name + "-app"
-	labels := buildDockerfileTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
+	labels := buildTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
 	StampSrvLabels(labels, name, string(meta.Type))
 
-	composeConfig := dockerfileComposeConfig{
+	cf := composeFile{
 		Name: constants.ComposeProjectName,
-		Services: map[string]dockerfileServiceConfig{
+		Services: map[string]composeService{
 			"app": {
 				ContainerName: containerName,
-				Build: dockerfileBuild{
+				Build: &composeBuild{
 					Context:    meta.ProjectPath,
 					Dockerfile: constants.DockerfileFile,
 				},
 				Labels:      labels,
 				Networks:    []string{constants.TraefikSubdir},
 				Restart:     constants.RestartUnlessStopped,
-				HealthCheck: makeStaticHealthCheck(info.Port),
+				HealthCheck: makeComposeHealthCheck(info.Port),
 			},
 		},
-		Networks: map[string]dockerfileNetworkConfig{
-			constants.TraefikSubdir: {
-				Name:     meta.NetworkName,
-				External: true,
-			},
+		Networks: map[string]composeNetwork{
+			constants.TraefikSubdir: {Name: meta.NetworkName, External: true},
 		},
 	}
 
-	data, err := yaml.Marshal(&composeConfig)
+	data, err := yaml.Marshal(&cf)
 	if err != nil {
 		return fmt.Errorf("failed to marshal compose config: %w", err)
 	}
