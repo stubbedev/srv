@@ -105,6 +105,24 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "VolumeMount": {
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Absolute host path."
+        },
+        "target": {
+          "type": "string",
+          "description": "Absolute path inside the container."
+        },
+        "read_only": {
+          "type": "boolean",
+          "description": "Mount the bind read-only."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     }
   },
   "properties": {
@@ -117,10 +135,6 @@
       "enum": [
         "compose",
         "static",
-        "php",
-        "node",
-        "ruby",
-        "python",
         "dockerfile"
       ],
       "description": "Site runtime type."
@@ -164,6 +178,20 @@
       "type": "string",
       "description": "Docker network the site joins."
     },
+    "extra_networks": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)."
+    },
+    "volumes": {
+      "items": {
+        "$ref": "#/$defs/VolumeMount"
+      },
+      "type": "array",
+      "description": "Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile"
+    },
     "listeners": {
       "items": {
         "type": "string"
@@ -201,93 +229,6 @@
     "cors": {
       "type": "boolean",
       "description": "Emit permissive CORS headers."
-    },
-    "php_version": {
-      "type": "string",
-      "description": "PHP version ('latest' or '8.3')."
-    },
-    "php_extensions": {
-      "items": {
-        "type": "string"
-      },
-      "type": "array",
-      "description": "Extra PHP extensions to install."
-    },
-    "php_framework": {
-      "type": "string",
-      "description": "Detected PHP framework."
-    },
-    "document_root": {
-      "type": "string",
-      "description": "Document root relative to the project (e.g. 'public')."
-    },
-    "node_runtime": {
-      "type": "string",
-      "enum": [
-        "node",
-        "bun",
-        "deno"
-      ],
-      "description": "JavaScript runtime."
-    },
-    "node_package_manager": {
-      "type": "string",
-      "enum": [
-        "npm",
-        "yarn",
-        "pnpm",
-        "bun",
-        "deno"
-      ],
-      "description": "Package manager."
-    },
-    "node_version": {
-      "type": "string",
-      "description": "Node version ('lts' or '20'; node runtime only)."
-    },
-    "node_framework": {
-      "type": "string",
-      "description": "Detected Node framework."
-    },
-    "node_start_cmd": {
-      "type": "string",
-      "description": "Start command (e.g. 'npm run dev')."
-    },
-    "ruby_version": {
-      "type": "string",
-      "description": "Ruby version ('latest' or '3.3')."
-    },
-    "ruby_framework": {
-      "type": "string",
-      "enum": [
-        "rails",
-        "sinatra",
-        "rack",
-        "generic"
-      ],
-      "description": "Detected Ruby framework."
-    },
-    "ruby_start_cmd": {
-      "type": "string",
-      "description": "Start command."
-    },
-    "python_version": {
-      "type": "string",
-      "description": "Python version ('latest' or '3.12')."
-    },
-    "python_framework": {
-      "type": "string",
-      "enum": [
-        "django",
-        "fastapi",
-        "flask",
-        "generic"
-      ],
-      "description": "Detected Python framework."
-    },
-    "python_start_cmd": {
-      "type": "string",
-      "description": "Start command."
     },
     "dockerfile_port": {
       "type": "integer",
