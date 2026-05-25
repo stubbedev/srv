@@ -49,8 +49,8 @@ func TestGenerateStaticNginxConfCacheOff(t *testing.T) {
 	}
 }
 
-func TestMakeStaticHealthCheck(t *testing.T) {
-	hc := makeStaticHealthCheck(8080)
+func TestMakeComposeHealthCheck(t *testing.T) {
+	hc := makeComposeHealthCheck(8080)
 	if hc == nil {
 		t.Fatal("nil")
 	}
@@ -80,20 +80,25 @@ func TestStampSrvLabels(t *testing.T) {
 	}
 }
 
-func TestBuildStaticTraefikLabels(t *testing.T) {
-	labels := buildStaticTraefikLabels("blog", []string{"blog.local"}, true, false)
+func TestBuildTraefikLabels(t *testing.T) {
+	labels := buildTraefikLabels("blog", []string{"blog.local"}, true, false, 80)
 	if labels["traefik.enable"] != "true" {
 		t.Error("traefik.enable missing")
 	}
 	if labels["traefik.http.services.blog.loadbalancer.server.port"] != "80" {
-		t.Error("default port should be 80 for static")
+		t.Error("port should be 80")
 	}
 	if _, ok := labels["traefik.http.routers.blog.tls.certresolver"]; ok {
 		t.Error("local site should not have certresolver")
 	}
 
-	labels = buildStaticTraefikLabels("blog", []string{"blog.com"}, false, false)
+	labels = buildTraefikLabels("blog", []string{"blog.com"}, false, false, 80)
 	if labels["traefik.http.routers.blog.tls.certresolver"] != "letsencrypt" {
 		t.Error("non-local should have letsencrypt resolver")
+	}
+
+	labels = buildTraefikLabels("api", []string{"api.test"}, true, false, 8080)
+	if labels["traefik.http.services.api.loadbalancer.server.port"] != "8080" {
+		t.Error("custom port should win")
 	}
 }

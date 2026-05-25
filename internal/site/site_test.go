@@ -370,7 +370,7 @@ func TestHasListener(t *testing.T) {
 }
 
 func TestAddInternalListenerLabels(t *testing.T) {
-	labels := buildStaticTraefikLabels("kontainer", []string{"a.test", "b.test"}, true, true)
+	labels := buildTraefikLabels("kontainer", []string{"a.test", "b.test"}, true, true, 80)
 	addInternalListenerLabels(labels, "kontainer", []string{"a.test", "b.test"}, true)
 
 	wantKeys := []string{
