@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/huh/v2"
 	"github.com/hashicorp/go-envparse"
 	"gopkg.in/yaml.v3"
 
@@ -516,14 +515,30 @@ func mergeEntryPoints(existing, template map[string]any) map[string]any {
 	return result
 }
 
-// GetEmail returns the stored Let's Encrypt email or prompts for one.
-func GetEmail(prompt bool) (string, error) {
+// GetEmail returns the stored Let's Encrypt email. The `provided` argument is
+// the value of the caller-supplied flag (e.g. `srv install --email`); when
+// non-empty it overrides any value already on disk and is persisted via
+// SaveEmail. When no email is on disk and the caller didn't provide one, a
+// clear error directs the user to pass --email.
+//
+// Production SSL via Let's Encrypt is the only feature that needs this email;
+// local-only setups can ignore the error returned by callers that swallow it.
+func GetEmail(provided string) (string, error) {
+	provided = strings.TrimSpace(provided)
+	if provided != "" {
+		if _, err := mail.ParseAddress(provided); err != nil {
+			return "", fmt.Errorf("invalid email %q: %w", provided, err)
+		}
+		if err := SaveEmail(provided); err != nil {
+			return "", err
+		}
+		return provided, nil
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return "", err
 	}
-
-	// Check for existing email using envparse for proper .env file parsing
 	envPath := cfg.EnvTraefikPath()
 	if file, err := os.Open(envPath); err == nil {
 		defer func() { _ = file.Close() }()
@@ -534,39 +549,7 @@ func GetEmail(prompt bool) (string, error) {
 			}
 		}
 	}
-
-	if !prompt {
-		return "", fmt.Errorf("no email configured. Run: srv install")
-	}
-
-	// Prompt for email
-	var email string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Let's Encrypt Email").
-				Description("Used for SSL certificate notifications").
-				Placeholder("you@example.com").
-				Value(&email).
-				Validate(func(s string) error {
-					if _, err := mail.ParseAddress(strings.TrimSpace(s)); err != nil {
-						return fmt.Errorf("please enter a valid email address")
-					}
-					return nil
-				}),
-		),
-	)
-
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-
-	// Save email
-	if err := SaveEmail(email); err != nil {
-		return "", err
-	}
-
-	return email, nil
+	return "", fmt.Errorf("no Let's Encrypt email configured. Pass `srv install --email you@example.com` or set %s in %s for production SSL", constants.EnvACMEEmail, envPath)
 }
 
 // SaveEmail saves the Let's Encrypt email to env.traefik, preserving any other

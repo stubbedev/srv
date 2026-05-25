@@ -21,6 +21,7 @@ import (
 var installFlags struct {
 	fresh bool
 	yes   bool
+	email string
 }
 
 var installCmd = &cobra.Command{
@@ -40,6 +41,7 @@ Use --fresh to remove all existing configuration and start fresh.`,
 func init() {
 	installCmd.Flags().BoolVar(&installFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
 	installCmd.Flags().BoolVarP(&installFlags.yes, "yes", "y", false, "Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry). Required for non-interactive runs.")
+	installCmd.Flags().StringVar(&installFlags.email, "email", "", "Let's Encrypt account email for production SSL. Stored on disk after first set; only required once. Pass an empty string to disable production SSL entirely.")
 	installCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(installCmd)
 }
@@ -123,10 +125,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		steps.Skip("Network %s already exists", cfg.NetworkName)
 	}
 
-	// Get or prompt for email
-	email, err := traefik.GetEmail(true)
+	// Pull the Let's Encrypt email from --email (overrides any stored value)
+	// or from a previous install. A local-only setup can ignore the error,
+	// but production sites without an email fail later when ACME tries to
+	// register, so we surface it up front unless --email "" was passed
+	// explicitly.
+	email, err := traefik.GetEmail(installFlags.email)
 	if err != nil {
-		return err
+		ui.Warn("Let's Encrypt email not configured: %v", err)
+		ui.Dim("Continuing with local sites only. Pass --email to enable production SSL.")
+		email = ""
 	}
 
 	// Step 2: Generate Traefik config

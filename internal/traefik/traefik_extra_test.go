@@ -33,7 +33,7 @@ func TestSaveAndGetEmail(t *testing.T) {
 	if err := SaveEmail("foo@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := GetEmail(false)
+	got, err := GetEmail("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestGetEmailMissingNoPrompt(t *testing.T) {
 	t.Setenv("SRV_ROOT", t.TempDir())
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
-	if _, err := GetEmail(false); err == nil {
+	if _, err := GetEmail(""); err == nil {
 		t.Error("expected err when no email and prompt=false")
 	}
 }
