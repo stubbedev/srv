@@ -50,10 +50,8 @@ func TestSiteShellContainerPHPFallback(t *testing.T) {
 	}
 }
 
-func TestPhpFPMContainerForSiteMissing(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("SRV_ROOT", root)
-	if got := phpFPMContainerForSite("ghost"); got != "srv-ghost-php" {
+func TestPHPContainerName(t *testing.T) {
+	if got := site.PHPContainerName("ghost"); got != "srv-ghost-php" {
 		t.Errorf("got %q", got)
 	}
 }

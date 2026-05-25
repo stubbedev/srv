@@ -77,13 +77,6 @@ func runRemove(cmd *cobra.Command, args []string) error {
 			ui.Warn("Could not remove routes config: %v", err)
 		}
 
-		// Drop this site from its shared FPM pool. Tears the pool down if no
-		// members remain.
-		if s.Type == site.SiteTypePHP {
-			if err := site.RemoveSiteFromPool(siteName); err != nil {
-				ui.Warn("Could not refresh FPM pool: %v", err)
-			}
-		}
 	}
 
 	// Remove SSL certificate and DNS for local domains

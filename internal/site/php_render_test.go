@@ -4,92 +4,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/stubbedev/srv/internal/constants"
 )
-
-func TestGeneratePHPFPMConfOndemand(t *testing.T) {
-	if !strings.Contains(generatePHPFPMConf(true), "pm = ondemand") {
-		t.Error("local should use ondemand")
-	}
-}
-
-func TestGeneratePHPFPMConfDynamic(t *testing.T) {
-	if !strings.Contains(generatePHPFPMConf(false), "pm = dynamic") {
-		t.Error("non-local should use dynamic")
-	}
-}
-
-func TestGeneratePHPIni(t *testing.T) {
-	out := generatePHPIni()
-	if !strings.Contains(out, "memory_limit") {
-		t.Error("php.ini missing memory_limit")
-	}
-	if !strings.Contains(out, "session.gc_maxlifetime") {
-		t.Error("php.ini missing session config")
-	}
-}
-
-func TestGeneratePHPNginxConfBasics(t *testing.T) {
-	info := &PHPSiteInfo{PHPVersion: "8.3", Framework: ""}
-	out := generatePHPNginxConf(info, nil, "blog", "srv-fpm-x")
-	if !strings.Contains(out, "fastcgi_pass srv-fpm-x:9000") {
-		t.Error("fastcgi_pass missing")
-	}
-	if !strings.Contains(out, "/var/www/blog") {
-		t.Error("docroot missing")
-	}
-	if !strings.Contains(out, "client_max_body_size 2G") {
-		t.Error("default max body missing")
-	}
-}
-
-func TestGeneratePHPNginxConfWithLimits(t *testing.T) {
-	info := &PHPSiteInfo{PHPVersion: "8.3"}
-	limits := &Limits{
-		MaxBody:        "100M",
-		ConnectTimeout: "30s",
-		SendTimeout:    "120s",
-		ReadTimeout:    "120s",
-	}
-	out := generatePHPNginxConf(info, limits, "blog", "srv-fpm-x")
-	if !strings.Contains(out, "client_max_body_size 100M") {
-		t.Error("custom max body missing")
-	}
-	if !strings.Contains(out, "fastcgi_connect_timeout 30s") {
-		t.Error("connect timeout missing")
-	}
-	if !strings.Contains(out, "fastcgi_send_timeout 120s") {
-		t.Error("send timeout missing")
-	}
-	if !strings.Contains(out, "fastcgi_read_timeout 120s") {
-		t.Error("read timeout missing")
-	}
-}
-
-func TestGeneratePHPNginxConfWordPress(t *testing.T) {
-	info := &PHPSiteInfo{PHPVersion: "8.3", Framework: constants.PHPFrameworkWordPress}
-	out := generatePHPNginxConf(info, nil, "blog", "srv-fpm-x")
-	if !strings.Contains(out, "$args") {
-		t.Error("WordPress try_files should use $args")
-	}
-}
-
-func TestGeneratePHPNginxConfSymfonyWeb(t *testing.T) {
-	info := &PHPSiteInfo{PHPVersion: "8.3", Framework: constants.PHPFrameworkSymfony, DocumentRoot: "web"}
-	out := generatePHPNginxConf(info, nil, "site", "fpm")
-	if !strings.Contains(out, "app.php") {
-		t.Error("Symfony web docroot should use app.php")
-	}
-}
-
-func TestGeneratePHPNginxConfLaravelDeniesDotenv(t *testing.T) {
-	info := &PHPSiteInfo{PHPVersion: "8.3", Framework: constants.PHPFrameworkLaravel}
-	out := generatePHPNginxConf(info, nil, "site", "fpm")
-	if !strings.Contains(out, `location ~ \.env$`) {
-		t.Error("Laravel .env block missing")
-	}
-}
 
 func TestKnownPHPExtensionsSorted(t *testing.T) {
 	exts := KnownPHPExtensions()
@@ -133,6 +48,26 @@ func TestNonBuiltinExtensions(t *testing.T) {
 	}
 }
 
+func TestGeneratePHPDockerfileFrankenPHPBase(t *testing.T) {
+	out := generatePHPDockerfile(&PHPSiteInfo{PHPVersion: "8.4", Extensions: []string{"redis"}})
+	if !strings.Contains(out, "FROM dunglas/frankenphp:php8.4-alpine") {
+		t.Errorf("Dockerfile missing FrankenPHP base image:\n%s", out)
+	}
+	if !strings.Contains(out, "install-php-extensions") {
+		t.Error("Dockerfile missing install-php-extensions")
+	}
+	if !strings.Contains(out, "redis") {
+		t.Error("Dockerfile missing extension")
+	}
+}
+
+func TestGeneratePHPDockerfileLatestVersion(t *testing.T) {
+	out := generatePHPDockerfile(&PHPSiteInfo{PHPVersion: "latest"})
+	if !strings.Contains(out, "FROM dunglas/frankenphp:alpine") {
+		t.Errorf("latest version should map to dunglas/frankenphp:alpine; got:\n%s", out)
+	}
+}
+
 func TestGeneratePHPDockerfileDeterministic(t *testing.T) {
 	a := generatePHPDockerfile(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"redis", "imagick"}})
 	b := generatePHPDockerfile(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"imagick", "redis"}})
@@ -143,11 +78,8 @@ func TestGeneratePHPDockerfileDeterministic(t *testing.T) {
 
 func TestGeneratePHPDockerfileSkipsBuiltin(t *testing.T) {
 	out := generatePHPDockerfile(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"json", "redis"}})
-	// json is builtin; should not appear as an extension install target.
-	lines := strings.Split(out, "\n")
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l == "json" {
+	for _, l := range strings.Split(out, "\n") {
+		if strings.TrimSpace(l) == "json" {
 			t.Errorf("json (builtin) appears as install target")
 		}
 	}
@@ -160,29 +92,6 @@ func TestGeneratePHPDockerfileIncludesOpcache(t *testing.T) {
 	out := generatePHPDockerfile(&PHPSiteInfo{PHPVersion: "8.3"})
 	if !strings.Contains(out, "opcache.enable=1") {
 		t.Error("opcache config missing")
-	}
-}
-
-func TestPHPImageFingerprint(t *testing.T) {
-	a := PHPImageFingerprint(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"redis"}})
-	b := PHPImageFingerprint(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"redis"}})
-	if a != b {
-		t.Error("fingerprint not stable")
-	}
-	if !strings.HasPrefix(a, "srv-php:") {
-		t.Errorf("fingerprint = %q", a)
-	}
-	c := PHPImageFingerprint(&PHPSiteInfo{PHPVersion: "8.4", Extensions: []string{"redis"}})
-	if a == c {
-		t.Error("fingerprint should differ on PHP version")
-	}
-}
-
-func TestPHPImageFingerprintIgnoresBuiltins(t *testing.T) {
-	a := PHPImageFingerprint(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"redis"}})
-	b := PHPImageFingerprint(&PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"redis", "json", "hash"}})
-	if a != b {
-		t.Errorf("builtin extensions changed fingerprint: %q vs %q", a, b)
 	}
 }
 

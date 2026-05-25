@@ -9,38 +9,27 @@ package constants
 // =============================================================================
 
 const (
-	// PHPFPMImageLatest is the PHP-FPM alpine Docker image (latest stable).
-	PHPFPMImageLatest = "php:fpm-alpine"
-	// PHPFPMImageFormat is the format string for versioned PHP-FPM alpine images.
-	PHPFPMImageFormat = "php:%s-fpm-alpine"
-	// PHPFPMPort is the PHP-FPM FastCGI port.
-	PHPFPMPort = 9000
-	// PHPFPMServiceName is the service name for the PHP-FPM container in compose.
-	PHPFPMServiceName = "php"
-	// PHPWebServiceName is the service name for the nginx container in compose.
-	PHPWebServiceName = "web"
+	// FrankenPHPImageLatest is the FrankenPHP alpine Docker image (latest stable PHP).
+	FrankenPHPImageLatest = "dunglas/frankenphp:alpine"
+	// FrankenPHPImageFormat is the format string for versioned FrankenPHP alpine images.
+	// Tag pattern follows https://hub.docker.com/r/dunglas/frankenphp/tags — e.g.
+	// `dunglas/frankenphp:php8.4-alpine`.
+	FrankenPHPImageFormat = "dunglas/frankenphp:php%s-alpine"
+	// FrankenPHPServiceName is the service name for the FrankenPHP container in compose.
+	FrankenPHPServiceName = "php"
+	// FrankenPHPContainerPort is the HTTP port FrankenPHP listens on inside the container.
+	FrankenPHPContainerPort = 80
+	// FrankenPHPAppDir is the working directory inside the FrankenPHP container
+	// where the site's project is bind-mounted.
+	FrankenPHPAppDir = "/app"
+	// FrankenPHPImageTagFormat is the per-site image tag built by srv:
+	// `srv-php-<sitename>:latest`.
+	FrankenPHPImageTagFormat = "srv-php-%s:latest"
+	// FrankenPHPContainerNameFormat is the per-site container name pattern:
+	// `srv-<sitename>-php`.
+	FrankenPHPContainerNameFormat = "srv-%s-php"
 	// PHPDockerfileFile is the Dockerfile filename generated for PHP sites.
 	PHPDockerfileFile = "Dockerfile"
-	// PHPIniFile is the php.ini filename generated for PHP sites.
-	PHPIniFile = "php.ini"
-	// PHPIniContainerPath is the path inside the PHP container where php.ini is mounted.
-	PHPIniContainerPath = "/usr/local/etc/php/conf.d/srv-overrides.ini"
-	// PHPFPMConfFile is the FPM pool config filename generated for PHP sites.
-	PHPFPMConfFile = "php-fpm.conf"
-	// PHPFPMConfContainerPath is the path inside the PHP container where the
-	// FPM pool override is mounted. Filename starts with "zz-" so it sorts
-	// after the base image's www.conf and overrides it.
-	PHPFPMConfContainerPath = "/usr/local/etc/php-fpm.d/zz-srv.conf"
-	// PHPDockerRootPath is the working directory inside PHP/nginx containers.
-	// With the shared FPM pool, each site is mounted at /var/www/<sitename>
-	// rather than the legacy single-site /var/www/html. The constant is kept
-	// for code paths that still hard-code the directory; new code uses
-	// PHPSiteDocRootRoot + "/" + <sitename>.
-	PHPDockerRootPath = "/var/www/html"
-	// PHPSiteDocRootRoot is the parent directory inside the shared FPM
-	// container under which each member site's project is mounted at its
-	// site name (e.g. /var/www/kontainer).
-	PHPSiteDocRootRoot = "/var/www"
 	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".
 	PHPVersionLatest = "latest"
 )

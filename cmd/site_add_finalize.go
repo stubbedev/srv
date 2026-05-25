@@ -163,10 +163,9 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 	if setup.isPHP {
 		vendorDir := setup.sitePath + "/vendor"
 		if _, err := os.Stat(vendorDir); os.IsNotExist(err) {
-			containerName := phpFPMContainerForSite(setup.siteName)
+			containerName := site.PHPContainerName(setup.siteName)
 			ui.Info("Running composer install...")
-			workDir := "/var/www/" + setup.siteName
-			if err := docker.ExecNonInteractiveAt(containerName, workDir, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
+			if err := docker.ExecNonInteractiveAt(containerName, constants.FrankenPHPAppDir, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
 				ui.Warn("composer install failed: %v", err)
 				ui.Dim("Run manually: srv site shell %s", setup.siteName)
 			}

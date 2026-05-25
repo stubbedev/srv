@@ -2,7 +2,7 @@
 // directory for composer.json or raw .php files, parsing the framework
 // (Laravel/Symfony/WordPress), document root, PHP version constraint, and
 // the requested extension set. Nothing here writes generated files —
-// php_render.go and php_pool.go take that role once detection settles.
+// php_render.go and php_franken.go take that role once detection settles.
 package site
 
 import (
@@ -427,16 +427,3 @@ func ParseExtensionOverrides(flagValue string, defaults []string) []string {
 	return result
 }
 
-// =============================================================================
-// PHP Docker image tag helpers
-// =============================================================================
-
-// PHPImageTag returns the Docker image tag for the given PHP version string.
-// When version is "latest" or empty, it returns the unversioned
-// "php:fpm-alpine" tag; otherwise it returns "php:<version>-fpm-alpine".
-func PHPImageTag(version string) string {
-	if version == "" || version == constants.PHPVersionLatest {
-		return constants.PHPFPMImageLatest
-	}
-	return fmt.Sprintf(constants.PHPFPMImageFormat, version)
-}
