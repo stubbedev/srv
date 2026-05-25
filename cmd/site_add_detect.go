@@ -156,4 +156,3 @@ func detectionSummary(setup *siteSetup) string {
 		return "unknown"
 	}
 }
-

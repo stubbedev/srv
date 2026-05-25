@@ -94,4 +94,3 @@ func TestFinalizeSiteSetupStatic(t *testing.T) {
 		t.Errorf("err: %v", err)
 	}
 }
-

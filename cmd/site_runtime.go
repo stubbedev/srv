@@ -72,7 +72,7 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 
 	// Gate behind --force so a script can't blow away manual edits by accident.
 	if !regenerateFlags.force {
-		return fmt.Errorf("regenerate refused: any manual edits to nginx.conf / Dockerfile / docker-compose.yml will be overwritten. Re-run with --force to proceed.")
+		return fmt.Errorf("regenerate refused: manual edits to nginx.conf / Dockerfile / docker-compose.yml will be overwritten — re-run with --force to proceed")
 	}
 
 	ui.Info("Regenerating config for '%s'...", siteName)

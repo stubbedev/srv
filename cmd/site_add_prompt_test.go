@@ -224,4 +224,3 @@ func TestPromptForProfileFlagMatches(t *testing.T) {
 		t.Errorf("setup.profile = %q, want prod", setup.profile)
 	}
 }
-

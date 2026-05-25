@@ -39,7 +39,7 @@ func EnsureBootstrapResolution() (restore func(), err error) {
 	// recreate the symlink later; if it's a regular file we save its contents.
 	li, lerr := os.Lstat(resolvConfPath)
 	if lerr != nil {
-		return nil, nil // file gone — caller can do nothing useful here
+		return nil, nil //nolint:nilerr // file gone — caller can do nothing useful here
 	}
 
 	var savedTarget string
@@ -89,7 +89,7 @@ func needsBootstrapSwap(path string) bool {
 // when at least one `nameserver` entry exists and every one is a loopback
 // address (127.0.0.0/8 IPv4 or ::1 IPv6).
 func loopbackOnlyResolvConf(contents string) bool {
-	any := false
+	seen := false
 	for _, line := range strings.Split(contents, "\n") {
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "#") {
@@ -103,12 +103,12 @@ func loopbackOnlyResolvConf(contents string) bool {
 			continue
 		}
 		addr := fields[1]
-		any = true
+		seen = true
 		if !isLoopback(addr) {
 			return false
 		}
 	}
-	return any
+	return seen
 }
 
 func isLoopback(addr string) bool {

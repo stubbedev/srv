@@ -87,24 +87,24 @@ const CurrentMetadataSchema = 1
 // SiteMetadata holds all configuration for a site.
 // This is stored in ~/.config/srv/sites/{name}/metadata.yml
 type SiteMetadata struct {
-	SchemaVersion      int       `yaml:"schema_version,omitempty" jsonschema:"description=metadata.yml schema version (1 = current)."`
-	Type               SiteType  `yaml:"type" jsonschema:"enum=compose,enum=static,enum=dockerfile,description=Site runtime type."`
-	Domains            []string  `yaml:"domains,omitempty" jsonschema:"description=All hostnames; the first entry is canonical."`
-	ProjectPath        string    `yaml:"project_path" jsonschema:"description=Absolute path to the project on disk."`
-	ServiceName        string    `yaml:"service_name,omitempty" jsonschema:"description=Container name used for Traefik routing."`
-	ComposeServiceName string    `yaml:"compose_service_name,omitempty" jsonschema:"description=docker-compose service name (for compose commands)."`
-	Profile            string    `yaml:"profile,omitempty" jsonschema:"description=docker-compose profile (if the service uses profiles)."`
-	Port               int       `yaml:"port" jsonschema:"description=Port the service listens on inside the container."`
-	IsLocal            bool      `yaml:"is_local" jsonschema:"description=Whether to use a locally-issued (mkcert) SSL certificate."`
-	Wildcard           bool      `yaml:"wildcard,omitempty" jsonschema:"description=Match apex + one-level subdomains (*.example.com)."`
-	NetworkName        string    `yaml:"network_name" jsonschema:"description=Docker network the site joins."`
-	ExtraNetworks      []string  `yaml:"extra_networks,omitempty" jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)."`
+	SchemaVersion      int           `yaml:"schema_version,omitempty" jsonschema:"description=metadata.yml schema version (1 = current)."`
+	Type               SiteType      `yaml:"type" jsonschema:"enum=compose,enum=static,enum=dockerfile,description=Site runtime type."`
+	Domains            []string      `yaml:"domains,omitempty" jsonschema:"description=All hostnames; the first entry is canonical."`
+	ProjectPath        string        `yaml:"project_path" jsonschema:"description=Absolute path to the project on disk."`
+	ServiceName        string        `yaml:"service_name,omitempty" jsonschema:"description=Container name used for Traefik routing."`
+	ComposeServiceName string        `yaml:"compose_service_name,omitempty" jsonschema:"description=docker-compose service name (for compose commands)."`
+	Profile            string        `yaml:"profile,omitempty" jsonschema:"description=docker-compose profile (if the service uses profiles)."`
+	Port               int           `yaml:"port" jsonschema:"description=Port the service listens on inside the container."`
+	IsLocal            bool          `yaml:"is_local" jsonschema:"description=Whether to use a locally-issued (mkcert) SSL certificate."`
+	Wildcard           bool          `yaml:"wildcard,omitempty" jsonschema:"description=Match apex + one-level subdomains (*.example.com)."`
+	NetworkName        string        `yaml:"network_name" jsonschema:"description=Docker network the site joins."`
+	ExtraNetworks      []string      `yaml:"extra_networks,omitempty" jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)."`
 	Volumes            []VolumeMount `yaml:"volumes,omitempty" jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile, TEMP dirs)."`
-	Listeners          []string  `yaml:"listeners,omitempty" jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."`
-	Limits             *Limits   `yaml:"limits,omitempty" jsonschema:"description=Request-body / timeout overrides."`
-	Routes             []Route   `yaml:"routes,omitempty" jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."`
-	Upstream           *Upstream `yaml:"upstream,omitempty" jsonschema:"description=Primary backend (proxy-type sites only)."`
-	Fallback           *Fallback `yaml:"fallback,omitempty" jsonschema:"description=Remote 5xx fallback target."`
+	Listeners          []string      `yaml:"listeners,omitempty" jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."`
+	Limits             *Limits       `yaml:"limits,omitempty" jsonschema:"description=Request-body / timeout overrides."`
+	Routes             []Route       `yaml:"routes,omitempty" jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."`
+	Upstream           *Upstream     `yaml:"upstream,omitempty" jsonschema:"description=Primary backend (proxy-type sites only)."`
+	Fallback           *Fallback     `yaml:"fallback,omitempty" jsonschema:"description=Remote 5xx fallback target."`
 	// Static site options
 	SPA   bool `yaml:"spa,omitempty" jsonschema:"description=Single-page-app mode (fall back to /index.html)."`
 	Cache bool `yaml:"cache,omitempty" jsonschema:"description=Emit aggressive caching headers for static assets."`

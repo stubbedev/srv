@@ -115,15 +115,15 @@ func runScaffold(cmd *cobra.Command, args []string) error {
 // scaffoldTemplate is one language+framework combination ready to render
 // into Dockerfile / docker-compose.yml / .dockerignore content.
 type scaffoldTemplate struct {
-	lang        string
-	framework   string
-	baseImage   string // Dockerfile FROM target
-	version     string // language runtime version (display only after override)
-	port        int    // container port the app listens on
-	docRoot     string // project-relative document root (PHP only)
-	startCmd    string // CMD line for node/ruby/python; ignored for PHP
-	extensions  []string // PHP only — extra extensions to install
-	envLines    []string // additional ENV ... lines for the Dockerfile
+	lang       string
+	framework  string
+	baseImage  string   // Dockerfile FROM target
+	version    string   // language runtime version (display only after override)
+	port       int      // container port the app listens on
+	docRoot    string   // project-relative document root (PHP only)
+	startCmd   string   // CMD line for node/ruby/python; ignored for PHP
+	extensions []string // PHP only — extra extensions to install
+	envLines   []string // additional ENV ... lines for the Dockerfile
 }
 
 // applyOverrides patches the template with user-supplied flag values.

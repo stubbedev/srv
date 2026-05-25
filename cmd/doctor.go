@@ -514,7 +514,7 @@ func findRootOwnedPaths(root string) ([]string, error) {
 	}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // best-effort; skip unreadable entries
+			return nil //nolint:nilerr // best-effort; skip unreadable entries
 		}
 		if len(hits) >= maxFindings {
 			return filepath.SkipDir
