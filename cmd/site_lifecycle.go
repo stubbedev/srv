@@ -85,6 +85,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		renewLocalCertIfNeeded(s.Name, s.Domains, s.Wildcard)
 	}
 
+	// Regenerate per-site artifacts before bringing containers up so any
+	// metadata edits since the last write are reflected in docker-compose.yml
+	// and the per-site Dockerfile. Reload short-circuits when the metadata
+	// hash matches the last apply so this stays cheap on hot paths.
+	if _, err := site.Reload(s.Name); err != nil {
+		return fmt.Errorf("reload site before start: %w", err)
+	}
+
 	ui.Info("Starting %s...", s.Name)
 	// Use ComposeDir which is set correctly for both static and compose sites
 	var startErr error
@@ -146,6 +154,11 @@ func startAllSites() error {
 
 	ui.Info("Starting %d site(s)...", len(sites))
 	if err := runBatchSiteOperation(sites, "start", func(s *site.Site) error {
+		// Reload per-site artifacts before compose up so label/Dockerfile
+		// edits land. Cheap when nothing changed (metadata-hash short-circuit).
+		if _, err := site.Reload(s.Name); err != nil {
+			return fmt.Errorf("reload: %w", err)
+		}
 		// Use ComposeDir for docker operations with profile if set
 		// Include --remove-orphans to clean up stale containers that may reference non-existent networks
 		if err := docker.ComposeQuietWithProfile(s.ComposeDir, s.Profile, "up", "-d", "--remove-orphans"); err != nil {
@@ -309,6 +322,10 @@ func runRestart(cmd *cobra.Command, args []string) error {
 
 	if s.IsBroken {
 		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
+	}
+
+	if _, err := site.Reload(s.Name); err != nil {
+		return fmt.Errorf("reload site before restart: %w", err)
 	}
 
 	ui.Info("Restarting %s...", s.Name)
