@@ -146,6 +146,13 @@ func runNetworkDetach(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// networkListOut is the json shape for `srv network list --format json`.
+type networkListOut struct {
+	Site    string   `json:"site"`
+	Primary string   `json:"primary"`
+	Extra   []string `json:"extra"`
+}
+
 func runNetworkList(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
 	meta, err := site.ReadSiteMetadata(siteName)
@@ -154,6 +161,13 @@ func runNetworkList(cmd *cobra.Command, args []string) error {
 	}
 	if meta == nil {
 		return fmt.Errorf("site not found: %s", siteName)
+	}
+	if jsonOutput() {
+		return ui.PrintJSON(networkListOut{
+			Site:    siteName,
+			Primary: meta.NetworkName,
+			Extra:   append([]string(nil), meta.ExtraNetworks...),
+		})
 	}
 	ui.Print("Primary: %s", meta.NetworkName)
 	if len(meta.ExtraNetworks) == 0 {

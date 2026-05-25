@@ -409,6 +409,17 @@ func runRedirectReload(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// redirectListRow is the json shape under `srv redirect list --format json`.
+type redirectListRow struct {
+	Name    string `json:"name"`
+	Domain  string `json:"domain"`
+	Target  string `json:"target"`
+	Mode    string `json:"mode"`
+	DNSOnly bool   `json:"dns_only"`
+	SSL     string `json:"ssl,omitempty"`
+	Status  string `json:"status"`
+}
+
 func runRedirectList(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -417,23 +428,52 @@ func runRedirectList(cmd *cobra.Command, args []string) error {
 
 	names := getRedirectNames()
 	if len(names) == 0 {
+		if jsonOutput() {
+			return ui.PrintJSON([]redirectListRow{})
+		}
 		ui.Dim("No redirects configured. Use 'srv redirect add --domain DOMAIN --to URL' to create one.")
 		return nil
 	}
 
 	traefikUp := traefik.IsRunning()
 
+	if jsonOutput() {
+		out := make([]redirectListRow, 0, len(names))
+		for _, name := range names {
+			info := readRedirectConfig(cfg, name)
+			row := redirectListRow{
+				Name:    name,
+				Domain:  info.Domain,
+				Target:  info.Target,
+				DNSOnly: info.DNSOnly,
+			}
+			if info.DNSOnly {
+				row.Mode = "dns"
+				row.Status = "active"
+			} else {
+				row.Mode = "301"
+				if !info.Permanent {
+					row.Mode = "302"
+				}
+				row.SSL = plainRedirectSSLStatus(name, info.Domain)
+				row.Status = "inactive"
+				if traefikUp {
+					row.Status = "active"
+				}
+			}
+			out = append(out, row)
+		}
+		return ui.PrintJSON(out)
+	}
+
 	headers := []string{"NAME", "DOMAIN", "TARGET", "MODE", "SSL", "STATUS"}
 	rows := make([][]string, 0, len(names))
-
 	for _, name := range names {
 		info := readRedirectConfig(cfg, name)
 		var mode, sslStatus, status string
 		if info.DNSOnly {
 			mode = "DNS"
 			sslStatus = ui.DimText("-")
-			// Status mirrors dnsmasq reachability via the local resolver
-			// rather than Traefik. Keep it simple: "active" once written.
 			status = "active"
 		} else {
 			mode = "301"
@@ -448,9 +488,26 @@ func runRedirectList(cmd *cobra.Command, args []string) error {
 		}
 		rows = append(rows, []string{name, info.Domain, info.Target, mode, sslStatus, ui.StatusColor(status)})
 	}
-
 	ui.PrintTable(headers, rows)
 	return nil
+}
+
+// plainRedirectSSLStatus mirrors getRedirectSSLStatus without colour for json.
+func plainRedirectSSLStatus(name, domain string) string {
+	if domain == "" {
+		return ""
+	}
+	cert := traefik.GetLocalCertInfo(redirectSiteName(name), domain)
+	switch {
+	case !cert.Exists:
+		return "missing"
+	case cert.IsExpired:
+		return "expired"
+	case cert.DaysLeft <= constants.CertExpiryWarningDays:
+		return "expiring"
+	default:
+		return "valid"
+	}
 }
 
 // =============================================================================

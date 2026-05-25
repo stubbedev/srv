@@ -28,8 +28,9 @@ var (
 	BuildDate = constants.DefaultBuildDate
 
 	// Root command flags
-	verbose bool
-	quiet   bool
+	verbose      bool
+	quiet        bool
+	outputFormat string
 )
 
 // RootCmd is the root command for srv.
@@ -46,6 +47,7 @@ var RootCmd = &cobra.Command{
 func init() {
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	RootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress informational diagnostic output (errors still printed)")
+	RootCmd.PersistentFlags().StringVar(&outputFormat, "format", "table", "Output format for list/inspect commands: 'table' (default, human-readable) or 'json' (scriptable)")
 
 	// Define command groups
 	RootCmd.AddGroup(
@@ -72,6 +74,13 @@ func SetVersion(version, commit, buildDate string) {
 // =============================================================================
 // Shared Helpers
 // =============================================================================
+
+// jsonOutput reports whether the user requested machine-readable output via
+// --format json. List/inspect commands branch on this to emit json instead of
+// a coloured table.
+func jsonOutput() bool {
+	return outputFormat == "json"
+}
 
 // GetSiteNames returns a list of all registered site names for shell completion.
 // Returns an empty slice if sites cannot be listed (logs warning in verbose mode).

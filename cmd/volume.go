@@ -156,6 +156,12 @@ func runVolumeRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// volumeListOut is the json shape for `srv volume list --format json`.
+type volumeListOut struct {
+	Site    string             `json:"site"`
+	Volumes []site.VolumeMount `json:"volumes"`
+}
+
 func runVolumeList(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
 	meta, err := site.ReadSiteMetadata(siteName)
@@ -164,6 +170,9 @@ func runVolumeList(cmd *cobra.Command, args []string) error {
 	}
 	if meta == nil {
 		return fmt.Errorf("site not found: %s", siteName)
+	}
+	if jsonOutput() {
+		return ui.PrintJSON(volumeListOut{Site: siteName, Volumes: meta.Volumes})
 	}
 	if len(meta.Volumes) == 0 {
 		ui.Dim("No extra volumes attached to %s", siteName)

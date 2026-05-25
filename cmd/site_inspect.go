@@ -33,6 +33,18 @@ func init() {
 	RootCmd.AddCommand(listCmd)
 }
 
+// listSiteRow is the json shape for one site under `srv list --format json`.
+type listSiteRow struct {
+	Name    string   `json:"name"`
+	Domains []string `json:"domains"`
+	Target  string   `json:"target"`
+	Type    string   `json:"type"`
+	SSL     string   `json:"ssl"`
+	Status  string   `json:"status"`
+	Local   bool     `json:"local"`
+	Broken  bool     `json:"broken"`
+}
+
 func runList(cmd *cobra.Command, args []string) error {
 	sites, err := site.List()
 	if err != nil {
@@ -40,46 +52,105 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(sites) == 0 {
+		if jsonOutput() {
+			return ui.PrintJSON([]listSiteRow{})
+		}
 		ui.Dim("No sites registered. Use 'srv add PATH' to add a site.")
 		return nil
 	}
 
-	// Sort by name
-	sort.Slice(sites, func(i, j int) bool {
-		return sites[i].Name < sites[j].Name
-	})
+	sort.Slice(sites, func(i, j int) bool { return sites[i].Name < sites[j].Name })
 
-	// Build table
+	if jsonOutput() {
+		out := make([]listSiteRow, 0, len(sites))
+		for _, s := range sites {
+			status := s.Status
+			if s.IsBroken {
+				status = constants.StatusBroken
+			}
+			out = append(out, listSiteRow{
+				Name:    s.Name,
+				Domains: append([]string(nil), s.Domains...),
+				Target:  s.Dir,
+				Type:    plainSiteTypeLabel(s),
+				SSL:     plainSSLStatus(s),
+				Status:  status,
+				Local:   s.IsLocal,
+				Broken:  s.IsBroken,
+			})
+		}
+		return ui.PrintJSON(out)
+	}
+
 	headers := []string{"NAME", "DOMAIN", "TARGET", "TYPE", "SSL", "STATUS"}
 	rows := make([][]string, 0, len(sites))
-
 	for _, s := range sites {
 		status := s.Status
 		if s.IsBroken {
 			status = constants.StatusBroken
 		}
-
-		// Determine SSL status
-		sslStatus := getSSLStatus(s)
-
-		// Show directory path as target (or placeholder if broken)
 		target := s.Dir
 		if s.IsBroken {
 			target = ui.DimText("-")
 		}
-
 		rows = append(rows, []string{
 			s.Name,
 			formatDomainsForList(s.Domains),
 			target,
 			getSiteTypeLabel(s),
-			sslStatus,
+			getSSLStatus(s),
 			ui.StatusColor(status),
 		})
 	}
-
 	ui.PrintTable(headers, rows)
 	return nil
+}
+
+// plainSiteTypeLabel is the json-friendly counterpart of getSiteTypeLabel —
+// returns a bare string with no colour codes.
+func plainSiteTypeLabel(s site.Site) string {
+	if s.IsBroken {
+		return ""
+	}
+	switch s.Type {
+	case site.SiteTypeStatic:
+		return "static"
+	case site.SiteTypePHP:
+		return "php"
+	case site.SiteTypeNode:
+		return "node"
+	case site.SiteTypeRuby:
+		return "ruby"
+	case site.SiteTypePython:
+		return "python"
+	case site.SiteTypeDockerfile:
+		return "dockerfile"
+	default:
+		return "compose"
+	}
+}
+
+// plainSSLStatus mirrors getSSLStatus but returns the raw value for json.
+func plainSSLStatus(s site.Site) string {
+	if s.IsBroken {
+		return ""
+	}
+	if !s.IsLocal {
+		return "auto"
+	}
+	cert := traefik.GetLocalCertInfo(s.Name, s.Domain())
+	switch {
+	case cert.Corrupt:
+		return "corrupt"
+	case !cert.Exists:
+		return "missing"
+	case cert.IsExpired:
+		return "expired"
+	case cert.DaysLeft <= constants.CertExpiryWarningDays:
+		return "expiring"
+	default:
+		return "valid"
+	}
 }
 
 // formatDomainsForList renders a site's domains for the `srv list` table.

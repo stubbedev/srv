@@ -15,6 +15,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -351,6 +352,21 @@ func PrintTable(headers []string, rows [][]string) {
 		}
 		fmt.Fprintln(outStdout)
 	}
+}
+
+// PrintJSON writes the given value to STDOUT as indented JSON followed by a
+// newline. Used by `--format json` on list commands so scripts can parse the
+// output without scraping a colour-tinted table.
+func PrintJSON(v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err := outStdout.Write(data); err != nil {
+		return err
+	}
+	_, err = outStdout.Write([]byte{'\n'})
+	return err
 }
 
 // stripAnsi removes ANSI/VT100 escape sequences so PrintTable can compute

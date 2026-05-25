@@ -447,6 +447,17 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// proxyListRow is the json shape for one entry under `srv proxy list --format json`.
+type proxyListRow struct {
+	Name      string `json:"name"`
+	Domain    string `json:"domain"`
+	Target    string `json:"target"`
+	Type      string `json:"type"`
+	Container string `json:"container,omitempty"`
+	SSL       string `json:"ssl"`
+	Status    string `json:"status"`
+}
+
 func runProxyList(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -455,36 +466,71 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 
 	proxies := getProxyNames()
 	if len(proxies) == 0 {
+		if jsonOutput() {
+			return ui.PrintJSON([]proxyListRow{})
+		}
 		ui.Dim("No proxies configured. Use 'srv proxy add --domain DOMAIN --port PORT' to create one.")
 		return nil
 	}
 
 	traefikUp := traefik.IsRunning()
+	status := "inactive"
+	if traefikUp {
+		status = "active"
+	}
+
+	if jsonOutput() {
+		out := make([]proxyListRow, 0, len(proxies))
+		for _, name := range proxies {
+			info := readProxyConfig(cfg, name)
+			ptype := constants.ProxyTypeLocalhost
+			if info.Container != "" {
+				ptype = constants.ProxyTypeContainer
+			}
+			out = append(out, proxyListRow{
+				Name:      name,
+				Domain:    info.Domain,
+				Target:    info.Target,
+				Type:      ptype,
+				Container: info.Container,
+				SSL:       plainProxySSLStatus(name, info.Domain),
+				Status:    status,
+			})
+		}
+		return ui.PrintJSON(out)
+	}
 
 	headers := []string{"NAME", "DOMAIN", "TARGET", "TYPE", "SSL", "STATUS"}
 	rows := make([][]string, 0, len(proxies))
-
 	for _, name := range proxies {
-		proxyInfo := readProxyConfig(cfg, name)
-		sslStatus := getProxySSLStatus(name, proxyInfo.Domain)
-
-		// Determine type based on whether it's proxying to a container or localhost
-		proxyType := constants.ProxyTypeLocalhost
-		if proxyInfo.Container != "" {
-			proxyType = constants.ProxyTypeContainer
+		info := readProxyConfig(cfg, name)
+		sslStatus := getProxySSLStatus(name, info.Domain)
+		ptype := constants.ProxyTypeLocalhost
+		if info.Container != "" {
+			ptype = constants.ProxyTypeContainer
 		}
-
-		// Proxy status depends on Traefik being up; proxies have no containers of their own
-		status := "inactive"
-		if traefikUp {
-			status = "active"
-		}
-
-		rows = append(rows, []string{name, proxyInfo.Domain, proxyInfo.Target, proxyType, sslStatus, ui.StatusColor(status)})
+		rows = append(rows, []string{name, info.Domain, info.Target, ptype, sslStatus, ui.StatusColor(status)})
 	}
-
 	ui.PrintTable(headers, rows)
 	return nil
+}
+
+// plainProxySSLStatus mirrors getProxySSLStatus without colour codes for json.
+func plainProxySSLStatus(name, domain string) string {
+	if domain == "" {
+		return ""
+	}
+	cert := traefik.GetLocalCertInfo("_proxy-"+name, domain)
+	switch {
+	case !cert.Exists:
+		return "missing"
+	case cert.IsExpired:
+		return "expired"
+	case cert.DaysLeft <= constants.CertExpiryWarningDays:
+		return "expiring"
+	default:
+		return "valid"
+	}
 }
 
 // =============================================================================

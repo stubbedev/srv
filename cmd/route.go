@@ -161,7 +161,16 @@ func runRouteList(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("no site or proxy named %q", target)
 }
 
+// routeListOut is the json shape under `srv route list --format json`.
+type routeListOut struct {
+	Target string       `json:"target"`
+	Routes []site.Route `json:"routes"`
+}
+
 func printRoutes(name string, routes []site.Route) error {
+	if jsonOutput() {
+		return ui.PrintJSON(routeListOut{Target: name, Routes: routes})
+	}
 	if len(routes) == 0 {
 		ui.Dim("No routes attached to %s", name)
 		return nil
