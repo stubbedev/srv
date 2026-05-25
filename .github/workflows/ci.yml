@@ -49,6 +49,9 @@ jobs:
           args: --fix
         continue-on-error: true
 
+      - name: Regenerate schemas
+        run: go run ./cmd/gen-schema
+
       - name: Commit and push fixes
         id: commit
         run: |
