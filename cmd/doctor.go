@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -53,6 +58,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	issues += checkDNS()
 	issues += checkCertificates()
 	issues += checkSitesValid()
+	issues += checkPHPEnvHostLoopback()
 
 	// Summary
 	ui.Blank()
@@ -336,6 +342,91 @@ func checkSitesValid() int {
 	}
 	ui.Blank()
 	return issues
+}
+
+// checkPHPEnvHostLoopback scans every PHP site's `.env` for host-loopback
+// references that won't resolve from inside the FrankenPHP container. Reports
+// each match with the two fix paths (host.docker.internal vs network attach).
+//
+// Heuristics:
+//   - lines matching `*_HOST(S)?=...127.0.0.1` or `*_ENDPOINT=...://127.0.0.1...`
+//   - commented lines (starting with #) are skipped
+//   - case-insensitive variable name match
+func checkPHPEnvHostLoopback() int {
+	ui.Bold("PHP .env host references")
+	sites, err := site.List()
+	if err != nil {
+		ui.IndentedWarn(1, "Could not list sites: %v", err)
+		ui.Blank()
+		return 1
+	}
+
+	totalHits := 0
+	checked := 0
+	for _, s := range sites {
+		if s.Type != site.SiteTypePHP {
+			continue
+		}
+		hits := scanEnvForHostLoopback(filepath.Join(s.Dir, ".env"))
+		if len(hits) == 0 {
+			continue
+		}
+		checked++
+		ui.IndentedWarn(1, "%s: %d .env entr%s point at 127.0.0.1", s.Name, len(hits), plural(len(hits), "y", "ies"))
+		for _, h := range hits {
+			ui.IndentedDim(2, "%s", h)
+		}
+		totalHits += len(hits)
+	}
+
+	if totalHits == 0 {
+		ui.IndentedDim(1, "No host-loopback references found in PHP site .env files")
+		ui.Blank()
+		return 0
+	}
+
+	ui.Blank()
+	ui.IndentedDim(1, "PHP runs in a container; 127.0.0.1 inside the container is the container itself.")
+	ui.IndentedDim(1, "Fix one of:")
+	ui.IndentedDim(2, "(a) rewrite to host.docker.internal — works because srv adds extra_hosts")
+	ui.IndentedDim(2, "(b) attach the FPM container to the host service's docker network and use its container name")
+	ui.IndentedDim(2, "    srv network attach <site> <docker-network>")
+	ui.Blank()
+	return checked
+}
+
+func plural(n int, singular, pluralForm string) string {
+	if n == 1 {
+		return singular
+	}
+	return pluralForm
+}
+
+// envLoopbackPattern matches "<NAME>=<value containing 127.0.0.1>" where NAME
+// is a typical host-pointing config key. Tolerates whitespace and quoted
+// values. Anchored to start-of-line so commented entries (#…) skip.
+var envLoopbackPattern = regexp.MustCompile(`(?i)^\s*([A-Z][A-Z0-9_]*?)(_HOST|_HOSTS|_ENDPOINT|_URL|_DSN|_URI)\s*=\s*[\"']?[^\"'\n]*127\.0\.0\.1`)
+
+func scanEnvForHostLoopback(path string) []string {
+	f, err := os.Open(path) //nolint:gosec // path comes from site metadata (trusted)
+	if err != nil {
+		return nil
+	}
+	defer f.Close() //nolint:errcheck
+
+	var hits []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if envLoopbackPattern.MatchString(line) {
+			hits = append(hits, trimmed)
+		}
+	}
+	return hits
 }
 
 // =============================================================================

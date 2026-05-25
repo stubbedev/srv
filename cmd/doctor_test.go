@@ -157,3 +157,37 @@ func TestCheckCertificatesMkcertInstalled(t *testing.T) {
 	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
 	_ = checkCertificates()
 }
+
+func TestScanEnvForHostLoopback(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	content := []byte(`# Comment line
+DB_HOST=127.0.0.1
+REDIS_HOST=127.0.0.1
+ELASTICSEARCH_HOSTS=http://127.0.0.1:9200
+STORAGE_ENDPOINT="http://127.0.0.1:9000"
+SOMETHING_ELSE=localhost
+DB_PORT=3306
+#DB_HOST=127.0.0.1
+DATABASE_URL=mysql://root@127.0.0.1:3306/db
+`)
+	if err := os.WriteFile(envPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hits := scanEnvForHostLoopback(envPath)
+	if len(hits) != 5 {
+		t.Fatalf("expected 5 hits, got %d: %v", len(hits), hits)
+	}
+	// Commented line must not appear
+	for _, h := range hits {
+		if h[0] == '#' {
+			t.Errorf("commented line leaked: %q", h)
+		}
+	}
+}
+
+func TestScanEnvForHostLoopbackMissingFile(t *testing.T) {
+	if hits := scanEnvForHostLoopback("/nonexistent/.env"); hits != nil {
+		t.Errorf("missing file should return nil, got %v", hits)
+	}
+}
