@@ -9,17 +9,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
+	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/importers/valet"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
 var importFlags struct {
-	valetDir  string
-	apply     bool
-	dryRun    bool
-	listSites bool
+	valetDir       string
+	apply          bool
+	dryRun         bool
+	listSites      bool
+	interactive    bool
+	resetDecisions bool
 }
 
 var importCmd = &cobra.Command{
@@ -45,6 +50,8 @@ func init() {
 	importValetCmd.Flags().BoolVar(&importFlags.apply, "apply", false, "Execute the generated srv commands instead of just printing them")
 	importValetCmd.Flags().BoolVar(&importFlags.dryRun, "dry-run", false, "Explicit no-op alias for the default print-only mode (mutually exclusive with --apply)")
 	importValetCmd.Flags().BoolVar(&importFlags.listSites, "list-sites", false, "List discovered Valet sites and exit; build no plan")
+	importValetCmd.Flags().BoolVar(&importFlags.interactive, "interactive", false, "Walk each generated step one by one and accept/skip via prompt; skip decisions persist across runs")
+	importValetCmd.Flags().BoolVar(&importFlags.resetDecisions, "reset-decisions", false, "Forget previously-recorded skip decisions before running")
 	importCmd.AddCommand(importValetCmd)
 	importCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(importCmd)
@@ -89,6 +96,11 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	decisions, _ := loadImportDecisions()
+	if importFlags.resetDecisions {
+		decisions = importDecisions{}
+	}
+
 	for i, step := range plan {
 		ui.Print("  [%d] %s", i+1, step.line)
 		for _, note := range step.notes {
@@ -116,19 +128,119 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 			skipped++
 			continue
 		}
+		if decisions.Skipped[step.line] {
+			ui.IndentedDim(1, "remembered skip: %s", step.line)
+			skipped++
+			continue
+		}
+		if importFlags.interactive {
+			choice, err := promptImportStep(step)
+			if err != nil {
+				return err
+			}
+			switch choice {
+			case "skip":
+				decisions.recordSkip(step.line)
+				skipped++
+				continue
+			case "abort":
+				ui.Warn("Aborted by user after %d of %d steps", i, len(plan))
+				_ = saveImportDecisions(decisions)
+				return nil
+			}
+		}
 		cmd := exec.Command(srvBinary, step.args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
+			_ = saveImportDecisions(decisions)
 			return fmt.Errorf("step %d (%s) failed: %w", i+1, step.line, err)
 		}
 		executed++
 	}
 	if skipped > 0 {
-		ui.Warn("Skipped %d entry/ies with unresolved fields (run dry-run to see them)", skipped)
+		ui.Warn("Skipped %d entry/ies (unresolved fields or user skip)", skipped)
+	}
+	if err := saveImportDecisions(decisions); err != nil {
+		ui.Dim("Could not persist import decisions: %v", err)
 	}
 	ui.Success("Imported %d entry/ies", executed)
 	return nil
+}
+
+// promptImportStep presents one accept/skip/abort prompt and returns the
+// user's choice. Errors propagate unchanged so a ctrl-c kills the whole run.
+func promptImportStep(step importStep) (string, error) {
+	choice := "accept"
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(step.line).
+				Description("Accept runs this srv command. Skip persists the decision so re-runs honour it. Abort halts the import.").
+				Options(
+					huh.NewOption("Accept", "accept"),
+					huh.NewOption("Skip (remember)", "skip"),
+					huh.NewOption("Abort", "abort"),
+				).
+				Value(&choice),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return "", fmt.Errorf("interactive prompt: %w", err)
+	}
+	return choice, nil
+}
+
+// importDecisions persists user choices across `srv import valet` runs so a
+// second invocation doesn't re-prompt for entries the user already declined.
+type importDecisions struct {
+	Skipped map[string]bool `yaml:"skipped,omitempty"`
+}
+
+func (d *importDecisions) recordSkip(line string) {
+	if d.Skipped == nil {
+		d.Skipped = map[string]bool{}
+	}
+	d.Skipped[line] = true
+}
+
+func importDecisionsPath() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cfg.Root, "import-decisions.yml"), nil
+}
+
+func loadImportDecisions() (importDecisions, error) {
+	path, err := importDecisionsPath()
+	if err != nil {
+		return importDecisions{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return importDecisions{}, nil
+		}
+		return importDecisions{}, err
+	}
+	var d importDecisions
+	if err := yaml.Unmarshal(data, &d); err != nil {
+		return importDecisions{}, err
+	}
+	return d, nil
+}
+
+func saveImportDecisions(d importDecisions) error {
+	path, err := importDecisionsPath()
+	if err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(&d)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // resolveValetDir picks a valet config directory. When --valet-dir is given it
