@@ -49,7 +49,7 @@ func TestWriteSiteMetadataRoundtrip(t *testing.T) {
 	t.Cleanup(config.ResetCache)
 
 	want := SiteMetadata{
-		Type:        SiteTypePHP,
+		Type:        SiteTypeDockerfile,
 		Domains:     []string{"app.test", "alias.test"},
 		ProjectPath: tmp,
 		Port:        9000,

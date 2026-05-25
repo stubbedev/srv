@@ -1,49 +1,28 @@
 // Package constants — runtime.go holds the per-language constants used when
-// srv generates Dockerfiles, compose files, and nginx configs for sites it
-// owns directly: PHP, Node.js (incl. Bun/Deno), Ruby, Python, and the
-// catch-all Dockerfile site type.
+// srv generates docker-compose configs for sites it owns directly (Node,
+// Ruby, Python, Dockerfile). PHP runtimes are no longer managed by srv —
+// users bring their own Dockerfile or scaffold one with `srv scaffold php`.
 package constants
 
 // =============================================================================
-// PHP Constants
+// PHP Constants (used only by the scaffold command + detection)
 // =============================================================================
 
 const (
 	// FrankenPHPImageLatest is the FrankenPHP alpine Docker image (latest stable PHP).
 	FrankenPHPImageLatest = "dunglas/frankenphp:alpine"
 	// FrankenPHPImageFormat is the format string for versioned FrankenPHP alpine images.
-	// Tag pattern follows https://hub.docker.com/r/dunglas/frankenphp/tags — e.g.
-	// `dunglas/frankenphp:php8.4-alpine`.
 	FrankenPHPImageFormat = "dunglas/frankenphp:php%s-alpine"
-	// FrankenPHPServiceName is the service name for the FrankenPHP container in compose.
-	FrankenPHPServiceName = "php"
-	// FrankenPHPContainerPort is the HTTP port FrankenPHP listens on inside the container.
-	FrankenPHPContainerPort = 80
-	// FrankenPHPAppDir is the working directory inside the FrankenPHP container
-	// where the site's project is bind-mounted.
-	FrankenPHPAppDir = "/app"
-	// FrankenPHPImageTagFormat is the per-site image tag built by srv:
-	// `srv-php-<sitename>:latest`.
-	FrankenPHPImageTagFormat = "srv-php-%s:latest"
-	// FrankenPHPContainerNameFormat is the per-site container name pattern:
-	// `srv-<sitename>-php`.
-	FrankenPHPContainerNameFormat = "srv-%s-php"
-	// PHPDockerfileFile is the Dockerfile filename generated for PHP sites.
-	PHPDockerfileFile = "Dockerfile"
 	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".
 	PHPVersionLatest = "latest"
 )
 
-// PHP framework identifiers.
+// PHP framework identifiers (used by detection + scaffold templates).
 const (
-	// PHPFrameworkLaravel is the Laravel framework identifier.
-	PHPFrameworkLaravel = "laravel"
-	// PHPFrameworkSymfony is the Symfony framework identifier.
-	PHPFrameworkSymfony = "symfony"
-	// PHPFrameworkWordPress is the WordPress framework identifier.
+	PHPFrameworkLaravel   = "laravel"
+	PHPFrameworkSymfony   = "symfony"
 	PHPFrameworkWordPress = "wordpress"
-	// PHPFrameworkGeneric is the generic PHP framework identifier.
-	PHPFrameworkGeneric = "generic"
+	PHPFrameworkGeneric   = "generic"
 )
 
 // =============================================================================

@@ -95,29 +95,6 @@ func TestPromptForMissingConfigInternalHTTP(t *testing.T) {
 	}
 }
 
-func TestPromptForMissingConfigPHPOverrides(t *testing.T) {
-	setupSrvRoot(t)
-	resetAddFlags()
-	addFlags.domain = "wp.local"
-	addFlags.name = "wp"
-	addFlags.local = true
-	addFlags.phpVersion = "8.4"
-	addFlags.documentRoot = "public"
-	addFlags.phpExtensions = "+redis"
-	defer resetAddFlags()
-
-	setup := &siteSetup{isPHP: true, phpInfo: &site.PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"mbstring"}}}
-	if err := promptForMissingConfig(setup); err != nil {
-		t.Fatal(err)
-	}
-	if setup.phpInfo.PHPVersion != "8.4" {
-		t.Errorf("version not overridden: %q", setup.phpInfo.PHPVersion)
-	}
-	if setup.phpInfo.DocumentRoot != "public" {
-		t.Error("docroot not overridden")
-	}
-}
-
 func TestPromptForServiceNoCompose(t *testing.T) {
 	setup := &siteSetup{}
 	if err := promptForService(setup); err != nil {

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -64,28 +63,6 @@ func TestSetupSiteFilesNode(t *testing.T) {
 		isLocal:  true,
 		isNode:   true,
 		nodeInfo: site.NodeDefaults(),
-	}
-	if err := setupSiteFiles(cfg, setup); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-}
-
-func TestSetupSiteFilesPHP(t *testing.T) {
-	root := setupSrvRoot(t)
-	cfg, _ := config.Load()
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	setup := &siteSetup{
-		siteName: "wp",
-		sitePath: projectDir,
-		domain:   "wp.local",
-		port:     80,
-		isLocal:  true,
-		isPHP:    true,
-		phpInfo:  &site.PHPSiteInfo{PHPVersion: "8.3", Extensions: []string{"redis"}, Framework: "generic"},
 	}
 	if err := setupSiteFiles(cfg, setup); err != nil {
 		t.Fatalf("err: %v", err)

@@ -66,7 +66,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	issues += checkDNS()
 	issues += checkCertificates()
 	issues += checkSitesValid()
-	issues += checkPHPEnvHostLoopback()
+	issues += checkSiteEnvHostLoopback()
 	issues += checkConfigDirOwnership(doctorFlags.fixPerms)
 
 	// Summary
@@ -353,16 +353,17 @@ func checkSitesValid() int {
 	return issues
 }
 
-// checkPHPEnvHostLoopback scans every PHP site's `.env` for host-loopback
-// references that won't resolve from inside the FrankenPHP container. Reports
-// each match with the two fix paths (host.docker.internal vs network attach).
+// checkSiteEnvHostLoopback scans every container-backed site's `.env` for
+// host-loopback references that won't resolve from inside the container.
+// Applies to dockerfile / compose / node / ruby / python sites — anywhere
+// the app code runs in a container that has its own loopback namespace.
 //
 // Heuristics:
 //   - lines matching `*_HOST(S)?=...127.0.0.1` or `*_ENDPOINT=...://127.0.0.1...`
 //   - commented lines (starting with #) are skipped
 //   - case-insensitive variable name match
-func checkPHPEnvHostLoopback() int {
-	ui.Bold("PHP .env host references")
+func checkSiteEnvHostLoopback() int {
+	ui.Bold(".env host references")
 	sites, err := site.List()
 	if err != nil {
 		ui.IndentedWarn(1, "Could not list sites: %v", err)
@@ -373,7 +374,7 @@ func checkPHPEnvHostLoopback() int {
 	totalHits := 0
 	checked := 0
 	for _, s := range sites {
-		if s.Type != site.SiteTypePHP {
+		if s.Type == site.SiteTypeStatic {
 			continue
 		}
 		hits := scanEnvForHostLoopback(filepath.Join(s.Dir, ".env"))
@@ -389,13 +390,13 @@ func checkPHPEnvHostLoopback() int {
 	}
 
 	if totalHits == 0 {
-		ui.IndentedDim(1, "No host-loopback references found in PHP site .env files")
+		ui.IndentedDim(1, "No host-loopback references found in site .env files")
 		ui.Blank()
 		return 0
 	}
 
 	ui.Blank()
-	ui.IndentedDim(1, "PHP runs in a container; 127.0.0.1 inside the container is the container itself.")
+	ui.IndentedDim(1, "These sites run in a container; 127.0.0.1 inside the container is the container itself.")
 	ui.IndentedDim(1, "Fix one of:")
 	ui.IndentedDim(2, "(a) rewrite to host.docker.internal — works because srv adds extra_hosts")
 	ui.IndentedDim(2, "(b) attach the FPM container to the host service's docker network and use its container name")

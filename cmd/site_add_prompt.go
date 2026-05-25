@@ -17,7 +17,7 @@ import (
 // promptForMissingConfig prompts user for any missing configuration
 func promptForMissingConfig(setup *siteSetup) error {
 	// Get service name (only for compose sites)
-	if !setup.isStatic && !setup.isPHP && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile {
+	if !setup.isStatic && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile {
 		if err := promptForService(setup); err != nil {
 			return err
 		}
@@ -66,22 +66,6 @@ func promptForMissingConfig(setup *siteSetup) error {
 	setup.spa = addFlags.spa
 	setup.cache = addFlags.cache
 	setup.cors = addFlags.cors
-
-	// PHP site: apply flag overrides on top of auto-detected values.
-	if setup.isPHP && setup.phpInfo != nil {
-		if addFlags.phpVersion != "" {
-			setup.phpInfo.PHPVersion = addFlags.phpVersion
-		}
-		if addFlags.documentRoot != "" {
-			setup.phpInfo.DocumentRoot = addFlags.documentRoot
-		}
-		if addFlags.phpExtensions != "" {
-			setup.phpInfo.Extensions = site.ParseExtensionOverrides(
-				addFlags.phpExtensions,
-				setup.phpInfo.Extensions,
-			)
-		}
-	}
 
 	// Node.js site: apply flag overrides on top of auto-detected values.
 	if setup.isNode && setup.nodeInfo != nil {

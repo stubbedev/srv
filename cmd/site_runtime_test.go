@@ -30,55 +30,6 @@ func TestRunRuntimeWrongType(t *testing.T) {
 	}
 }
 
-func TestRunRuntimePHPNoFlags(t *testing.T) {
-	root := setupSrvRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTestSite(t, "blog", site.SiteMetadata{
-		Type:        site.SiteTypePHP,
-		Domains:     []string{"blog.local"},
-		ProjectPath: projectDir,
-		Port:        80,
-		NetworkName: "n",
-		PHPVersion:  "8.3",
-	})
-	resetRuntimeFlags()
-	if err := runRuntime(nil, []string{"blog"}); err == nil {
-		t.Error("expected err: no flags")
-	}
-}
-
-func TestRunRuntimePHPVersionUpdate(t *testing.T) {
-	root := setupSrvRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	writeTestSite(t, "blog", site.SiteMetadata{
-		Type:          site.SiteTypePHP,
-		Domains:       []string{"blog.local"},
-		ProjectPath:   projectDir,
-		Port:          80,
-		NetworkName:   "n",
-		PHPVersion:    "8.3",
-		PHPExtensions: []string{"redis"},
-	})
-	resetRuntimeFlags()
-	runtimeFlags.phpVersion = "8.4"
-	defer resetRuntimeFlags()
-
-	if err := runRuntime(nil, []string{"blog"}); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	meta, _ := site.ReadSiteMetadata("blog")
-	if meta.PHPVersion != "8.4" {
-		t.Errorf("version not updated: %q", meta.PHPVersion)
-	}
-}
-
 func TestRunRuntimeNodeNoFlag(t *testing.T) {
 	setupSrvRoot(t)
 	writeTestSite(t, "app", site.SiteMetadata{
@@ -171,7 +122,5 @@ func TestRunRegenerateMissingSite(t *testing.T) {
 }
 
 func resetRuntimeFlags() {
-	runtimeFlags.phpVersion = ""
-	runtimeFlags.phpExtensions = ""
 	runtimeFlags.nodeVersion = ""
 }

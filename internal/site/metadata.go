@@ -24,13 +24,12 @@ import (
 type SiteType string
 
 const (
-	SiteTypeCompose    SiteType = constants.SiteTypeCompose    // Docker compose project
+	SiteTypeCompose    SiteType = constants.SiteTypeCompose    // Docker compose project (user-owned)
 	SiteTypeStatic     SiteType = constants.SiteTypeStatic     // Static files served via nginx
-	SiteTypePHP        SiteType = constants.SiteTypePHP        // PHP/FPM site (nginx + php-fpm)
 	SiteTypeNode       SiteType = constants.SiteTypeNode       // Node.js / Bun / Deno site
 	SiteTypeRuby       SiteType = constants.SiteTypeRuby       // Ruby site
 	SiteTypePython     SiteType = constants.SiteTypePython     // Python site
-	SiteTypeDockerfile SiteType = constants.SiteTypeDockerfile // Dockerfile site
+	SiteTypeDockerfile SiteType = constants.SiteTypeDockerfile // Dockerfile site (user-owned Dockerfile)
 )
 
 // Limits holds optional per-site/per-route timeout and request-body limits.
@@ -92,7 +91,7 @@ const CurrentMetadataSchema = 1
 // This is stored in ~/.config/srv/sites/{name}/metadata.yml
 type SiteMetadata struct {
 	SchemaVersion      int       `yaml:"schema_version,omitempty" jsonschema:"description=metadata.yml schema version (1 = current)."`
-	Type               SiteType  `yaml:"type" jsonschema:"enum=compose,enum=static,enum=php,enum=node,enum=ruby,enum=python,enum=dockerfile,description=Site runtime type."`
+	Type               SiteType  `yaml:"type" jsonschema:"enum=compose,enum=static,enum=node,enum=ruby,enum=python,enum=dockerfile,description=Site runtime type."`
 	Domains            []string  `yaml:"domains,omitempty" jsonschema:"description=All hostnames; the first entry is canonical."`
 	ProjectPath        string    `yaml:"project_path" jsonschema:"description=Absolute path to the project on disk."`
 	ServiceName        string    `yaml:"service_name,omitempty" jsonschema:"description=Container name used for Traefik routing."`
@@ -113,11 +112,6 @@ type SiteMetadata struct {
 	SPA   bool `yaml:"spa,omitempty" jsonschema:"description=Single-page-app mode (fall back to /index.html)."`
 	Cache bool `yaml:"cache,omitempty" jsonschema:"description=Emit aggressive caching headers for static assets."`
 	CORS  bool `yaml:"cors,omitempty" jsonschema:"description=Emit permissive CORS headers."`
-	// PHP site options
-	PHPVersion    string   `yaml:"php_version,omitempty" jsonschema:"description=PHP version ('latest' or '8.3')."`
-	PHPExtensions []string `yaml:"php_extensions,omitempty" jsonschema:"description=Extra PHP extensions to install."`
-	PHPFramework  string   `yaml:"php_framework,omitempty" jsonschema:"description=Detected PHP framework."`
-	DocumentRoot  string   `yaml:"document_root,omitempty" jsonschema:"description=Document root relative to the project (e.g. 'public')."`
 	// Node.js / Bun / Deno site options
 	NodeRuntime        string `yaml:"node_runtime,omitempty" jsonschema:"enum=node,enum=bun,enum=deno,description=JavaScript runtime."`
 	NodePackageManager string `yaml:"node_package_manager,omitempty" jsonschema:"enum=npm,enum=yarn,enum=pnpm,enum=bun,enum=deno,description=Package manager."`

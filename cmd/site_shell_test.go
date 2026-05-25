@@ -38,24 +38,6 @@ func TestSiteShellContainer(t *testing.T) {
 	}
 }
 
-func TestSiteShellContainerPHPFallback(t *testing.T) {
-	// PHP path requires reading site metadata. With SRV_ROOT pointed at an
-	// empty tmp dir, ReadSiteMetadata returns (nil, nil) and the helper
-	// falls back to "srv-<name>-php".
-	root := t.TempDir()
-	t.Setenv("SRV_ROOT", root)
-	got := siteShellContainer(site.Site{Name: "blog", Type: site.SiteTypePHP})
-	if got != "srv-blog-php" {
-		t.Errorf("PHP fallback = %q, want srv-blog-php", got)
-	}
-}
-
-func TestPHPContainerName(t *testing.T) {
-	if got := site.PHPContainerName("ghost"); got != "srv-ghost-php" {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestRunShellDockerDown(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(dockerSwapNewClientErrShell())

@@ -164,28 +164,6 @@ func RawPHPDefaults() *PHPSiteInfo {
 	}
 }
 
-// PHPSiteInfoFromMetadata reconstructs a PHPSiteInfo from the persisted
-// metadata of a PHP site. Used by reload and regenerate paths where we want
-// to re-apply the *site's* configuration rather than re-detect from disk.
-func PHPSiteInfoFromMetadata(meta SiteMetadata) *PHPSiteInfo {
-	info := &PHPSiteInfo{
-		PHPVersion:   meta.PHPVersion,
-		Extensions:   meta.PHPExtensions,
-		Framework:    meta.PHPFramework,
-		DocumentRoot: meta.DocumentRoot,
-	}
-	if info.PHPVersion == "" {
-		info.PHPVersion = constants.PHPVersionLatest
-	}
-	if info.Framework == "" {
-		info.Framework = constants.PHPFrameworkGeneric
-	}
-	if len(info.Extensions) == 0 {
-		info.Extensions = BaselinePHPExtensions()
-	}
-	return info
-}
-
 // BaselinePHPExtensions returns the set of extensions installed for every PHP
 // site regardless of what composer.json declares. It covers the most common
 // needs out of the box so projects work without having to enumerate every

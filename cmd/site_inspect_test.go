@@ -63,28 +63,6 @@ func TestRunInfoStatic(t *testing.T) {
 	}
 }
 
-func TestRunInfoPHPWithExtensions(t *testing.T) {
-	root := setupSrvRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTestSite(t, "wp", site.SiteMetadata{
-		Type:          site.SiteTypePHP,
-		Domains:       []string{"wp.local"},
-		ProjectPath:   projectDir,
-		Port:          80,
-		IsLocal:       true,
-		NetworkName:   "n",
-		PHPVersion:    "8.3",
-		PHPFramework:  "laravel",
-		PHPExtensions: []string{"redis"},
-	})
-	if err := runInfo(nil, []string{"wp"}); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
 func TestRunInfoNode(t *testing.T) {
 	root := setupSrvRoot(t)
 	projectDir := filepath.Join(root, "p")
@@ -315,7 +293,6 @@ func TestGetSiteTypeLabel(t *testing.T) {
 	}{
 		{site.Site{IsBroken: true}, "-"},
 		{site.Site{Type: site.SiteTypeStatic}, "static"},
-		{site.Site{Type: site.SiteTypePHP}, "php"},
 		{site.Site{Type: site.SiteTypeNode}, "node"},
 		{site.Site{Type: site.SiteTypeRuby}, "ruby"},
 		{site.Site{Type: site.SiteTypePython}, "python"},

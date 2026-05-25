@@ -35,22 +35,6 @@ func TestDetectionSummaryCompose(t *testing.T) {
 	}
 }
 
-func TestDetectionSummaryPHP(t *testing.T) {
-	setup := &siteSetup{isPHP: true, phpInfo: &site.PHPSiteInfo{Framework: "laravel", PHPVersion: "8.3", Extensions: []string{"redis"}}}
-	got := detectionSummary(setup)
-	if !strings.Contains(got, "laravel") || !strings.Contains(got, "8.3") {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestDetectionSummaryPHPGeneric(t *testing.T) {
-	setup := &siteSetup{isPHP: true, phpInfo: &site.PHPSiteInfo{Framework: "generic", PHPVersion: "8.3"}}
-	got := detectionSummary(setup)
-	if !strings.Contains(got, "php") || !strings.Contains(got, "8.3") {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestDetectionSummaryNode(t *testing.T) {
 	setup := &siteSetup{isNode: true, nodeInfo: &site.NodeSiteInfo{Runtime: "node", PackageManager: "yarn", NodeVersion: "20", Framework: "next"}}
 	got := detectionSummary(setup)
@@ -109,13 +93,9 @@ func TestApplyTypeOverrideStatic(t *testing.T) {
 	}
 }
 
-func TestApplyTypeOverridePHP(t *testing.T) {
-	setup, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "php")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isPHP || setup.phpInfo == nil {
-		t.Errorf("got %+v", setup)
+func TestApplyTypeOverridePHPRejected(t *testing.T) {
+	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "php"); err == nil {
+		t.Fatal("expected error: --type php no longer supported")
 	}
 }
 
@@ -237,9 +217,6 @@ func resetAddFlags() {
 	addFlags.spa = false
 	addFlags.cache = false
 	addFlags.cors = false
-	addFlags.phpVersion = ""
-	addFlags.documentRoot = ""
-	addFlags.phpExtensions = ""
 	addFlags.nodeVersion = ""
 	addFlags.typeOverride = ""
 	addFlags.aliases = nil

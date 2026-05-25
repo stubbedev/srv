@@ -99,35 +99,6 @@ func TestPrimaryDomain(t *testing.T) {
 	}
 }
 
-func TestPHPSiteInfoFromMetadata(t *testing.T) {
-	meta := SiteMetadata{
-		PHPVersion:    "8.3",
-		PHPExtensions: []string{"redis"},
-		PHPFramework:  "laravel",
-		DocumentRoot:  "public",
-	}
-	info := PHPSiteInfoFromMetadata(meta)
-	if info.PHPVersion != "8.3" || info.Framework != "laravel" || info.DocumentRoot != "public" {
-		t.Errorf("got %+v", info)
-	}
-	if len(info.Extensions) != 1 || info.Extensions[0] != "redis" {
-		t.Errorf("Extensions = %v", info.Extensions)
-	}
-}
-
-func TestPHPSiteInfoFromMetadataDefaults(t *testing.T) {
-	info := PHPSiteInfoFromMetadata(SiteMetadata{})
-	if info.PHPVersion == "" {
-		t.Error("PHPVersion should default")
-	}
-	if info.Framework == "" {
-		t.Error("Framework should default")
-	}
-	if len(info.Extensions) == 0 {
-		t.Error("Extensions should default to baseline")
-	}
-}
-
 func TestBaselinePHPExtensionsNonEmpty(t *testing.T) {
 	if len(BaselinePHPExtensions()) == 0 {
 		t.Error("baseline extensions empty")

@@ -94,7 +94,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 
 	// Determine compose directory based on site type
 	switch meta.Type {
-	case SiteTypeStatic, SiteTypePHP, SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
+	case SiteTypeStatic, SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
 		// srv-managed sites have their compose file in the srv config dir
 		s.ComposeDir = SiteConfigDir(cfg, entry.Name())
 	default:
@@ -112,7 +112,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 //   - Fallback (no service name, unknown type): subprocess docker compose ps.
 func siteContainerStatus(s Site) string {
 	switch s.Type {
-	case SiteTypeStatic, SiteTypePHP, SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
+	case SiteTypeStatic, SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
 		// Single-container sites: service name IS the container name.
 		if s.ServiceName != "" {
 			return docker.ContainerStatusByName(s.ServiceName)

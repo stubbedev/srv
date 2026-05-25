@@ -21,26 +21,19 @@ import (
 // =============================================================================
 
 var runtimeFlags struct {
-	phpVersion    string
-	phpExtensions string
-	nodeVersion   string
+	nodeVersion string
 }
 
 var runtimeCmd = &cobra.Command{
 	Use:   "runtime SITE",
-	Short: "Change runtime version or PHP extensions for a site",
-	Long: `Update the runtime version or PHP extensions for a PHP or Node.js site.
+	Short: "Change runtime version for a Node.js site",
+	Long: `Update the Node.js runtime version for a Node.js site. The
+docker-compose.yml is regenerated and the container restarted.
 
-For PHP sites the Dockerfile is rebuilt with the new version / extension list.
-php.ini and nginx.conf are left untouched so your customisations are preserved.
+PHP runtimes are user-owned (edit your Dockerfile, or re-run
+` + "`" + `srv scaffold php` + "`" + `); this command no longer touches them.
 
-For Node.js sites the docker-compose.yml is regenerated with the new version.
-
-After updating, the site containers are rebuilt and restarted automatically.
-
-Examples:
-  srv site runtime mysite --php-version 8.3
-  srv site runtime mysite --php-extensions "+redis,-xdebug"
+Example:
   srv site runtime mysite --node-version 22`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -59,12 +52,7 @@ Examples:
 }
 
 func init() {
-	runtimeCmd.Flags().StringVar(&runtimeFlags.phpVersion, "php-version", "", "PHP version (e.g. 8.3, 8.2, latest)")
-	runtimeCmd.Flags().StringVar(&runtimeFlags.phpExtensions, "php-extensions", "", "PHP extensions: full list, or +ext/-ext to add/remove from defaults")
 	runtimeCmd.Flags().StringVar(&runtimeFlags.nodeVersion, "node-version", "", "Node.js version (e.g. 22, 20, lts)")
-	_ = runtimeCmd.RegisterFlagCompletionFunc("php-extensions", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return site.KnownPHPExtensions(), cobra.ShellCompDirectiveNoFileComp
-	})
 	runtimeCmd.GroupID = GroupSites
 	RootCmd.AddCommand(runtimeCmd)
 }
@@ -83,59 +71,11 @@ func runRuntime(cmd *cobra.Command, args []string) error {
 	}
 
 	switch meta.Type {
-	case site.SiteTypePHP:
-		return runtimeUpdatePHP(cfg, siteName, meta)
 	case site.SiteTypeNode:
 		return runtimeUpdateNode(cfg, siteName, meta)
 	default:
-		return fmt.Errorf("site '%s' is a %s site — runtime management is only available for PHP and Node.js sites", siteName, meta.Type)
+		return fmt.Errorf("site '%s' is a %s site — runtime management is only available for Node.js sites (PHP runtimes are user-owned via Dockerfile / `srv scaffold php`)", siteName, meta.Type)
 	}
-}
-
-func runtimeUpdatePHP(cfg *config.Config, siteName string, meta *site.SiteMetadata) error {
-	if runtimeFlags.phpVersion == "" && runtimeFlags.phpExtensions == "" {
-		return fmt.Errorf("specify at least --php-version or --php-extensions")
-	}
-
-	// Show before/after diff.
-	if runtimeFlags.phpVersion != "" && runtimeFlags.phpVersion != meta.PHPVersion {
-		ui.Dim("  php version:  %s → %s", meta.PHPVersion, runtimeFlags.phpVersion)
-		meta.PHPVersion = runtimeFlags.phpVersion
-	}
-	if runtimeFlags.phpExtensions != "" {
-		before := len(meta.PHPExtensions)
-		meta.PHPExtensions = site.ParseExtensionOverrides(runtimeFlags.phpExtensions, meta.PHPExtensions)
-		after := len(meta.PHPExtensions)
-		if before != after {
-			ui.Dim("  extensions:   %d → %d", before, after)
-		}
-	}
-
-	phpInfo := &site.PHPSiteInfo{
-		PHPVersion:   meta.PHPVersion,
-		Extensions:   meta.PHPExtensions,
-		Framework:    meta.PHPFramework,
-		DocumentRoot: meta.DocumentRoot,
-	}
-
-	ui.Info("Updating PHP runtime for '%s'...", siteName)
-	if err := site.WritePHPDockerConfig(siteName, *meta, phpInfo); err != nil {
-		return fmt.Errorf("failed to write PHP config: %w", err)
-	}
-
-	// Persist updated metadata.
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("failed to update metadata: %w", err)
-	}
-
-	composeDir := site.SiteConfigDir(cfg, siteName)
-	ui.Info("Rebuilding and restarting containers...")
-	if err := docker.ComposeUpBuildWithProfile(composeDir, meta.Profile); err != nil {
-		return fmt.Errorf("failed to rebuild containers: %w", err)
-	}
-
-	ui.Success("PHP runtime updated for '%s' (version: %s)", siteName, meta.PHPVersion)
-	return nil
 }
 
 func runtimeUpdateNode(cfg *config.Config, siteName string, meta *site.SiteMetadata) error {
@@ -242,16 +182,6 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 	ui.Info("Regenerating config for '%s'...", siteName)
 
 	switch meta.Type {
-	case site.SiteTypePHP:
-		phpInfo := &site.PHPSiteInfo{
-			PHPVersion:   meta.PHPVersion,
-			Extensions:   meta.PHPExtensions,
-			Framework:    meta.PHPFramework,
-			DocumentRoot: meta.DocumentRoot,
-		}
-		if err := site.WritePHPSiteConfig(siteName, *meta, phpInfo, true); err != nil {
-			return fmt.Errorf("failed to regenerate PHP config: %w", err)
-		}
 	case site.SiteTypeNode:
 		nodeInfo := &site.NodeSiteInfo{
 			Runtime:        meta.NodeRuntime,
@@ -294,7 +224,7 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to regenerate static config: %w", err)
 		}
 	default:
-		return fmt.Errorf("regenerate is only available for PHP, Node.js, Ruby, Python, Dockerfile, and static sites")
+		return fmt.Errorf("regenerate is only available for Node.js, Ruby, Python, Dockerfile, and static sites (PHP runtimes are user-owned; edit your Dockerfile or re-run `srv scaffold php`)")
 	}
 
 	composeDir := site.SiteConfigDir(cfg, siteName)

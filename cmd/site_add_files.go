@@ -16,8 +16,6 @@ import (
 // All config is stored in ~/.config/srv - no files are created in the project directory
 func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	switch {
-	case setup.isPHP:
-		ui.Info("Configuring PHP site: %s", setup.siteName)
 	case setup.isNode:
 		ui.Info("Configuring Node.js site: %s", setup.siteName)
 	case setup.isRuby:
@@ -35,8 +33,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	// Determine site type
 	siteType := site.SiteTypeCompose
 	switch {
-	case setup.isPHP:
-		siteType = site.SiteTypePHP
 	case setup.isNode:
 		siteType = site.SiteTypeNode
 	case setup.isRuby:
@@ -79,14 +75,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		SPA:                setup.spa,
 		Cache:              setup.cache,
 		CORS:               setup.cors,
-	}
-
-	// Add PHP-specific fields to metadata.
-	if setup.isPHP && setup.phpInfo != nil {
-		meta.PHPVersion = setup.phpInfo.PHPVersion
-		meta.PHPExtensions = setup.phpInfo.Extensions
-		meta.PHPFramework = setup.phpInfo.Framework
-		meta.DocumentRoot = setup.phpInfo.DocumentRoot
 	}
 
 	// Add Node.js-specific fields to metadata.
@@ -134,11 +122,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	}
 
 	switch {
-	case setup.isPHP:
-		// PHP site: generate Dockerfile, nginx.conf, and docker-compose.yml.
-		if err := site.WritePHPSiteConfig(setup.siteName, meta, setup.phpInfo, addFlags.force); err != nil {
-			return fmt.Errorf("failed to write PHP site config: %w", err)
-		}
 	case setup.isNode:
 		// Node.js site: generate docker-compose.yml.
 		if err := site.WriteNodeSiteConfig(setup.siteName, meta, setup.nodeInfo, addFlags.force); err != nil {

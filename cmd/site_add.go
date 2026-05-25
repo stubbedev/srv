@@ -41,10 +41,6 @@ var addFlags struct {
 	readTimeout    string
 	sendTimeout    string
 	connectTimeout string
-	// PHP site options
-	phpVersion    string
-	documentRoot  string
-	phpExtensions string
 	// Node.js site options
 	nodeVersion string
 	// Compose profile selection
@@ -125,13 +121,6 @@ func init() {
 			return []string{"1s", "5s", "10s", "30s", "60s", "300s"}, cobra.ShellCompDirectiveNoFileComp
 		})
 	}
-	// PHP site options
-	addCmd.Flags().StringVar(&addFlags.phpVersion, "php-version", "", "PHP version (auto-detected; use 'latest' for newest)")
-	addCmd.Flags().StringVar(&addFlags.documentRoot, "document-root", "", "Document root relative to project (auto-detected)")
-	addCmd.Flags().StringVar(&addFlags.phpExtensions, "php-extensions", "", "PHP extensions: full list, or +ext/-ext to add/remove from defaults")
-	_ = addCmd.RegisterFlagCompletionFunc("php-extensions", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return site.KnownPHPExtensions(), cobra.ShellCompDirectiveNoFileComp
-	})
 	// Node.js site options
 	addCmd.Flags().StringVar(&addFlags.nodeVersion, "node-version", "", "Node.js version (auto-detected from .nvmrc / package.json; use 'lts' for latest LTS)")
 	// Compose profile (required when the selected service has multiple)
@@ -144,7 +133,7 @@ func init() {
 	// Type override
 	addCmd.Flags().StringVar(&addFlags.typeOverride, "type", "", "Force site type: php, node, ruby, python, dockerfile, static, compose")
 	_ = addCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"php", "node", "ruby", "python", "dockerfile", "static", "compose"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"node", "ruby", "python", "dockerfile", "static", "compose"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	addCmd.GroupID = GroupSites
 	RootCmd.AddCommand(addCmd)
@@ -223,12 +212,10 @@ type siteSetup struct {
 	isLocal            bool
 	wildcard           bool // true if wildcard subdomain matching is enabled
 	isStatic           bool // true if serving static files (no docker-compose.yml)
-	isPHP              bool // true if serving a PHP/FPM site
 	isNode             bool // true if serving a Node.js site
 	isRuby             bool // true if serving a Ruby site
 	isPython           bool // true if serving a Python site
 	isDockerfile       bool // true if building from a bare Dockerfile
-	phpInfo            *site.PHPSiteInfo
 	nodeInfo           *site.NodeSiteInfo
 	rubyInfo           *site.RubySiteInfo
 	pythonInfo         *site.PythonSiteInfo

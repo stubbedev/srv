@@ -37,17 +37,13 @@ func TestValidateSiteSetupStatic(t *testing.T) {
 	}
 }
 
-func TestValidateSiteSetupPHP(t *testing.T) {
+func TestValidateSiteSetupPHPProjectErrors(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "composer.json"), []byte(`{}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	setup, err := validateSiteSetup(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isPHP {
-		t.Error("expected php detection")
+	if _, err := validateSiteSetup(dir); err == nil {
+		t.Fatal("expected error: PHP project with no Dockerfile / docker-compose.yml")
 	}
 }
 

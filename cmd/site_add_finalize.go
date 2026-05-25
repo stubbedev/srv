@@ -1,16 +1,13 @@
 // Package cmd — site_add_finalize.go finishes the `srv add` flow after the
 // on-disk artifacts have been written: issue local certs + register DNS,
-// surface a summary, start the containers, and run composer install for
-// fresh PHP projects.
+// surface a summary, and start the containers.
 package cmd
 
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/stubbedev/srv/internal/config"
-	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
@@ -27,8 +24,6 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	// Determine site type label
 	var siteType string
 	switch {
-	case setup.isPHP:
-		siteType = "php"
 	case setup.isNode:
 		siteType = "node"
 	case setup.isRuby:
@@ -46,12 +41,6 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	ui.Success("Site '%s' added successfully!", setup.siteName)
 	ui.Dim("Domain: %s (%s, %s)", setup.domain, siteType, ui.Highlight(TypeLabel(setup.isLocal)))
 	ui.Dim("Config: %s/sites/%s/ (no project files modified)", cfg.Root, setup.siteName)
-
-	if setup.isPHP && setup.phpInfo != nil && setup.phpInfo.Framework == constants.PHPFrameworkLaravel {
-		ui.Blank()
-		ui.Dim("Laravel: ensure storage and bootstrap/cache are writable:")
-		ui.Dim("  chmod -R 777 %s/storage %s/bootstrap/cache", setup.sitePath, setup.sitePath)
-	}
 
 	// Always start the site after adding
 	return startSiteAfterAdd(cfg, setup)
@@ -145,7 +134,7 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine the compose directory
 	var composeDir string
-	if setup.isStatic || setup.isPHP || setup.isNode || setup.isRuby || setup.isPython || setup.isDockerfile {
+	if setup.isStatic || setup.isNode || setup.isRuby || setup.isPython || setup.isDockerfile {
 		// srv-managed sites have their compose file in the srv config directory
 		composeDir = site.SiteConfigDir(cfg, setup.siteName)
 	} else {
@@ -157,24 +146,9 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 		return fmt.Errorf("failed to start site: %w", err)
 	}
 
-	// For PHP sites: run composer install automatically if vendor/ is absent.
-	// The project is bind-mounted so vendor/ written inside the container is
-	// immediately visible on the host as well.
-	if setup.isPHP {
-		vendorDir := setup.sitePath + "/vendor"
-		if _, err := os.Stat(vendorDir); os.IsNotExist(err) {
-			containerName := site.PHPContainerName(setup.siteName)
-			ui.Info("Running composer install...")
-			if err := docker.ExecNonInteractiveAt(containerName, constants.FrankenPHPAppDir, "composer", "install", "--no-interaction", "--prefer-dist"); err != nil {
-				ui.Warn("composer install failed: %v", err)
-				ui.Dim("Run manually: srv site shell %s", setup.siteName)
-			}
-		}
-	}
-
 	// For compose sites, connect service to traefik network.
-	// Static, PHP, and Node sites manage network membership via compose labels.
-	if !setup.isStatic && !setup.isPHP && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile && setup.composeServiceName != "" {
+	// srv-managed sites manage network membership via compose labels.
+	if !setup.isStatic && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile && setup.composeServiceName != "" {
 		if err := docker.ConnectServiceToNetwork(setup.sitePath, setup.composeServiceName, cfg.NetworkName); err != nil {
 			if errors.Is(err, docker.ErrServiceNotRunning) {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", setup.composeServiceName)

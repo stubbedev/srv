@@ -60,17 +60,6 @@ func TestMakeStaticHealthCheck(t *testing.T) {
 	}
 }
 
-func TestMakeHealthCheck(t *testing.T) {
-	hc := makeHealthCheck(9000)
-	if hc == nil {
-		t.Fatal("nil")
-	}
-	joined := strings.Join(hc.Test, " ")
-	if !strings.Contains(joined, "9000") {
-		t.Errorf("port missing: %v", hc.Test)
-	}
-}
-
 func TestVolumeConsistencyForHost(t *testing.T) {
 	v := volumeConsistencyForHost()
 	// We can't change runtime.GOOS in a test; just verify it returns either

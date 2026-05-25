@@ -104,13 +104,6 @@ func Reload(name string) (*ReloadResult, error) {
 	// matches the current metadata. For srv-managed types this also implies
 	// a container restart is required to pick up new Traefik labels.
 	switch meta.Type {
-	case SiteTypePHP:
-		// Re-render nginx.conf + docker-compose.yml. The Dockerfile is also
-		// regenerated; if a rebuild is needed, the user must run `srv restart`.
-		if err := WritePHPSiteConfig(name, *meta, PHPSiteInfoFromMetadata(*meta), true); err != nil {
-			return res, fmt.Errorf("regenerate PHP config: %w", err)
-		}
-		res.NeedsRestart = true
 	case SiteTypeStatic:
 		if err := WriteStaticSiteConfig(name, *meta, true); err != nil {
 			return res, fmt.Errorf("regenerate static config: %w", err)

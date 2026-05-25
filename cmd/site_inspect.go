@@ -115,8 +115,6 @@ func plainSiteTypeLabel(s site.Site) string {
 	switch s.Type {
 	case site.SiteTypeStatic:
 		return "static"
-	case site.SiteTypePHP:
-		return "php"
 	case site.SiteTypeNode:
 		return "node"
 	case site.SiteTypeRuby:
@@ -175,8 +173,6 @@ func getSiteTypeLabel(s site.Site) string {
 	switch s.Type {
 	case site.SiteTypeStatic:
 		return "static"
-	case site.SiteTypePHP:
-		return "php"
 	case site.SiteTypeNode:
 		return "node"
 	case site.SiteTypeRuby:
@@ -276,18 +272,6 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	switch s.Type {
 	case site.SiteTypeStatic:
 		ui.Print("  Type:    %s", "static (nginx)")
-	case site.SiteTypePHP:
-		typeLabel := "php (nginx + php-fpm)"
-		if meta != nil && meta.PHPVersion != "" && meta.PHPVersion != "latest" {
-			typeLabel = fmt.Sprintf("php %s (nginx + php-fpm)", meta.PHPVersion)
-		}
-		ui.Print("  Type:    %s", typeLabel)
-		if meta != nil && meta.PHPFramework != "" && meta.PHPFramework != "generic" {
-			ui.Print("  Framework: %s", meta.PHPFramework)
-		}
-		if meta != nil && len(meta.PHPExtensions) > 0 {
-			ui.Print("  Extensions: %d loaded", len(meta.PHPExtensions))
-		}
 	case site.SiteTypeNode:
 		runtimeLabel := "node.js"
 		if meta != nil && meta.NodeRuntime != "" {

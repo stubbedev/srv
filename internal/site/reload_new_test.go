@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/traefik"
 )
 
@@ -300,37 +299,6 @@ func TestValidateMetadataValidComplete(t *testing.T) {
 
 // Confirm traefik import is still referenced (silences lint).
 var _ = traefik.LocalDomains
-
-func TestReloadPHP(t *testing.T) {
-	root := withSRVRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "traefik", "conf"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	meta := SiteMetadata{
-		Type:          SiteTypePHP,
-		Domains:       []string{"blog.local"},
-		ProjectPath:   projectDir,
-		Port:          80,
-		NetworkName:   "n",
-		PHPVersion:    "8.3",
-		PHPExtensions: []string{"redis"},
-	}
-	if err := WriteSiteMetadata("blog", meta); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	res, err := Reload("blog")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.NeedsRestart {
-		t.Error("PHP reload should require restart")
-	}
-}
 
 func TestReloadNode(t *testing.T) {
 	root := withSRVRoot(t)

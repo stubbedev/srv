@@ -95,18 +95,3 @@ func TestFinalizeSiteSetupStatic(t *testing.T) {
 	}
 }
 
-func TestFinalizeSiteSetupPHP(t *testing.T) {
-	setupSrvRoot(t)
-	cfg := mustLoadConfig(t)
-	setup := &siteSetup{
-		siteName: "wp",
-		sitePath: t.TempDir(),
-		domain:   "wp.local",
-		isPHP:    true,
-	}
-	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
-	if err := finalizeSiteSetup(cfg, setup); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}

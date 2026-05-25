@@ -22,15 +22,13 @@ const (
 	SiteTypeCompose = "compose"
 	// SiteTypeStatic is the static site type.
 	SiteTypeStatic = "static"
-	// SiteTypePHP is the PHP/FPM site type.
-	SiteTypePHP = "php"
 	// SiteTypeNode is the Node.js site type.
 	SiteTypeNode = "node"
 	// SiteTypeRuby is the Ruby site type.
 	SiteTypeRuby = "ruby"
 	// SiteTypePython is the Python site type.
 	SiteTypePython = "python"
-	// SiteTypeDockerfile is the Dockerfile site type.
+	// SiteTypeDockerfile is the Dockerfile site type (user-owned Dockerfile in the project root).
 	SiteTypeDockerfile = "dockerfile"
 )
 
