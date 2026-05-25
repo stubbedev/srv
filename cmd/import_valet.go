@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -23,8 +22,8 @@ var importFlags struct {
 	apply          bool
 	dryRun         bool
 	listSites      bool
-	interactive    bool
 	resetDecisions bool
+	skip           []string
 }
 
 var importCmd = &cobra.Command{
@@ -50,7 +49,7 @@ func init() {
 	importValetCmd.Flags().BoolVar(&importFlags.apply, "apply", false, "Execute the generated srv commands instead of just printing them")
 	importValetCmd.Flags().BoolVar(&importFlags.dryRun, "dry-run", false, "Explicit no-op alias for the default print-only mode (mutually exclusive with --apply)")
 	importValetCmd.Flags().BoolVar(&importFlags.listSites, "list-sites", false, "List discovered Valet sites and exit; build no plan")
-	importValetCmd.Flags().BoolVar(&importFlags.interactive, "interactive", false, "Walk each generated step one by one and accept/skip via prompt; skip decisions persist across runs")
+	importValetCmd.Flags().StringSliceVar(&importFlags.skip, "skip", nil, "Plan-line substring to skip during --apply; repeatable. Skipped lines are added to ~/.config/srv/import-decisions.yml.")
 	importValetCmd.Flags().BoolVar(&importFlags.resetDecisions, "reset-decisions", false, "Forget previously-recorded skip decisions before running")
 	importCmd.AddCommand(importValetCmd)
 	importCmd.GroupID = GroupSystem
@@ -100,9 +99,23 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 	if importFlags.resetDecisions {
 		decisions = importDecisions{}
 	}
+	// New --skip values fold into the persisted decisions before the apply
+	// loop so they survive future runs and so the dry-run print can flag
+	// them inline.
+	for _, pat := range importFlags.skip {
+		for _, step := range plan {
+			if strings.Contains(step.line, pat) {
+				decisions.recordSkip(step.line)
+			}
+		}
+	}
 
 	for i, step := range plan {
-		ui.Print("  [%d] %s", i+1, step.line)
+		marker := ""
+		if decisions.Skipped[step.line] {
+			marker = " [skipped]"
+		}
+		ui.Print("  [%d] %s%s", i+1, step.line, marker)
 		for _, note := range step.notes {
 			ui.IndentedDim(2, "%s", note)
 		}
@@ -129,25 +142,9 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		if decisions.Skipped[step.line] {
-			ui.IndentedDim(1, "remembered skip: %s", step.line)
+			ui.IndentedDim(1, "skipped: %s", step.line)
 			skipped++
 			continue
-		}
-		if importFlags.interactive {
-			choice, err := promptImportStep(step)
-			if err != nil {
-				return err
-			}
-			switch choice {
-			case "skip":
-				decisions.recordSkip(step.line)
-				skipped++
-				continue
-			case "abort":
-				ui.Warn("Aborted by user after %d of %d steps", i, len(plan))
-				_ = saveImportDecisions(decisions)
-				return nil
-			}
 		}
 		cmd := exec.Command(srvBinary, step.args...)
 		cmd.Stdout = os.Stdout
@@ -159,36 +156,13 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 		executed++
 	}
 	if skipped > 0 {
-		ui.Warn("Skipped %d entry/ies (unresolved fields or user skip)", skipped)
+		ui.Warn("Skipped %d entry/ies (unresolved fields or --skip / persisted decision)", skipped)
 	}
 	if err := saveImportDecisions(decisions); err != nil {
 		ui.Dim("Could not persist import decisions: %v", err)
 	}
 	ui.Success("Imported %d entry/ies", executed)
 	return nil
-}
-
-// promptImportStep presents one accept/skip/abort prompt and returns the
-// user's choice. Errors propagate unchanged so a ctrl-c kills the whole run.
-func promptImportStep(step importStep) (string, error) {
-	choice := "accept"
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(step.line).
-				Description("Accept runs this srv command. Skip persists the decision so re-runs honour it. Abort halts the import.").
-				Options(
-					huh.NewOption("Accept", "accept"),
-					huh.NewOption("Skip (remember)", "skip"),
-					huh.NewOption("Abort", "abort"),
-				).
-				Value(&choice),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return "", fmt.Errorf("interactive prompt: %w", err)
-	}
-	return choice, nil
 }
 
 // importDecisions persists user choices across `srv import valet` runs so a

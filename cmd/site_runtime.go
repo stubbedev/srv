@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 
-	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -186,6 +185,10 @@ func runtimeUpdateNode(cfg *config.Config, siteName string, meta *site.SiteMetad
 // regenerate command
 // =============================================================================
 
+var regenerateFlags struct {
+	force bool
+}
+
 var regenerateCmd = &cobra.Command{
 	Use:   "regenerate SITE",
 	Short: "Regenerate config files for a site, overwriting any customisations",
@@ -213,6 +216,7 @@ The site will be restarted automatically after regeneration.`,
 }
 
 func init() {
+	regenerateCmd.Flags().BoolVarP(&regenerateFlags.force, "force", "f", false, "Required: confirm overwriting any manual edits to nginx.conf / Dockerfile / compose.yml")
 	regenerateCmd.GroupID = GroupSites
 	RootCmd.AddCommand(regenerateCmd)
 }
@@ -230,22 +234,9 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Confirm with user before overwriting.
-	var confirmed bool
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title(fmt.Sprintf("Regenerate config for '%s'?", siteName)).
-				Description("This will overwrite nginx.conf, php.ini, docker-compose.yml, and Dockerfile.\nYour manual edits will be lost.").
-				Value(&confirmed),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return err
-	}
-	if !confirmed {
-		ui.Dim("Cancelled.")
-		return nil
+	// Gate behind --force so a script can't blow away manual edits by accident.
+	if !regenerateFlags.force {
+		return fmt.Errorf("regenerate refused: any manual edits to nginx.conf / Dockerfile / docker-compose.yml will be overwritten. Re-run with --force to proceed.")
 	}
 
 	ui.Info("Regenerating config for '%s'...", siteName)
