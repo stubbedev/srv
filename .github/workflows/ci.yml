@@ -33,6 +33,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Download mkcert binaries for embedding
+        run: just mkcert
+
       - name: Run gofmt -w
         run: gofmt -w $(go list -f '{{.Dir}}' ./...)
 
