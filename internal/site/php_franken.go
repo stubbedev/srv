@@ -196,6 +196,7 @@ func renderPHPCompose(name string, meta SiteMetadata, info *PHPSiteInfo, siteDir
 		},
 	}
 
+	serviceNetworks := append([]string{constants.TraefikSubdir}, meta.ExtraNetworks...)
 	service := phpServiceConfig{
 		Build: &phpBuildConfig{
 			Context:    siteDir,
@@ -208,23 +209,26 @@ func renderPHPCompose(name string, meta SiteMetadata, info *PHPSiteInfo, siteDir
 		Environment:   env,
 		Volumes:       volumes,
 		Labels:        labels,
-		Networks:      []string{constants.TraefikSubdir},
+		Networks:      serviceNetworks,
 		ExtraHosts:    linuxExtraHosts(),
 		Restart:       constants.RestartUnlessStopped,
 		HealthCheck:   makeHealthCheck(constants.FrankenPHPContainerPort),
 	}
 
+	networks := map[string]phpNetworkConfig{
+		constants.TraefikSubdir: {
+			Name:     meta.NetworkName,
+			External: true,
+		},
+	}
+	for _, n := range meta.ExtraNetworks {
+		networks[n] = phpNetworkConfig{Name: n, External: true}
+	}
+
 	compose := phpComposeConfig{
-		Name: constants.ComposeProjectName,
-		Services: map[string]phpServiceConfig{
-			constants.FrankenPHPServiceName: service,
-		},
-		Networks: map[string]phpNetworkConfig{
-			constants.TraefikSubdir: {
-				Name:     meta.NetworkName,
-				External: true,
-			},
-		},
+		Name:     constants.ComposeProjectName,
+		Services: map[string]phpServiceConfig{constants.FrankenPHPServiceName: service},
+		Networks: networks,
 	}
 
 	data, err := yaml.Marshal(&compose)
