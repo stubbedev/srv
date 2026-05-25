@@ -98,4 +98,3 @@ func TestPrimaryDomain(t *testing.T) {
 		t.Error("nil should return empty")
 	}
 }
-

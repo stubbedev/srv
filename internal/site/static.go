@@ -166,13 +166,13 @@ type composeBuild struct {
 // composeService represents one service in a generated docker-compose.yml.
 // Image XOR Build is set depending on whether the site has a Dockerfile.
 type composeService struct {
-	ContainerName string            `yaml:"container_name"`
-	Image         string            `yaml:"image,omitempty"`
-	Build         *composeBuild     `yaml:"build,omitempty"`
-	Volumes       []composeVolume   `yaml:"volumes,omitempty"`
-	Labels        map[string]string `yaml:"labels"`
-	Networks      []string          `yaml:"networks"`
-	Restart       string            `yaml:"restart"`
+	ContainerName string              `yaml:"container_name"`
+	Image         string              `yaml:"image,omitempty"`
+	Build         *composeBuild       `yaml:"build,omitempty"`
+	Volumes       []composeVolume     `yaml:"volumes,omitempty"`
+	Labels        map[string]string   `yaml:"labels"`
+	Networks      []string            `yaml:"networks"`
+	Restart       string              `yaml:"restart"`
 	HealthCheck   *composeHealthCheck `yaml:"healthcheck,omitempty"`
 }
 
