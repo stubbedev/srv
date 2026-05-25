@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -85,18 +86,24 @@ func GetSiteNames() []string {
 	return names
 }
 
-// GetSiteRouteIDs returns the route IDs configured for a site. Used by shell
-// completion for `srv route remove`.
+// GetSiteRouteIDs returns the route IDs configured for a site or proxy with
+// the given name. Used by shell completion for `srv route remove`.
 func GetSiteRouteIDs(name string) []string {
-	meta, err := site.ReadSiteMetadata(name)
-	if err != nil || meta == nil {
-		return nil
+	if meta, err := site.ReadSiteMetadata(name); err == nil && meta != nil {
+		ids := make([]string, 0, len(meta.Routes))
+		for _, r := range meta.Routes {
+			ids = append(ids, r.ID)
+		}
+		return ids
 	}
-	ids := make([]string, 0, len(meta.Routes))
-	for _, r := range meta.Routes {
-		ids = append(ids, r.ID)
+	if pmeta, err := proxy.Read(name); err == nil && pmeta != nil {
+		ids := make([]string, 0, len(pmeta.Routes))
+		for _, r := range pmeta.Routes {
+			ids = append(ids, r.ID)
+		}
+		return ids
 	}
-	return ids
+	return nil
 }
 
 // GetSiteAliases returns the alias hostnames (Domains[1:]) for a site, used to

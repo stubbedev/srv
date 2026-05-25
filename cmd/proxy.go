@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/platform"
+	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
@@ -353,6 +354,30 @@ func runProxyAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Persist a small metadata sidecar so `srv route add` can attach routes
+	// to this proxy later. Preserves existing routes if the user is
+	// overwriting an existing proxy via --force.
+	pmeta, _ := proxy.Read(input.name)
+	var existingRoutes []site.Route
+	if pmeta != nil {
+		existingRoutes = pmeta.Routes
+	}
+	if err := proxy.Write(proxy.Metadata{
+		Name:     input.name,
+		Domains:  []string{input.domain},
+		Wildcard: input.wildcard,
+		IsLocal:  true,
+		Routes:   existingRoutes,
+	}); err != nil {
+		ui.Warn("Failed to write proxy metadata sidecar: %v", err)
+	} else if len(existingRoutes) > 0 {
+		// Existing routes need their Traefik file regenerated since the host
+		// (or wildcard flag) may have changed.
+		if err := proxy.Reload(input.name); err != nil {
+			ui.Warn("Failed to refresh proxy routes: %v", err)
+		}
+	}
+
 	// Update Traefik dynamic config
 	if err := traefik.UpdateDynamicConfig(); err != nil {
 		ui.Warn("Failed to update Traefik config: %v", err)
@@ -403,6 +428,14 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 	// Tear down the fallback sidecar if one was configured for this proxy.
 	if err := removeFallbackSidecar(cfg, name); err != nil {
 		ui.Warn("Failed to remove fallback sidecar: %v", err)
+	}
+
+	// Drop the proxy metadata sidecar and its routes Traefik file.
+	if err := traefik.RemoveRoutesConfig(cfg, name); err != nil {
+		ui.Warn("Failed to remove proxy routes config: %v", err)
+	}
+	if err := proxy.Remove(name); err != nil {
+		ui.Warn("Failed to remove proxy metadata: %v", err)
 	}
 
 	// Update Traefik dynamic config

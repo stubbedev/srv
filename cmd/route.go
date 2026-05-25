@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -42,7 +43,7 @@ var routeAddCmd = &cobra.Command{
 	RunE:  runRouteAdd,
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
-			return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+			return routeTargetNames(), cobra.ShellCompDirectiveNoFileComp
 		}
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	},
@@ -55,7 +56,7 @@ var routeListCmd = &cobra.Command{
 	RunE:  runRouteList,
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
-			return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
+			return routeTargetNames(), cobra.ShellCompDirectiveNoFileComp
 		}
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	},
@@ -96,23 +97,25 @@ func init() {
 }
 
 func runRouteAdd(cmd *cobra.Command, args []string) error {
-	siteName := args[0]
-	meta, err := site.ReadSiteMetadata(siteName)
-	if err != nil {
-		return err
-	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
-	}
-
+	target := args[0]
 	route, err := buildRouteFromFlags()
 	if err != nil {
 		return err
 	}
 
+	if meta, _ := site.ReadSiteMetadata(target); meta != nil {
+		return addRouteToSite(target, meta, route)
+	}
+	if pmeta, _ := proxy.Read(target); pmeta != nil {
+		return addRouteToProxy(target, pmeta, route)
+	}
+	return fmt.Errorf("no site or proxy named %q", target)
+}
+
+func addRouteToSite(name string, meta *site.SiteMetadata, route site.Route) error {
 	for _, existing := range meta.Routes {
 		if existing.ID == route.ID {
-			return fmt.Errorf("route %q already exists on %s — remove it first or pick a different --id", route.ID, siteName)
+			return fmt.Errorf("route %q already exists on %s — remove it first or pick a different --id", route.ID, name)
 		}
 	}
 
@@ -120,31 +123,50 @@ func runRouteAdd(cmd *cobra.Command, args []string) error {
 	if err := site.ValidateMetadata(meta); err != nil {
 		return fmt.Errorf("route would produce invalid metadata: %w", err)
 	}
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
+	if err := site.WriteSiteMetadata(name, *meta); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
-	if _, err := site.Reload(siteName); err != nil {
+	if _, err := site.Reload(name); err != nil {
 		ui.Warn("Failed to refresh routing config: %v", err)
 	}
+	ui.Success("Added route %q on %s", route.ID, name)
+	return nil
+}
 
-	ui.Success("Added route %q on %s", route.ID, siteName)
+func addRouteToProxy(name string, meta *proxy.Metadata, route site.Route) error {
+	for _, existing := range meta.Routes {
+		if existing.ID == route.ID {
+			return fmt.Errorf("route %q already exists on %s — remove it first or pick a different --id", route.ID, name)
+		}
+	}
+	meta.Routes = append(meta.Routes, route)
+	if err := proxy.Write(*meta); err != nil {
+		return fmt.Errorf("write proxy metadata: %w", err)
+	}
+	if err := proxy.Reload(name); err != nil {
+		ui.Warn("Failed to refresh proxy routes: %v", err)
+	}
+	ui.Success("Added route %q on proxy %s", route.ID, name)
 	return nil
 }
 
 func runRouteList(cmd *cobra.Command, args []string) error {
-	siteName := args[0]
-	meta, err := site.ReadSiteMetadata(siteName)
-	if err != nil {
-		return err
+	target := args[0]
+	if meta, _ := site.ReadSiteMetadata(target); meta != nil {
+		return printRoutes(target, meta.Routes)
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	if pmeta, _ := proxy.Read(target); pmeta != nil {
+		return printRoutes(target, pmeta.Routes)
 	}
-	if len(meta.Routes) == 0 {
-		ui.Dim("No routes attached to %s", siteName)
+	return fmt.Errorf("no site or proxy named %q", target)
+}
+
+func printRoutes(name string, routes []site.Route) error {
+	if len(routes) == 0 {
+		ui.Dim("No routes attached to %s", name)
 		return nil
 	}
-	for _, r := range meta.Routes {
+	for _, r := range routes {
 		match := r.Path
 		if match == "" {
 			match = "regex:" + r.PathRegex
@@ -160,35 +182,59 @@ func runRouteList(cmd *cobra.Command, args []string) error {
 }
 
 func runRouteRemove(cmd *cobra.Command, args []string) error {
-	siteName, id := args[0], args[1]
-	meta, err := site.ReadSiteMetadata(siteName)
-	if err != nil {
-		return err
+	target, id := args[0], args[1]
+	if meta, _ := site.ReadSiteMetadata(target); meta != nil {
+		return removeRouteFromSite(target, meta, id)
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	if pmeta, _ := proxy.Read(target); pmeta != nil {
+		return removeRouteFromProxy(target, pmeta, id)
 	}
-	filtered := meta.Routes[:0]
+	return fmt.Errorf("no site or proxy named %q", target)
+}
+
+func removeRouteFromSite(name string, meta *site.SiteMetadata, id string) error {
+	filtered, removed := dropRoute(meta.Routes, id)
+	if !removed {
+		return fmt.Errorf("route %q not found on %s", id, name)
+	}
+	meta.Routes = filtered
+	if err := site.WriteSiteMetadata(name, *meta); err != nil {
+		return fmt.Errorf("write metadata: %w", err)
+	}
+	if _, err := site.Reload(name); err != nil {
+		ui.Warn("Failed to refresh routing config: %v", err)
+	}
+	ui.Success("Removed route %q from %s", id, name)
+	return nil
+}
+
+func removeRouteFromProxy(name string, meta *proxy.Metadata, id string) error {
+	filtered, removed := dropRoute(meta.Routes, id)
+	if !removed {
+		return fmt.Errorf("route %q not found on proxy %s", id, name)
+	}
+	meta.Routes = filtered
+	if err := proxy.Write(*meta); err != nil {
+		return fmt.Errorf("write proxy metadata: %w", err)
+	}
+	if err := proxy.Reload(name); err != nil {
+		ui.Warn("Failed to refresh proxy routes: %v", err)
+	}
+	ui.Success("Removed route %q from proxy %s", id, name)
+	return nil
+}
+
+func dropRoute(routes []site.Route, id string) ([]site.Route, bool) {
+	out := routes[:0]
 	removed := false
-	for _, r := range meta.Routes {
+	for _, r := range routes {
 		if r.ID == id {
 			removed = true
 			continue
 		}
-		filtered = append(filtered, r)
+		out = append(out, r)
 	}
-	if !removed {
-		return fmt.Errorf("route %q not found on %s", id, siteName)
-	}
-	meta.Routes = filtered
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := site.Reload(siteName); err != nil {
-		ui.Warn("Failed to refresh routing config: %v", err)
-	}
-	ui.Success("Removed route %q from %s", id, siteName)
-	return nil
+	return out, removed
 }
 
 // buildRouteFromFlags assembles a site.Route from the current routeAddFlags
@@ -240,6 +286,14 @@ func buildRouteFromFlags() (site.Route, error) {
 }
 
 var routeIDFlagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// routeTargetNames returns the union of site names and proxy names for shell
+// completion of `srv route` subcommands.
+func routeTargetNames() []string {
+	out := GetSiteNames()
+	out = append(out, proxy.ListNames()...)
+	return out
+}
 
 // autoRouteID derives a stable id from --path ("/app" → "app", "/api/v1" →
 // "api-v1") or from a regex when its first literal segment is obvious. Returns
