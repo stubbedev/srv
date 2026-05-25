@@ -17,13 +17,12 @@ import (
 )
 
 var scaffoldFlags struct {
-	lang       string
-	framework  string
-	version    string
-	extensions string
-	port       int
-	dir        string
-	force      bool
+	lang      string
+	framework string
+	version   string
+	port      int
+	dir       string
+	force     bool
 }
 
 var scaffoldCmd = &cobra.Command{
@@ -41,7 +40,6 @@ Supported languages and frameworks:
 
   --lang php      --framework laravel|symfony|wordpress|generic
                   --version 8.4 (default) / 8.3 / 8.2 / ...
-                  --extensions redis,imagick,...
   --lang node     --framework nextjs|nuxt|vite|express|nestjs|generic
                   --version lts (default) / 22 / 20 / ...
   --lang ruby     --framework rails|sinatra|generic
@@ -61,7 +59,6 @@ func init() {
 	scaffoldCmd.Flags().StringVar(&scaffoldFlags.lang, "lang", "", "Language: php / node / ruby / python (required)")
 	scaffoldCmd.Flags().StringVar(&scaffoldFlags.framework, "framework", "generic", "Framework variant (see --help)")
 	scaffoldCmd.Flags().StringVar(&scaffoldFlags.version, "version", "", "Language runtime version (default: language-specific)")
-	scaffoldCmd.Flags().StringVar(&scaffoldFlags.extensions, "extensions", "", "PHP only: comma-separated extra extensions (e.g. 'redis,imagick')")
 	scaffoldCmd.Flags().IntVar(&scaffoldFlags.port, "port", 0, "Override the framework default container port")
 	scaffoldCmd.Flags().StringVar(&scaffoldFlags.dir, "dir", ".", "Project directory to scaffold into")
 	scaffoldCmd.Flags().BoolVarP(&scaffoldFlags.force, "force", "f", false, "Overwrite existing Dockerfile / docker-compose.yml / .dockerignore")
@@ -86,7 +83,7 @@ func runScaffold(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	tpl.applyOverrides(scaffoldFlags.version, scaffoldFlags.port, scaffoldFlags.extensions)
+	tpl.applyOverrides(scaffoldFlags.version, scaffoldFlags.port)
 
 	files := tpl.render()
 
@@ -127,20 +124,13 @@ type scaffoldTemplate struct {
 }
 
 // applyOverrides patches the template with user-supplied flag values.
-func (t *scaffoldTemplate) applyOverrides(version string, port int, extensions string) {
+func (t *scaffoldTemplate) applyOverrides(version string, port int) {
 	if version != "" {
 		t.version = version
 		t.baseImage = renderBaseImage(t.lang, version)
 	}
 	if port > 0 {
 		t.port = port
-	}
-	if extensions != "" {
-		for _, e := range strings.Split(extensions, ",") {
-			if e = strings.TrimSpace(e); e != "" {
-				t.extensions = append(t.extensions, e)
-			}
-		}
 	}
 }
 

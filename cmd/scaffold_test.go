@@ -38,15 +38,12 @@ func TestSelectScaffoldTemplateUnknownLang(t *testing.T) {
 
 func TestScaffoldTemplateApplyOverrides(t *testing.T) {
 	tpl, _ := selectScaffoldTemplate("php", "laravel")
-	tpl.applyOverrides("8.3", 8080, "imagick,xdebug")
+	tpl.applyOverrides("8.3", 8080)
 	if tpl.version != "8.3" {
 		t.Errorf("version not overridden: %q", tpl.version)
 	}
 	if tpl.port != 8080 {
 		t.Errorf("port not overridden: %d", tpl.port)
-	}
-	if !strings.Contains(strings.Join(tpl.extensions, ","), "imagick") {
-		t.Errorf("extensions not appended: %v", tpl.extensions)
 	}
 	if !strings.Contains(tpl.baseImage, "php8.3") {
 		t.Errorf("base image not rebuilt for version override: %q", tpl.baseImage)
@@ -74,13 +71,12 @@ func TestRunScaffoldRefusesExisting(t *testing.T) {
 	scaffoldFlags.force = false
 	defer func() {
 		scaffoldFlags = struct {
-			lang       string
-			framework  string
-			version    string
-			extensions string
-			port       int
-			dir        string
-			force      bool
+			lang      string
+			framework string
+			version   string
+			port      int
+			dir       string
+			force     bool
 		}{}
 	}()
 	if err := runScaffold(nil, nil); err == nil {
@@ -99,13 +95,12 @@ func TestRunScaffoldForceOverwrites(t *testing.T) {
 	scaffoldFlags.force = true
 	defer func() {
 		scaffoldFlags = struct {
-			lang       string
-			framework  string
-			version    string
-			extensions string
-			port       int
-			dir        string
-			force      bool
+			lang      string
+			framework string
+			version   string
+			port      int
+			dir       string
+			force     bool
 		}{}
 	}()
 	if err := runScaffold(nil, nil); err != nil {
