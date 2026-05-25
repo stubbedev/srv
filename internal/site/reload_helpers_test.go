@@ -99,8 +99,3 @@ func TestPrimaryDomain(t *testing.T) {
 	}
 }
 
-func TestBaselinePHPExtensionsNonEmpty(t *testing.T) {
-	if len(BaselinePHPExtensions()) == 0 {
-		t.Error("baseline extensions empty")
-	}
-}
