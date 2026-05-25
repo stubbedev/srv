@@ -109,7 +109,7 @@ func Reload(name string) (*ReloadResult, error) {
 			return res, fmt.Errorf("regenerate static config: %w", err)
 		}
 		res.NeedsRestart = true
-	case SiteTypeNode, SiteTypeRuby, SiteTypePython, SiteTypeDockerfile:
+	case SiteTypeDockerfile:
 		// These have their own Write helpers; regenerating their compose
 		// file picks up label changes. Caller restarts the container.
 		// (Skipping explicit per-type re-write here keeps Reload type-agnostic;

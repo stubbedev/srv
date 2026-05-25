@@ -26,9 +26,6 @@ type SiteType string
 const (
 	SiteTypeCompose    SiteType = constants.SiteTypeCompose    // Docker compose project (user-owned)
 	SiteTypeStatic     SiteType = constants.SiteTypeStatic     // Static files served via nginx
-	SiteTypeNode       SiteType = constants.SiteTypeNode       // Node.js / Bun / Deno site
-	SiteTypeRuby       SiteType = constants.SiteTypeRuby       // Ruby site
-	SiteTypePython     SiteType = constants.SiteTypePython     // Python site
 	SiteTypeDockerfile SiteType = constants.SiteTypeDockerfile // Dockerfile site (user-owned Dockerfile)
 )
 
@@ -91,7 +88,7 @@ const CurrentMetadataSchema = 1
 // This is stored in ~/.config/srv/sites/{name}/metadata.yml
 type SiteMetadata struct {
 	SchemaVersion      int       `yaml:"schema_version,omitempty" jsonschema:"description=metadata.yml schema version (1 = current)."`
-	Type               SiteType  `yaml:"type" jsonschema:"enum=compose,enum=static,enum=node,enum=ruby,enum=python,enum=dockerfile,description=Site runtime type."`
+	Type               SiteType  `yaml:"type" jsonschema:"enum=compose,enum=static,enum=dockerfile,description=Site runtime type."`
 	Domains            []string  `yaml:"domains,omitempty" jsonschema:"description=All hostnames; the first entry is canonical."`
 	ProjectPath        string    `yaml:"project_path" jsonschema:"description=Absolute path to the project on disk."`
 	ServiceName        string    `yaml:"service_name,omitempty" jsonschema:"description=Container name used for Traefik routing."`
@@ -112,20 +109,6 @@ type SiteMetadata struct {
 	SPA   bool `yaml:"spa,omitempty" jsonschema:"description=Single-page-app mode (fall back to /index.html)."`
 	Cache bool `yaml:"cache,omitempty" jsonschema:"description=Emit aggressive caching headers for static assets."`
 	CORS  bool `yaml:"cors,omitempty" jsonschema:"description=Emit permissive CORS headers."`
-	// Node.js / Bun / Deno site options
-	NodeRuntime        string `yaml:"node_runtime,omitempty" jsonschema:"enum=node,enum=bun,enum=deno,description=JavaScript runtime."`
-	NodePackageManager string `yaml:"node_package_manager,omitempty" jsonschema:"enum=npm,enum=yarn,enum=pnpm,enum=bun,enum=deno,description=Package manager."`
-	NodeVersion        string `yaml:"node_version,omitempty" jsonschema:"description=Node version ('lts' or '20'; node runtime only)."`
-	NodeFramework      string `yaml:"node_framework,omitempty" jsonschema:"description=Detected Node framework."`
-	NodeStartCmd       string `yaml:"node_start_cmd,omitempty" jsonschema:"description=Start command (e.g. 'npm run dev')."`
-	// Ruby site options
-	RubyVersion   string `yaml:"ruby_version,omitempty" jsonschema:"description=Ruby version ('latest' or '3.3')."`
-	RubyFramework string `yaml:"ruby_framework,omitempty" jsonschema:"enum=rails,enum=sinatra,enum=rack,enum=generic,description=Detected Ruby framework."`
-	RubyStartCmd  string `yaml:"ruby_start_cmd,omitempty" jsonschema:"description=Start command."`
-	// Python site options
-	PythonVersion   string `yaml:"python_version,omitempty" jsonschema:"description=Python version ('latest' or '3.12')."`
-	PythonFramework string `yaml:"python_framework,omitempty" jsonschema:"enum=django,enum=fastapi,enum=flask,enum=generic,description=Detected Python framework."`
-	PythonStartCmd  string `yaml:"python_start_cmd,omitempty" jsonschema:"description=Start command."`
 	// Dockerfile site options
 	DockerfilePort int `yaml:"dockerfile_port,omitempty" jsonschema:"description=Port discovered from the Dockerfile EXPOSE directive."`
 }

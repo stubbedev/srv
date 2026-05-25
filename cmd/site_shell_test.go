@@ -22,9 +22,6 @@ func TestSiteShellContainer(t *testing.T) {
 		s    site.Site
 		want string // "" means use phpFPM helper, else exact match
 	}{
-		{"node", site.Site{Name: "app", Type: site.SiteTypeNode}, "srv-app-node"},
-		{"ruby", site.Site{Name: "api", Type: site.SiteTypeRuby}, "srv-api-app"},
-		{"python", site.Site{Name: "api", Type: site.SiteTypePython}, "srv-api-app"},
 		{"dockerfile", site.Site{Name: "x", Type: site.SiteTypeDockerfile}, "srv-x-app"},
 		{"compose", site.Site{Name: "y", Type: site.SiteTypeCompose, ServiceName: "web"}, "web"},
 		{"unknown-type-falls-through", site.Site{Name: "z", Type: "", ServiceName: "svc"}, "svc"},

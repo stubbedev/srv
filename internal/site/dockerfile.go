@@ -86,10 +86,24 @@ type dockerfileBuild struct {
 	Dockerfile string `yaml:"dockerfile"`
 }
 
+type dockerfileNetworkConfig struct {
+	Name     string `yaml:"name"`
+	External bool   `yaml:"external"`
+}
+
 type dockerfileComposeConfig struct {
 	Name     string                             `yaml:"name,omitempty"`
 	Services map[string]dockerfileServiceConfig `yaml:"services"`
-	Networks map[string]nodeNetworkConfig       `yaml:"networks"`
+	Networks map[string]dockerfileNetworkConfig `yaml:"networks"`
+}
+
+// buildDockerfileTraefikLabels builds Traefik labels for a dockerfile site,
+// pointing the loadbalancer at the user-supplied port (from the Dockerfile's
+// EXPOSE directive or the --port flag).
+func buildDockerfileTraefikLabels(name string, domains []string, isLocal, wildcard bool, port int) map[string]string {
+	labels := buildStaticTraefikLabels(name, domains, isLocal, wildcard)
+	labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name)] = fmt.Sprintf("%d", port)
+	return labels
 }
 
 // WriteDockerfileSiteConfig generates and writes docker-compose.yml for a Dockerfile site.
@@ -106,7 +120,7 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	}
 
 	containerName := "srv-" + name + "-app"
-	labels := buildAppTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
+	labels := buildDockerfileTraefikLabels(name, meta.Domains, meta.IsLocal, meta.Wildcard, info.Port)
 	if HasListener(meta.Listeners, constants.ListenerInternal) {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
@@ -127,7 +141,7 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 				HealthCheck: makeStaticHealthCheck(info.Port),
 			},
 		},
-		Networks: map[string]nodeNetworkConfig{
+		Networks: map[string]dockerfileNetworkConfig{
 			constants.TraefikSubdir: {
 				Name:     meta.NetworkName,
 				External: true,

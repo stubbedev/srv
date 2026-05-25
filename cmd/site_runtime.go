@@ -1,5 +1,7 @@
 // Package cmd — site_runtime.go groups the config-management commands:
-// `srv runtime`, `srv regenerate`, and `srv edit`.
+// `srv regenerate` and `srv edit`. (The `srv runtime` command is gone:
+// srv no longer manages language runtime versions — that's the user's
+// Dockerfile.)
 package cmd
 
 import (
@@ -10,116 +12,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
-	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
-
-// =============================================================================
-// runtime command
-// =============================================================================
-
-var runtimeFlags struct {
-	nodeVersion string
-}
-
-var runtimeCmd = &cobra.Command{
-	Use:   "runtime SITE",
-	Short: "Change runtime version for a Node.js site",
-	Long: `Update the Node.js runtime version for a Node.js site. The
-docker-compose.yml is regenerated and the container restarted.
-
-PHP runtimes are user-owned (edit your Dockerfile, or re-run
-` + "`" + `srv scaffold php` + "`" + `); this command no longer touches them.
-
-Example:
-  srv site runtime mysite --node-version 22`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			_ = cmd.Help()
-			return ui.UsageError("srv site runtime SITE", "a site name is required")
-		}
-		if len(args) > 1 {
-			return ui.UsageError("srv site runtime SITE", "too many arguments — expected a single site name, got %d", len(args))
-		}
-		return nil
-	},
-	RunE: runRuntime,
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return GetSiteNames(), cobra.ShellCompDirectiveNoFileComp
-	},
-}
-
-func init() {
-	runtimeCmd.Flags().StringVar(&runtimeFlags.nodeVersion, "node-version", "", "Node.js version (e.g. 22, 20, lts)")
-	runtimeCmd.GroupID = GroupSites
-	RootCmd.AddCommand(runtimeCmd)
-}
-
-func runRuntime(cmd *cobra.Command, args []string) error {
-	siteName := args[0]
-
-	meta, err := site.ReadSiteMetadata(siteName)
-	if err != nil || meta == nil {
-		return fmt.Errorf("site '%s' not found", siteName)
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	switch meta.Type {
-	case site.SiteTypeNode:
-		return runtimeUpdateNode(cfg, siteName, meta)
-	default:
-		return fmt.Errorf("site '%s' is a %s site — runtime management is only available for Node.js sites (PHP runtimes are user-owned via Dockerfile / `srv scaffold php`)", siteName, meta.Type)
-	}
-}
-
-func runtimeUpdateNode(cfg *config.Config, siteName string, meta *site.SiteMetadata) error {
-	if runtimeFlags.nodeVersion == "" {
-		return fmt.Errorf("specify --node-version")
-	}
-
-	if meta.NodeRuntime != "" && meta.NodeRuntime != constants.NodeRuntimeNode {
-		return fmt.Errorf("--node-version only applies to Node.js sites (this site uses %s)", meta.NodeRuntime)
-	}
-
-	if runtimeFlags.nodeVersion != meta.NodeVersion {
-		ui.Dim("  node version:  %s → %s", meta.NodeVersion, runtimeFlags.nodeVersion)
-	}
-	meta.NodeVersion = runtimeFlags.nodeVersion
-
-	nodeInfo := &site.NodeSiteInfo{
-		Runtime:        meta.NodeRuntime,
-		PackageManager: meta.NodePackageManager,
-		NodeVersion:    meta.NodeVersion,
-		Framework:      meta.NodeFramework,
-		StartCmd:       meta.NodeStartCmd,
-		Port:           meta.Port,
-	}
-
-	ui.Info("Updating Node.js runtime for '%s'...", siteName)
-	if err := site.WriteNodeSiteConfig(siteName, *meta, nodeInfo, true); err != nil {
-		return fmt.Errorf("failed to write Node config: %w", err)
-	}
-
-	// Persist updated metadata.
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("failed to update metadata: %w", err)
-	}
-
-	composeDir := site.SiteConfigDir(cfg, siteName)
-	ui.Info("Restarting containers...")
-	if err := docker.ComposeUpWithProfile(composeDir, meta.Profile); err != nil {
-		return fmt.Errorf("failed to restart containers: %w", err)
-	}
-
-	ui.Success("Node.js runtime updated for '%s' (version: %s)", siteName, meta.NodeVersion)
-	return nil
-}
 
 // =============================================================================
 // regenerate command
@@ -182,38 +78,6 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 	ui.Info("Regenerating config for '%s'...", siteName)
 
 	switch meta.Type {
-	case site.SiteTypeNode:
-		nodeInfo := &site.NodeSiteInfo{
-			Runtime:        meta.NodeRuntime,
-			PackageManager: meta.NodePackageManager,
-			NodeVersion:    meta.NodeVersion,
-			Framework:      meta.NodeFramework,
-			StartCmd:       meta.NodeStartCmd,
-			Port:           meta.Port,
-		}
-		if err := site.WriteNodeSiteConfig(siteName, *meta, nodeInfo, true); err != nil {
-			return fmt.Errorf("failed to regenerate Node config: %w", err)
-		}
-	case site.SiteTypeRuby:
-		rubyInfo := &site.RubySiteInfo{
-			RubyVersion: meta.RubyVersion,
-			Framework:   meta.RubyFramework,
-			StartCmd:    meta.RubyStartCmd,
-			Port:        meta.Port,
-		}
-		if err := site.WriteRubySiteConfig(siteName, *meta, rubyInfo, true); err != nil {
-			return fmt.Errorf("failed to regenerate Ruby config: %w", err)
-		}
-	case site.SiteTypePython:
-		pythonInfo := &site.PythonSiteInfo{
-			PythonVersion: meta.PythonVersion,
-			Framework:     meta.PythonFramework,
-			StartCmd:      meta.PythonStartCmd,
-			Port:          meta.Port,
-		}
-		if err := site.WritePythonSiteConfig(siteName, *meta, pythonInfo, true); err != nil {
-			return fmt.Errorf("failed to regenerate Python config: %w", err)
-		}
 	case site.SiteTypeDockerfile:
 		dockerfileInfo := &site.DockerfileSiteInfo{Port: meta.DockerfilePort}
 		if err := site.WriteDockerfileSiteConfig(siteName, *meta, dockerfileInfo, true); err != nil {
@@ -224,7 +88,7 @@ func runRegenerate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to regenerate static config: %w", err)
 		}
 	default:
-		return fmt.Errorf("regenerate is only available for Node.js, Ruby, Python, Dockerfile, and static sites (PHP runtimes are user-owned; edit your Dockerfile or re-run `srv scaffold php`)")
+		return fmt.Errorf("regenerate is only available for dockerfile and static sites; language runtimes (Node/Ruby/Python/PHP) are user-owned now — edit your Dockerfile or re-run `srv scaffold`")
 	}
 
 	composeDir := site.SiteConfigDir(cfg, siteName)

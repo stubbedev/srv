@@ -115,12 +115,6 @@ func plainSiteTypeLabel(s site.Site) string {
 	switch s.Type {
 	case site.SiteTypeStatic:
 		return "static"
-	case site.SiteTypeNode:
-		return "node"
-	case site.SiteTypeRuby:
-		return "ruby"
-	case site.SiteTypePython:
-		return "python"
 	case site.SiteTypeDockerfile:
 		return "dockerfile"
 	default:
@@ -173,12 +167,6 @@ func getSiteTypeLabel(s site.Site) string {
 	switch s.Type {
 	case site.SiteTypeStatic:
 		return "static"
-	case site.SiteTypeNode:
-		return "node"
-	case site.SiteTypeRuby:
-		return "ruby"
-	case site.SiteTypePython:
-		return "python"
 	case site.SiteTypeDockerfile:
 		return "dockerfile"
 	default:
@@ -269,51 +257,10 @@ func runInfo(cmd *cobra.Command, args []string) error {
 
 	// Site type info
 	meta, _ := site.ReadSiteMetadata(s.Name)
+	_ = meta // metadata is still used elsewhere by callers; keep reference live.
 	switch s.Type {
 	case site.SiteTypeStatic:
 		ui.Print("  Type:    %s", "static (nginx)")
-	case site.SiteTypeNode:
-		runtimeLabel := "node.js"
-		if meta != nil && meta.NodeRuntime != "" {
-			runtimeLabel = meta.NodeRuntime
-			if meta.NodePackageManager != "" && meta.NodePackageManager != meta.NodeRuntime && meta.NodePackageManager != constants.NodePMDeno {
-				runtimeLabel += " / " + meta.NodePackageManager
-			}
-			if meta.NodeVersion != "" && meta.NodeVersion != constants.NodeVersionLTS {
-				runtimeLabel += " " + meta.NodeVersion
-			}
-		}
-		ui.Print("  Type:    %s", runtimeLabel)
-		if meta != nil && meta.NodeFramework != "" && meta.NodeFramework != "generic" {
-			ui.Print("  Framework: %s", meta.NodeFramework)
-		}
-		if s.Port != 0 {
-			ui.Print("  Port:    %d", s.Port)
-		}
-	case site.SiteTypeRuby:
-		runtimeLabel := "ruby"
-		if meta != nil && meta.RubyVersion != "" && meta.RubyVersion != constants.RubyVersionLatest {
-			runtimeLabel = "ruby " + meta.RubyVersion
-		}
-		ui.Print("  Type:    %s", runtimeLabel)
-		if meta != nil && meta.RubyFramework != "" && meta.RubyFramework != "generic" {
-			ui.Print("  Framework: %s", meta.RubyFramework)
-		}
-		if s.Port != 0 {
-			ui.Print("  Port:    %d", s.Port)
-		}
-	case site.SiteTypePython:
-		runtimeLabel := "python"
-		if meta != nil && meta.PythonVersion != "" && meta.PythonVersion != constants.PythonVersionLatest {
-			runtimeLabel = "python " + meta.PythonVersion
-		}
-		ui.Print("  Type:    %s", runtimeLabel)
-		if meta != nil && meta.PythonFramework != "" && meta.PythonFramework != "generic" {
-			ui.Print("  Framework: %s", meta.PythonFramework)
-		}
-		if s.Port != 0 {
-			ui.Print("  Port:    %d", s.Port)
-		}
 	case site.SiteTypeDockerfile:
 		ui.Print("  Type:    %s", "dockerfile (custom build)")
 		if s.Port != 0 {

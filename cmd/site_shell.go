@@ -110,9 +110,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 // siteShellContainer returns the container name to shell into for a given site.
 func siteShellContainer(s site.Site) string {
 	switch s.Type {
-	case site.SiteTypeNode:
-		return "srv-" + s.Name + "-node"
-	case site.SiteTypeRuby, site.SiteTypePython, site.SiteTypeDockerfile:
+	case site.SiteTypeDockerfile:
 		return "srv-" + s.Name + "-app"
 	default:
 		// Compose sites: use the stored service name (container name).

@@ -35,38 +35,6 @@ func TestDetectionSummaryCompose(t *testing.T) {
 	}
 }
 
-func TestDetectionSummaryNode(t *testing.T) {
-	setup := &siteSetup{isNode: true, nodeInfo: &site.NodeSiteInfo{Runtime: "node", PackageManager: "yarn", NodeVersion: "20", Framework: "next"}}
-	got := detectionSummary(setup)
-	if !strings.Contains(got, "next") {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestDetectionSummaryNodeBun(t *testing.T) {
-	setup := &siteSetup{isNode: true, nodeInfo: &site.NodeSiteInfo{Runtime: "bun", PackageManager: "bun", NodeVersion: "lts", Framework: "generic"}}
-	got := detectionSummary(setup)
-	if !strings.Contains(got, "bun") {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestDetectionSummaryRuby(t *testing.T) {
-	setup := &siteSetup{isRuby: true, rubyInfo: &site.RubySiteInfo{RubyVersion: "3.3", Framework: "rails"}}
-	got := detectionSummary(setup)
-	if !strings.Contains(got, "rails") {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestDetectionSummaryPython(t *testing.T) {
-	setup := &siteSetup{isPython: true, pythonInfo: &site.PythonSiteInfo{PythonVersion: "3.12", Framework: "flask"}}
-	got := detectionSummary(setup)
-	if !strings.Contains(got, "flask") {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestDetectionSummaryDockerfile(t *testing.T) {
 	setup := &siteSetup{isDockerfile: true, dockerfileInfo: &site.DockerfileSiteInfo{Port: 8080}}
 	got := detectionSummary(setup)
@@ -99,33 +67,21 @@ func TestApplyTypeOverridePHPRejected(t *testing.T) {
 	}
 }
 
-func TestApplyTypeOverrideNode(t *testing.T) {
-	setup, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isNode || setup.nodeInfo == nil {
-		t.Errorf("got %+v", setup)
+func TestApplyTypeOverrideNodeRejected(t *testing.T) {
+	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "node"); err == nil {
+		t.Fatal("expected error: --type node no longer supported")
 	}
 }
 
-func TestApplyTypeOverrideRuby(t *testing.T) {
-	setup, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "ruby")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isRuby || setup.rubyInfo == nil {
-		t.Errorf("got %+v", setup)
+func TestApplyTypeOverrideRubyRejected(t *testing.T) {
+	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "ruby"); err == nil {
+		t.Fatal("expected error: --type ruby no longer supported")
 	}
 }
 
-func TestApplyTypeOverridePython(t *testing.T) {
-	setup, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "python")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isPython || setup.pythonInfo == nil {
-		t.Errorf("got %+v", setup)
+func TestApplyTypeOverridePythonRejected(t *testing.T) {
+	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "python"); err == nil {
+		t.Fatal("expected error: --type python no longer supported")
 	}
 }
 
@@ -217,7 +173,6 @@ func resetAddFlags() {
 	addFlags.spa = false
 	addFlags.cache = false
 	addFlags.cors = false
-	addFlags.nodeVersion = ""
 	addFlags.typeOverride = ""
 	addFlags.aliases = nil
 }

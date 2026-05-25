@@ -225,24 +225,3 @@ func TestPromptForProfileFlagMatches(t *testing.T) {
 	}
 }
 
-func TestPromptForMissingConfigNodeOverrides(t *testing.T) {
-	setupSrvRoot(t)
-	resetAddFlags()
-	addFlags.domain = "app.local"
-	addFlags.name = "app"
-	addFlags.local = true
-	addFlags.nodeVersion = "22"
-	addFlags.port = 5000
-	defer resetAddFlags()
-
-	setup := &siteSetup{isNode: true, nodeInfo: &site.NodeSiteInfo{NodeVersion: "20", Port: 3000}}
-	if err := promptForMissingConfig(setup); err != nil {
-		t.Fatal(err)
-	}
-	if setup.nodeInfo.NodeVersion != "22" {
-		t.Errorf("version not overridden: %q", setup.nodeInfo.NodeVersion)
-	}
-	if setup.nodeInfo.Port != 5000 {
-		t.Errorf("port not overridden: %d", setup.nodeInfo.Port)
-	}
-}

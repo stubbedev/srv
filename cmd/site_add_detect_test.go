@@ -47,45 +47,33 @@ func TestValidateSiteSetupPHPProjectErrors(t *testing.T) {
 	}
 }
 
-func TestValidateSiteSetupNode(t *testing.T) {
+func TestValidateSiteSetupNodeRejected(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"scripts":{"start":"node ."}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	setup, err := validateSiteSetup(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isNode {
-		t.Error("expected node detection")
+	if _, err := validateSiteSetup(dir); err == nil {
+		t.Fatal("expected error: Node project with no Dockerfile / docker-compose.yml")
 	}
 }
 
-func TestValidateSiteSetupRuby(t *testing.T) {
+func TestValidateSiteSetupRubyRejected(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Gemfile"), []byte(`gem "rails"`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	setup, err := validateSiteSetup(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isRuby {
-		t.Error("expected ruby detection")
+	if _, err := validateSiteSetup(dir); err == nil {
+		t.Fatal("expected error: Ruby project with no Dockerfile / docker-compose.yml")
 	}
 }
 
-func TestValidateSiteSetupPython(t *testing.T) {
+func TestValidateSiteSetupPythonRejected(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	setup, err := validateSiteSetup(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !setup.isPython {
-		t.Error("expected python detection")
+	if _, err := validateSiteSetup(dir); err == nil {
+		t.Fatal("expected error: Python project with no Dockerfile / docker-compose.yml")
 	}
 }
 

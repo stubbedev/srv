@@ -41,8 +41,6 @@ var addFlags struct {
 	readTimeout    string
 	sendTimeout    string
 	connectTimeout string
-	// Node.js site options
-	nodeVersion string
 	// Compose profile selection
 	profile string
 	// Extra mounts
@@ -122,7 +120,6 @@ func init() {
 		})
 	}
 	// Node.js site options
-	addCmd.Flags().StringVar(&addFlags.nodeVersion, "node-version", "", "Node.js version (auto-detected from .nvmrc / package.json; use 'lts' for latest LTS)")
 	// Compose profile (required when the selected service has multiple)
 	addCmd.Flags().StringVar(&addFlags.profile, "profile", "", "Docker Compose profile (required when the selected service declares multiple)")
 	// Extra bind-mounts
@@ -133,7 +130,7 @@ func init() {
 	// Type override
 	addCmd.Flags().StringVar(&addFlags.typeOverride, "type", "", "Force site type: php, node, ruby, python, dockerfile, static, compose")
 	_ = addCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"node", "ruby", "python", "dockerfile", "static", "compose"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"dockerfile", "static", "compose"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	addCmd.GroupID = GroupSites
 	RootCmd.AddCommand(addCmd)
@@ -212,13 +209,7 @@ type siteSetup struct {
 	isLocal            bool
 	wildcard           bool // true if wildcard subdomain matching is enabled
 	isStatic           bool // true if serving static files (no docker-compose.yml)
-	isNode             bool // true if serving a Node.js site
-	isRuby             bool // true if serving a Ruby site
-	isPython           bool // true if serving a Python site
 	isDockerfile       bool // true if building from a bare Dockerfile
-	nodeInfo           *site.NodeSiteInfo
-	rubyInfo           *site.RubySiteInfo
-	pythonInfo         *site.PythonSiteInfo
 	dockerfileInfo     *site.DockerfileSiteInfo
 	// Static site options
 	spa   bool

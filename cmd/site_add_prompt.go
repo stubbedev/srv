@@ -17,7 +17,7 @@ import (
 // promptForMissingConfig prompts user for any missing configuration
 func promptForMissingConfig(setup *siteSetup) error {
 	// Get service name (only for compose sites)
-	if !setup.isStatic && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile {
+	if !setup.isStatic && !setup.isDockerfile {
 		if err := promptForService(setup); err != nil {
 			return err
 		}
@@ -66,17 +66,6 @@ func promptForMissingConfig(setup *siteSetup) error {
 	setup.spa = addFlags.spa
 	setup.cache = addFlags.cache
 	setup.cors = addFlags.cors
-
-	// Node.js site: apply flag overrides on top of auto-detected values.
-	if setup.isNode && setup.nodeInfo != nil {
-		if addFlags.nodeVersion != "" {
-			setup.nodeInfo.NodeVersion = addFlags.nodeVersion
-		}
-		// If the user explicitly set --port, use it; otherwise keep the detected port.
-		if addFlags.port != constants.DefaultContainerPort {
-			setup.nodeInfo.Port = addFlags.port
-		}
-	}
 
 	return nil
 }

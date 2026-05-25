@@ -48,27 +48,6 @@ func TestSetupSiteFilesStatic(t *testing.T) {
 	}
 }
 
-func TestSetupSiteFilesNode(t *testing.T) {
-	root := setupSrvRoot(t)
-	cfg, _ := config.Load()
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	setup := &siteSetup{
-		siteName: "app",
-		sitePath: projectDir,
-		domain:   "app.local",
-		port:     3000,
-		isLocal:  true,
-		isNode:   true,
-		nodeInfo: site.NodeDefaults(),
-	}
-	if err := setupSiteFiles(cfg, setup); err != nil {
-		t.Fatalf("err: %v", err)
-	}
-}
-
 func TestSetupSiteFilesCompose(t *testing.T) {
 	root := setupSrvRoot(t)
 	cfg, _ := config.Load()

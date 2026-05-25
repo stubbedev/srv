@@ -24,12 +24,6 @@ func finalizeSiteSetup(cfg *config.Config, setup *siteSetup) error {
 	// Determine site type label
 	var siteType string
 	switch {
-	case setup.isNode:
-		siteType = "node"
-	case setup.isRuby:
-		siteType = "ruby"
-	case setup.isPython:
-		siteType = "python"
 	case setup.isDockerfile:
 		siteType = "dockerfile"
 	case setup.isStatic:
@@ -134,7 +128,7 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine the compose directory
 	var composeDir string
-	if setup.isStatic || setup.isNode || setup.isRuby || setup.isPython || setup.isDockerfile {
+	if setup.isStatic || setup.isDockerfile {
 		// srv-managed sites have their compose file in the srv config directory
 		composeDir = site.SiteConfigDir(cfg, setup.siteName)
 	} else {
@@ -148,7 +142,7 @@ func startSiteAfterAdd(cfg *config.Config, setup *siteSetup) error {
 
 	// For compose sites, connect service to traefik network.
 	// srv-managed sites manage network membership via compose labels.
-	if !setup.isStatic && !setup.isNode && !setup.isRuby && !setup.isPython && !setup.isDockerfile && setup.composeServiceName != "" {
+	if !setup.isStatic && !setup.isDockerfile && setup.composeServiceName != "" {
 		if err := docker.ConnectServiceToNetwork(setup.sitePath, setup.composeServiceName, cfg.NetworkName); err != nil {
 			if errors.Is(err, docker.ErrServiceNotRunning) {
 				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", setup.composeServiceName)

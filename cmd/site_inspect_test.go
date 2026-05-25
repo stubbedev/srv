@@ -63,71 +63,6 @@ func TestRunInfoStatic(t *testing.T) {
 	}
 }
 
-func TestRunInfoNode(t *testing.T) {
-	root := setupSrvRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTestSite(t, "app", site.SiteMetadata{
-		Type:               site.SiteTypeNode,
-		Domains:            []string{"app.local"},
-		ProjectPath:        projectDir,
-		Port:               3000,
-		IsLocal:            true,
-		NetworkName:        "n",
-		NodeRuntime:        "node",
-		NodePackageManager: "yarn",
-		NodeVersion:        "20",
-		NodeFramework:      "next",
-	})
-	if err := runInfo(nil, []string{"app"}); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
-func TestRunInfoRuby(t *testing.T) {
-	root := setupSrvRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTestSite(t, "api", site.SiteMetadata{
-		Type:          site.SiteTypeRuby,
-		Domains:       []string{"api.local"},
-		ProjectPath:   projectDir,
-		Port:          3000,
-		IsLocal:       true,
-		NetworkName:   "n",
-		RubyVersion:   "3.3",
-		RubyFramework: "rails",
-	})
-	if err := runInfo(nil, []string{"api"}); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
-func TestRunInfoPython(t *testing.T) {
-	root := setupSrvRoot(t)
-	projectDir := filepath.Join(root, "p")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTestSite(t, "api", site.SiteMetadata{
-		Type:            site.SiteTypePython,
-		Domains:         []string{"api.local"},
-		ProjectPath:     projectDir,
-		Port:            8000,
-		IsLocal:         true,
-		NetworkName:     "n",
-		PythonVersion:   "3.12",
-		PythonFramework: "flask",
-	})
-	if err := runInfo(nil, []string{"api"}); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
 func TestRunInfoCompose(t *testing.T) {
 	root := setupSrvRoot(t)
 	projectDir := filepath.Join(root, "p")
@@ -293,9 +228,6 @@ func TestGetSiteTypeLabel(t *testing.T) {
 	}{
 		{site.Site{IsBroken: true}, "-"},
 		{site.Site{Type: site.SiteTypeStatic}, "static"},
-		{site.Site{Type: site.SiteTypeNode}, "node"},
-		{site.Site{Type: site.SiteTypeRuby}, "ruby"},
-		{site.Site{Type: site.SiteTypePython}, "python"},
 		{site.Site{Type: site.SiteTypeDockerfile}, "dockerfile"},
 		{site.Site{Type: site.SiteTypeCompose}, "compose"},
 		{site.Site{Type: ""}, "compose"},

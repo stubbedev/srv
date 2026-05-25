@@ -300,7 +300,7 @@ func TestValidateMetadataValidComplete(t *testing.T) {
 // Confirm traefik import is still referenced (silences lint).
 var _ = traefik.LocalDomains
 
-func TestReloadNode(t *testing.T) {
+func TestReloadDockerfile(t *testing.T) {
 	root := withSRVRoot(t)
 	projectDir := filepath.Join(root, "p")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
@@ -310,11 +310,12 @@ func TestReloadNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := SiteMetadata{
-		Type:        SiteTypeNode,
-		Domains:     []string{"app.local"},
-		ProjectPath: projectDir,
-		Port:        3000,
-		NetworkName: "n",
+		Type:           SiteTypeDockerfile,
+		Domains:        []string{"app.local"},
+		ProjectPath:    projectDir,
+		Port:           3000,
+		NetworkName:    "n",
+		DockerfilePort: 3000,
 	}
 	if err := WriteSiteMetadata("app", meta); err != nil {
 		t.Fatal(err)
@@ -324,6 +325,6 @@ func TestReloadNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !res.NeedsRestart {
-		t.Error("Node reload should require restart")
+		t.Error("Dockerfile reload should require restart")
 	}
 }

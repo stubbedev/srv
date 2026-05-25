@@ -16,12 +16,6 @@ import (
 // All config is stored in ~/.config/srv - no files are created in the project directory
 func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	switch {
-	case setup.isNode:
-		ui.Info("Configuring Node.js site: %s", setup.siteName)
-	case setup.isRuby:
-		ui.Info("Configuring Ruby site: %s", setup.siteName)
-	case setup.isPython:
-		ui.Info("Configuring Python site: %s", setup.siteName)
 	case setup.isDockerfile:
 		ui.Info("Configuring Dockerfile site: %s", setup.siteName)
 	case setup.isStatic:
@@ -33,12 +27,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	// Determine site type
 	siteType := site.SiteTypeCompose
 	switch {
-	case setup.isNode:
-		siteType = site.SiteTypeNode
-	case setup.isRuby:
-		siteType = site.SiteTypeRuby
-	case setup.isPython:
-		siteType = site.SiteTypePython
 	case setup.isDockerfile:
 		siteType = site.SiteTypeDockerfile
 	case setup.isStatic:
@@ -47,14 +35,7 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 
 	// Determine canonical port for routing metadata.
 	port := setup.port
-	switch {
-	case setup.isNode && setup.nodeInfo != nil:
-		port = setup.nodeInfo.Port
-	case setup.isRuby && setup.rubyInfo != nil:
-		port = setup.rubyInfo.Port
-	case setup.isPython && setup.pythonInfo != nil:
-		port = setup.pythonInfo.Port
-	case setup.isDockerfile && setup.dockerfileInfo != nil:
+	if setup.isDockerfile && setup.dockerfileInfo != nil {
 		port = setup.dockerfileInfo.Port
 	}
 
@@ -77,32 +58,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 		CORS:               setup.cors,
 	}
 
-	// Add Node.js-specific fields to metadata.
-	if setup.isNode && setup.nodeInfo != nil {
-		meta.NodeRuntime = setup.nodeInfo.Runtime
-		meta.NodePackageManager = setup.nodeInfo.PackageManager
-		meta.NodeVersion = setup.nodeInfo.NodeVersion
-		meta.NodeFramework = setup.nodeInfo.Framework
-		meta.NodeStartCmd = setup.nodeInfo.StartCmd
-		meta.ServiceName = "srv-" + setup.siteName + "-node"
-	}
-
-	// Add Ruby-specific fields to metadata.
-	if setup.isRuby && setup.rubyInfo != nil {
-		meta.RubyVersion = setup.rubyInfo.RubyVersion
-		meta.RubyFramework = setup.rubyInfo.Framework
-		meta.RubyStartCmd = setup.rubyInfo.StartCmd
-		meta.ServiceName = "srv-" + setup.siteName + "-app"
-	}
-
-	// Add Python-specific fields to metadata.
-	if setup.isPython && setup.pythonInfo != nil {
-		meta.PythonVersion = setup.pythonInfo.PythonVersion
-		meta.PythonFramework = setup.pythonInfo.Framework
-		meta.PythonStartCmd = setup.pythonInfo.StartCmd
-		meta.ServiceName = "srv-" + setup.siteName + "-app"
-	}
-
 	// Add Dockerfile-specific fields to metadata.
 	if setup.isDockerfile && setup.dockerfileInfo != nil {
 		meta.DockerfilePort = setup.dockerfileInfo.Port
@@ -122,21 +77,6 @@ func setupSiteFiles(cfg *config.Config, setup *siteSetup) error {
 	}
 
 	switch {
-	case setup.isNode:
-		// Node.js site: generate docker-compose.yml.
-		if err := site.WriteNodeSiteConfig(setup.siteName, meta, setup.nodeInfo, addFlags.force); err != nil {
-			return fmt.Errorf("failed to write Node site config: %w", err)
-		}
-	case setup.isRuby:
-		// Ruby site: generate docker-compose.yml.
-		if err := site.WriteRubySiteConfig(setup.siteName, meta, setup.rubyInfo, addFlags.force); err != nil {
-			return fmt.Errorf("failed to write Ruby site config: %w", err)
-		}
-	case setup.isPython:
-		// Python site: generate docker-compose.yml.
-		if err := site.WritePythonSiteConfig(setup.siteName, meta, setup.pythonInfo, addFlags.force); err != nil {
-			return fmt.Errorf("failed to write Python site config: %w", err)
-		}
 	case setup.isDockerfile:
 		// Dockerfile site: generate docker-compose.yml that builds from project Dockerfile.
 		if err := site.WriteDockerfileSiteConfig(setup.siteName, meta, setup.dockerfileInfo, addFlags.force); err != nil {
