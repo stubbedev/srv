@@ -430,27 +430,25 @@ srv add ./assets --domain cdn.example.com --cors
 
 ### PHP Sites
 
-For directories containing a `composer.json` or `.php`/`.phtml` files (without a `docker-compose.yml`), srv generates an nginx web container per site plus a **shared PHP-FPM pool** that serves every site with a matching `(php_version, extension_set)` fingerprint.
+For directories containing a `composer.json` or `.php`/`.phtml` files (without a `docker-compose.yml`), srv generates **one per-site container running FrankenPHP** (Caddy + embedded PHP). No separate nginx shim, no shared FPM pool — one container per site, image `srv-php-<name>:latest`.
 
 What you get:
 
 - Auto-detected PHP version from `composer.json` requirements
 - Auto-detected framework (Laravel, Symfony, WordPress, or generic)
 - Auto-detected document root (`public/`, `web/`, etc.)
-- Required extensions extracted from `composer.json`
-- Pool Dockerfile uses BuildKit cache mounts so adding/removing one extension reuses the apk cache and IPE tarball cache across sites
-- `pm=ondemand` on local-mode sites so idle pools cost zero workers
-- nginx config with FastCGI routing pointing at the shared pool container
-- Sensitive paths blocked (`.env`, `.git`, `vendor/`, `node_modules/`)
-- Security headers + gzip
-- Healthcheck on the web container (busybox `nc -z`)
+- Required extensions extracted from `composer.json` and installed via `install-php-extensions`
+- BuildKit cache mounts in the generated Dockerfile so adding/removing one extension reuses the apk and IPE caches across builds
+- Container runs as the host UID/GID so files PHP writes back are owned by you, not root
+- `extra_hosts: host.docker.internal:host-gateway` on Linux so existing `.env` host-loopback references reach the host (see [Host Services](#host-services--php-runtime) below)
+- Healthcheck on the container (busybox `nc -z`)
 - macOS bind mounts get `consistency: cached` automatically
+- Drop a `Dockerfile.srv` (or `.srv/Dockerfile`) at the project root to override the generated Dockerfile; the first uncommented `FROM` must be `dunglas/frankenphp:...`
 
-**Container layout for N sites with the same fingerprint:**
-- N nginx web containers (`srv-<sitename>-web`, label `dev.srv.type=php`)
-- 1 shared FPM container (`srv-fpm-<hash>`, label `dev.srv.type=php-fpm-pool`)
+**Container layout per site:**
+- 1 FrankenPHP container (`srv-<sitename>-php`, label `dev.srv.type=php`)
 
-Each site is mounted at `/var/www/<sitename>` inside the pool; `srv shell <site>` exec's into the pool container with the working directory set to your site's mount.
+The project is bind-mounted at `/app` inside the container. `srv shell <site>` exec's in there. `SERVER_NAME=:80` and `SERVER_ROOT=public/` (or your detected docroot) are set via env so Caddy serves the right tree.
 
 ```bash
 # Laravel project (auto-detects framework, PHP version, and extensions)
@@ -496,6 +494,85 @@ srv add ./app --domain api.test --local --service backend
 
 # Custom port
 srv add ./app --domain myapp.test --local --port 3000
+```
+
+## Host Services & PHP Runtime
+
+PHP sites run in a container, so the usual `DB_HOST=127.0.0.1` in your `.env` no longer points at MySQL on the host — it points at the FrankenPHP container itself. srv gives you three escape hatches; pick whichever matches where the host service actually lives.
+
+### (a) Host services on the loopback → `host.docker.internal`
+
+If MySQL/Redis/etc. listen on the host's `127.0.0.1`, srv already wires `extra_hosts: host.docker.internal:host-gateway` into the FrankenPHP container on Linux (macOS/Windows Docker Desktop provides the name natively). Rewrite each affected `.env` entry:
+
+```env
+DB_HOST=host.docker.internal
+REDIS_HOST=host.docker.internal
+ELASTICSEARCH_HOSTS=http://host.docker.internal:9200
+```
+
+`srv doctor` scans every PHP site's `.env` for `*_HOST=127.0.0.1`-style entries and warns when it finds them.
+
+### (b) Services in your own docker-compose → `srv network attach`
+
+If you run MySQL/Redis in another `docker compose` stack of your own, the cleanest fix is to join that stack's network so the FrankenPHP container can reach the containers by their hostname.
+
+```bash
+srv network attach my-app mysql01_default
+srv network attach my-app redis01_default
+srv network list   my-app
+srv network detach my-app redis01_default
+```
+
+Then in `.env`:
+
+```env
+DB_HOST=mysql01
+REDIS_HOST=redis01
+```
+
+Networks must already exist as external Docker networks; srv won't create them for you. Run `srv restart <site>` after attaching/detaching so the container picks up the new network membership.
+
+### (c) Host filesystem paths / extra binaries → `srv volume add`
+
+PHP often shells out to host binaries (`ffmpeg`, `imagemagick`, `gs`, `libreoffice`, `dcraw`, …) or writes through a host TEMP/asset path. Mount whatever you need into the container:
+
+```bash
+# Make your nix-profile binaries available to PHP
+srv volume add my-app ~/.nix-profile:/home/$USER/.nix-profile:ro
+srv volume add my-app /nix:/nix:ro
+
+# A shared temp directory that lives on the host
+srv volume add my-app /tmp/uploads:/tmp/uploads
+
+# Pass --volume HOST:CONTAINER[:ro] (repeatable) at site-add time too
+srv add ./laravel-app --domain app.test --local \
+  --volume ~/.nix-profile:/home/$USER/.nix-profile:ro \
+  --volume /nix:/nix:ro
+```
+
+`srv volume list <site>` lists current mounts; `srv volume remove <site> <target>` detaches by container path. Mounts must use absolute paths (with `~` expansion); relative or non-existent host paths are refused up front. The `/app` target is reserved for the project bind so you can't shadow it.
+
+After any `srv network` or `srv volume` change, run `srv restart <site>` for the container to be recreated.
+
+### Worked example: full Laravel stack
+
+```bash
+# 1. Add the site, bind-mounting nix binaries up front
+srv add ~/projects/kontainer --domain kontainer.test --local \
+  --volume ~/.nix-profile:/home/$USER/.nix-profile:ro \
+  --volume /nix:/nix:ro
+
+# 2. Join the MySQL/Redis/Elastic stack you already run elsewhere
+srv network attach kontainer my-stack_default
+
+# 3. Update .env once
+#    DB_HOST=mysql01
+#    REDIS_HOST=redis01
+#    ELASTICSEARCH_HOSTS=http://elastic01:9200
+
+# 4. Sanity-check
+srv doctor
+srv restart kontainer
 ```
 
 ## Proxying Non-Docker Services
