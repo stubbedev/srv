@@ -376,7 +376,7 @@ func buildImportPlan(sites []*valet.Site) []importStep {
 
 	for _, key := range order {
 		g := groups[key]
-		plan = append(plan, planPHPSite(g))
+		plan = append(plan, planPHPSite(g)...)
 	}
 	for _, s := range loose {
 		if step, ok := planLooseSite(s); ok {
@@ -395,41 +395,83 @@ func buildImportPlan(sites []*valet.Site) []importStep {
 	return plan
 }
 
-func planPHPSite(g *importGroup) importStep {
+// planPHPSite emits TWO import steps for a PHP project: first a `srv
+// scaffold` to write a Dockerfile + docker-compose.yml into the project,
+// then an `srv add` against that project. srv no longer owns PHP
+// runtimes directly, so the import path has to materialise something the
+// dockerfile/compose flow can pick up.
+//
+// Returned as a single importStep whose args/line cover the scaffold call;
+// the add command and any route attachments are listed as notes (and are
+// also emitted as follow-up importSteps via planPHPFollowups).
+func planPHPSite(g *importGroup) []importStep {
 	s := g.canonical
-	args := []string{"add", s.ProjectPath, "--domain", s.Domain, "--local"}
+	framework := detectPHPFrameworkForImport(s.ProjectPath)
+
+	scaffoldArgs := []string{"scaffold", "--lang", "php", "--framework", framework, "--dir", s.ProjectPath, "--force"}
+	scaffoldStep := importStep{
+		line: "srv " + strings.Join(scaffoldArgs, " "),
+		args: scaffoldArgs,
+	}
+
+	addArgs := []string{"add", s.ProjectPath, "--domain", s.Domain, "--local"}
 	if s.Wildcard {
-		args = append(args, "--wildcard")
+		addArgs = append(addArgs, "--wildcard")
 	}
 	if s.Internal {
-		args = append(args, "--internal-http")
+		addArgs = append(addArgs, "--internal-http")
 	}
 	for _, alias := range g.aliases {
-		// Aliases inherit wildcard/internal flags from the canonical site;
-		// no per-alias overrides supported in `srv add`.
-		args = append(args, "--alias", alias.Domain)
+		addArgs = append(addArgs, "--alias", alias.Domain)
 		for _, extra := range alias.Aliases {
-			args = append(args, "--alias", extra)
+			addArgs = append(addArgs, "--alias", extra)
 		}
 	}
 	for _, a := range s.Aliases {
-		args = append(args, "--alias", a)
+		addArgs = append(addArgs, "--alias", a)
 	}
-	addLimitFlags(&args, s)
+	addLimitFlags(&addArgs, s)
 
-	notes := []string{}
+	addNotes := []string{}
 	for _, r := range s.Routes {
-		notes = append(notes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
+		addNotes = append(addNotes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
 	}
 	for _, alias := range g.aliases {
 		for _, r := range alias.Routes {
-			notes = append(notes, fmt.Sprintf("post-add (from %s): srv route add <name> %s", alias.Domain, routeFlags(r)))
+			addNotes = append(addNotes, fmt.Sprintf("post-add (from %s): srv route add <name> %s", alias.Domain, routeFlags(r)))
 		}
 	}
 	for _, n := range s.UnknownNotes {
-		notes = append(notes, "unhandled: "+n)
+		addNotes = append(addNotes, "unhandled: "+n)
 	}
-	return importStep{line: "srv " + strings.Join(args, " "), args: args, notes: notes}
+	addStep := importStep{
+		line:  "srv " + strings.Join(addArgs, " "),
+		args:  addArgs,
+		notes: addNotes,
+	}
+
+	return []importStep{scaffoldStep, addStep}
+}
+
+// detectPHPFrameworkForImport probes a project dir for the framework markers
+// the scaffold command supports. Returns "generic" when nothing matches.
+func detectPHPFrameworkForImport(dir string) string {
+	if dir == "" {
+		return "generic"
+	}
+	if _, err := os.Stat(filepath.Join(dir, "artisan")); err == nil {
+		return "laravel"
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wp-config.php")); err == nil {
+		return "wordpress"
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wp-content")); err == nil {
+		return "wordpress"
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bin", "console")); err == nil {
+		return "symfony"
+	}
+	return "generic"
 }
 
 // planLooseSite emits a step for non-PHP entries (proxies, unresolved PHP).

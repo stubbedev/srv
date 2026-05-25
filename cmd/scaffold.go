@@ -250,6 +250,11 @@ services:
     working_dir: /app
     volumes:
       - .:/app
+    # Lets the container reach services on the host's loopback (e.g. a
+    # MySQL bound to 127.0.0.1) by name. Use DB_HOST=host.docker.internal
+    # in your .env to point app code at host services.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "%d"
     restart: unless-stopped

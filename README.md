@@ -428,53 +428,58 @@ srv add ./site --domain dev.test --local --cache=false
 srv add ./assets --domain cdn.example.com --cors
 ```
 
-### PHP Sites
+### Language-runtime sites (PHP, Node, Ruby, Python)
 
-For directories containing a `composer.json` or `.php`/`.phtml` files (without a `docker-compose.yml`), srv generates **one per-site container running FrankenPHP** (Caddy + embedded PHP). No separate nginx shim, no shared FPM pool — one container per site, image `srv-php-<name>:latest`.
+srv does **not** manage language runtime versions, extensions, or framework templates. The Dockerfile lives in your project, you own it. This keeps srv focused on routing / DNS / TLS — the things you actually want a Valet-replacement to handle.
 
-What you get:
+Two ways to get a Dockerfile + docker-compose.yml in front of `srv add`:
 
-- Auto-detected PHP version from `composer.json` requirements
-- Auto-detected framework (Laravel, Symfony, WordPress, or generic)
-- Auto-detected document root (`public/`, `web/`, etc.)
-- Required extensions extracted from `composer.json` and installed via `install-php-extensions`
-- BuildKit cache mounts in the generated Dockerfile so adding/removing one extension reuses the apk and IPE caches across builds
-- Container runs as the host UID/GID so files PHP writes back are owned by you, not root
-- `extra_hosts: host.docker.internal:host-gateway` on Linux so existing `.env` host-loopback references reach the host (see [Host Services](#host-services--php-runtime) below)
-- Healthcheck on the container (busybox `nc -z`)
-- macOS bind mounts get `consistency: cached` automatically
-- Drop a `Dockerfile.srv` (or `.srv/Dockerfile`) at the project root to override the generated Dockerfile; the first uncommented `FROM` must be `dunglas/frankenphp:...`
+**1. Write your own.** Any project root with a `Dockerfile` is a SiteTypeDockerfile site; any project root with a `docker-compose.yml` is a SiteTypeCompose site. srv attaches Traefik routing and leaves your files alone.
 
-**Container layout per site:**
-- 1 FrankenPHP container (`srv-<sitename>-php`, label `dev.srv.type=php`)
-
-The project is bind-mounted at `/app` inside the container. `srv shell <site>` exec's in there. `SERVER_NAME=:80` and `SERVER_ROOT=public/` (or your detected docroot) are set via env so Caddy serves the right tree.
+**2. Use the scaffolder.** `srv scaffold` writes a starter Dockerfile + docker-compose.yml + .dockerignore into the project, then you edit and commit them like any other source file.
 
 ```bash
-# Laravel project (auto-detects framework, PHP version, and extensions)
-srv add ./laravel-app --domain app.test --local
+# PHP
+srv scaffold --lang php --framework laravel
+srv scaffold --lang php --framework symfony --version 8.3
+srv scaffold --lang php --framework wordpress --extensions imagick,redis
 
-# WordPress site
-srv add ./wordpress --domain blog.test --local
+# Node / Bun via the same image you'd use anyway
+srv scaffold --lang node --framework nextjs --version 22
+srv scaffold --lang node --framework express
 
-# Override PHP version
-srv add ./myapp --domain myapp.test --local --php-version 8.3
+# Ruby
+srv scaffold --lang ruby --framework rails
 
-# Override document root
-srv add ./myapp --domain myapp.test --local --document-root public
-
-# Add/remove extensions from auto-detected defaults
-srv add ./myapp --domain myapp.test --local --php-extensions "+redis,-calendar"
-
-# Replace all extensions with an explicit list
-srv add ./myapp --domain myapp.test --local --php-extensions "pdo,pdo_mysql,mbstring,gd"
+# Python
+srv scaffold --lang python --framework fastapi
 ```
 
-**Detection order:**
-1. `docker-compose.yml` present - treated as a compose site (not PHP)
-2. `composer.json` present - PHP site with full metadata extraction
-3. `.php` or `.phtml` files present - PHP site with default extensions
-4. Otherwise - static site
+Each scaffold call produces three files in the target directory:
+
+| File                | Purpose                                                                                |
+|---------------------|----------------------------------------------------------------------------------------|
+| `Dockerfile`        | The runtime image build. PHP uses `dunglas/frankenphp:php<version>-alpine`; Node uses `node:<version>-alpine`; Ruby `ruby:<version>-alpine`; Python `python:<version>-alpine`. |
+| `docker-compose.yml`| Single `app` service, builds the Dockerfile, mounts `.` at `/app`, runs as `${UID:-1000}:${GID:-1000}` so file ownership matches the host. |
+| `.dockerignore`     | Sensible default exclusions (vendor, node_modules, build artefacts, `.env.local`, etc.) |
+
+After scaffolding, run `srv add`:
+
+```bash
+srv scaffold --lang php --framework laravel
+srv add . --domain app.test --local
+```
+
+`srv add` detects the docker-compose.yml and treats it like any other compose site — Traefik routes the domain, mkcert issues the cert, dnsmasq registers `.test`.
+
+**Re-scaffolding.** Re-running `srv scaffold` refuses to overwrite by default. Pass `--force` to replace the existing files. The expectation is that you'll customise the generated Dockerfile (add extensions, mount nix profile, install ffmpeg) and commit those changes — srv won't touch them again.
+
+**Detection order when you run `srv add PATH` without flags:**
+
+1. `docker-compose.yml` present → compose site
+2. `Dockerfile` present → dockerfile site
+3. `composer.json` / `package.json` / `Gemfile` / `requirements.txt` etc. present **without** Dockerfile/compose → hard error pointing at `srv scaffold`
+4. Otherwise → static site
 
 ### Docker-Compose Sites
 
@@ -496,13 +501,13 @@ srv add ./app --domain api.test --local --service backend
 srv add ./app --domain myapp.test --local --port 3000
 ```
 
-## Host Services & PHP Runtime
+## Host Services
 
-PHP sites run in a container, so the usual `DB_HOST=127.0.0.1` in your `.env` no longer points at MySQL on the host — it points at the FrankenPHP container itself. srv gives you three escape hatches; pick whichever matches where the host service actually lives.
+App code in a container has its own loopback namespace, so the usual `DB_HOST=127.0.0.1` in your `.env` no longer points at MySQL on the host — it points at the app container itself. srv gives you three escape hatches; pick whichever matches where the host service actually lives.
 
 ### (a) Host services on the loopback → `host.docker.internal`
 
-If MySQL/Redis/etc. listen on the host's `127.0.0.1`, srv already wires `extra_hosts: host.docker.internal:host-gateway` into the FrankenPHP container on Linux (macOS/Windows Docker Desktop provides the name natively). Rewrite each affected `.env` entry:
+If MySQL/Redis/etc. listen on the host's `127.0.0.1`, add `extra_hosts: ["host.docker.internal:host-gateway"]` to your `docker-compose.yml` (the scaffold templates include this) and rewrite each affected `.env` entry:
 
 ```env
 DB_HOST=host.docker.internal

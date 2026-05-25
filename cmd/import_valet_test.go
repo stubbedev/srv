@@ -135,15 +135,25 @@ func TestBuildImportPlanGrouping(t *testing.T) {
 		{Domain: "other.test", ProjectPath: "/srv/other", IsPHP: true},
 	}
 	plan := buildImportPlan(sites)
-	if len(plan) != 2 {
-		t.Errorf("expected 2 grouped sites, got %d (%v)", len(plan), plan)
+	// Each PHP site now produces TWO steps: scaffold + add.
+	if len(plan) != 4 {
+		t.Errorf("expected 4 steps (2 grouped sites × scaffold+add), got %d (%v)", len(plan), plan)
 	}
-	first := plan[0].line
-	if !strings.Contains(first, "/srv/cms") {
-		t.Errorf("first plan missing canonical path: %q", first)
+	var addLine string
+	for _, step := range plan {
+		if strings.Contains(step.line, " add /srv/cms ") {
+			addLine = step.line
+		}
 	}
-	if !strings.Contains(first, "--alias cms-admin.test") {
-		t.Errorf("aliases not folded: %q", first)
+	if addLine == "" {
+		t.Fatalf("missing add step for /srv/cms; got %v", plan)
+	}
+	if !strings.Contains(addLine, "--alias cms-admin.test") {
+		t.Errorf("aliases not folded into add: %q", addLine)
+	}
+	// Scaffold step must come first.
+	if !strings.Contains(plan[0].line, "scaffold") {
+		t.Errorf("first step should be scaffold, got %q", plan[0].line)
 	}
 }
 
