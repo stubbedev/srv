@@ -1,479 +1,360 @@
-// Package ui provides terminal UI styling and helpers.
+// Package ui provides terminal output helpers for the srv CLI.
+//
+// Design goals (in priority order):
+//
+//  1. Scriptable. Results go to stdout, diagnostics (Info/Warn/Dim/Success
+//     status messages) go to stderr. Pipe-safe by default: NO_COLOR is
+//     honoured and ANSI colour codes are auto-disabled when stdout/stderr
+//     isn't a TTY. No interactive prompts in this package — callers must
+//     either drive the run via flags or read stdin themselves.
+//  2. Plain. No Unicode icons; the colour alone signals severity. The
+//     message text always carries the semantics so output remains
+//     greppable even when colour is stripped.
+//  3. Minimal deps. Uses fatih/color for the styling layer; no charm /
+//     lipgloss / huh / bubbletea.
 package ui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
-	"charm.land/lipgloss/v2"
+	"github.com/fatih/color"
 
 	"github.com/stubbedev/srv/internal/constants"
 )
 
 var (
-	// Color palette - using adaptive colors that work in light/dark terminals
-	green  = lipgloss.Color("10")
-	red    = lipgloss.Color("9")
-	yellow = lipgloss.Color("11")
-	blue   = lipgloss.Color("12")
-	gray   = lipgloss.Color("8")
-	cyan   = lipgloss.Color("14")
-	white  = lipgloss.Color("15")
-	purple = lipgloss.Color("13")
-
-	// Styles
-	SuccessStyle = lipgloss.NewStyle().Foreground(green)
-	ErrorStyle   = lipgloss.NewStyle().Foreground(red)
-	WarnStyle    = lipgloss.NewStyle().Foreground(yellow)
-	InfoStyle    = lipgloss.NewStyle().Foreground(blue)
-	DimStyle     = lipgloss.NewStyle().Foreground(gray)
-	CyanStyle    = lipgloss.NewStyle().Foreground(cyan)
-	BoldStyle    = lipgloss.NewStyle().Bold(true)
-	CodeStyle    = lipgloss.NewStyle().Foreground(cyan)
-	AccentStyle  = lipgloss.NewStyle().Foreground(purple)
-
-	// Verbose mode flag
+	// Verbose unlocks VerboseLog. Off by default.
 	Verbose bool
+	// Quiet suppresses Info/Warn/Dim/Success diagnostic lines. Error and
+	// Print (result) output still go through.
+	Quiet bool
 
-	// Mutex for thread-safe output
+	// printMu serialises stdout/stderr writes for the parallel-operation helpers.
 	printMu sync.Mutex
 
-	// Unicode support detection (cached)
-	unicodeSupport     bool
-	unicodeSupportOnce sync.Once
+	// Colour functions. fatih/color disables itself automatically when the
+	// destination isn't a TTY or NO_COLOR is set, so callers can use these
+	// unconditionally — output stays clean in pipes and CI logs.
+	successC = color.New(color.FgGreen).SprintFunc()
+	errorC   = color.New(color.FgRed).SprintFunc()
+	warnC    = color.New(color.FgYellow).SprintFunc()
+	infoC    = color.New(color.FgBlue).SprintFunc()
+	dimC     = color.New(color.FgHiBlack).SprintFunc()
+	boldC    = color.New(color.Bold).SprintFunc()
+	cyanC    = color.New(color.FgCyan).SprintFunc()
+	purpleC  = color.New(color.FgMagenta).SprintFunc()
 )
 
-// Symbols - using Unicode when supported, ASCII fallback otherwise
+// outStdout / outStderr are the destinations for diagnostic / result output.
+// Exposed as vars so tests can swap them.
 var (
-	SymbolSuccess string
-	SymbolError   string
-	SymbolWarning string
-	SymbolInfo    string
-	SymbolArrow   string
-	SymbolBullet  string
-	SymbolCheck   string
-	SymbolCross   string
-	SymbolDot     string
+	outStdout io.Writer = os.Stdout
+	outStderr io.Writer = os.Stderr
 )
 
-func init() {
-	initSymbols()
-}
-
-// initSymbols sets up symbols based on terminal Unicode support
-func initSymbols() {
-	unicodeSupportOnce.Do(func() {
-		unicodeSupport = detectUnicodeSupport()
-	})
-
-	if unicodeSupport {
-		SymbolSuccess = "✓"
-		SymbolError = "✗"
-		SymbolWarning = "!"
-		SymbolInfo = "•"
-		SymbolArrow = "→"
-		SymbolBullet = "●"
-		SymbolCheck = "✓"
-		SymbolCross = "✗"
-		SymbolDot = "·"
-	} else {
-		SymbolSuccess = "[ok]"
-		SymbolError = "[error]"
-		SymbolWarning = "[warn]"
-		SymbolInfo = "[info]"
-		SymbolArrow = "->"
-		SymbolBullet = "*"
-		SymbolCheck = "[ok]"
-		SymbolCross = "[x]"
-		SymbolDot = "."
-	}
-}
-
-// detectUnicodeSupport checks if the terminal likely supports Unicode
-func detectUnicodeSupport() bool {
-	// Check common environment variables that indicate Unicode support
-	lang := os.Getenv("LANG")
-	lcAll := os.Getenv("LC_ALL")
-	term := os.Getenv("TERM")
-
-	// Check for UTF-8 in locale settings
-	if strings.Contains(strings.ToLower(lang), "utf") ||
-		strings.Contains(strings.ToLower(lcAll), "utf") {
-		return true
-	}
-
-	// Modern terminals typically support Unicode
-	unicodeTerms := []string{"xterm-256color", "screen-256color", "tmux-256color", "alacritty", "kitty", "wezterm"}
-	for _, t := range unicodeTerms {
-		if strings.Contains(term, t) {
-			return true
-		}
-	}
-
-	// Default to Unicode on macOS and modern Linux
-	if os.Getenv("TERM_PROGRAM") != "" {
-		return true
-	}
-
-	return false
-}
-
-// Spinner represents an animated spinner for long-running operations.
-type Spinner struct {
-	message  string
-	frames   []string
-	done     chan struct{}
-	stopOnce sync.Once
-}
-
-// NewSpinner creates a new spinner with a message.
-func NewSpinner(message string) *Spinner {
-	frames := []string{"|", "/", "-", "\\"}
-	if unicodeSupport {
-		frames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	}
-	return &Spinner{
-		message: message,
-		frames:  frames,
-		done:    make(chan struct{}),
-	}
-}
-
-// Start begins the spinner animation.
-// The spinner will automatically stop after 10 minutes to prevent goroutine leaks.
-func (s *Spinner) Start() {
-	go func() {
-		i := 0
-		timeout := time.After(constants.SpinnerTimeout)
-		ticker := time.NewTicker(constants.SpinnerInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-s.done:
-				return
-			case <-timeout:
-				// Auto-stop after timeout to prevent goroutine leak
-				s.Stop()
-				return
-			case <-ticker.C:
-				fmt.Printf("\r%s %s", DimStyle.Render(s.frames[i%len(s.frames)]), s.message)
-				i++
-			}
-		}
-	}()
-}
-
-// Stop ends the spinner animation.
-func (s *Spinner) Stop() {
-	s.stopOnce.Do(func() {
-		close(s.done)
-		fmt.Print("\r\033[K") // Clear line
-	})
-}
-
-// StopWithSuccess ends the spinner and prints a success message.
-func (s *Spinner) StopWithSuccess(message string) {
-	s.Stop()
-	Success("%s", message)
-}
-
-// StopWithError ends the spinner and prints an error message.
-func (s *Spinner) StopWithError(message string) {
-	s.Stop()
-	Error("%s", message)
-}
-
-// Steps tracks progress through a multi-step operation.
+// Steps tracks progress through a multi-step operation. Output goes to stderr
+// (it's diagnostic, not result data).
 type Steps struct {
 	total   int
 	current int
 }
 
 // NewSteps creates a new step tracker.
-func NewSteps(total int) *Steps {
-	return &Steps{total: total, current: 0}
-}
+func NewSteps(total int) *Steps { return &Steps{total: total} }
 
 // Next advances to the next step and prints the message.
 func (s *Steps) Next(format string, args ...any) {
 	s.current++
+	if Quiet {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	prefix := DimStyle.Render(fmt.Sprintf("[%d/%d]", s.current, s.total))
-	fmt.Printf("%s %s %s\n", prefix, InfoStyle.Render(SymbolArrow), msg)
+	fmt.Fprintf(outStderr, "%s %s\n", dimC(fmt.Sprintf("[%d/%d]", s.current, s.total)), msg)
 }
 
 // Done prints a completion message for the current step.
 func (s *Steps) Done(format string, args ...any) {
+	if Quiet {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	prefix := DimStyle.Render(fmt.Sprintf("[%d/%d]", s.current, s.total))
-	fmt.Printf("%s %s %s\n", prefix, SuccessStyle.Render(SymbolCheck), msg)
+	fmt.Fprintf(outStderr, "%s %s\n", dimC(fmt.Sprintf("[%d/%d]", s.current, s.total)), successC(msg))
 }
 
 // Skip prints a skip message for the current step.
 func (s *Steps) Skip(format string, args ...any) {
+	if Quiet {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	prefix := DimStyle.Render(fmt.Sprintf("[%d/%d]", s.current, s.total))
-	fmt.Printf("%s %s %s\n", prefix, DimStyle.Render(SymbolDot), msg)
+	fmt.Fprintf(outStderr, "%s %s\n", dimC(fmt.Sprintf("[%d/%d]", s.current, s.total)), dimC(msg))
 }
 
-// Success prints a success message with green checkmark.
+// Success writes a diagnostic success line to stderr. Suppressed under --quiet.
 func Success(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s %s\n", SuccessStyle.Render(SymbolSuccess), msg)
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, successC(fmt.Sprintf(format, args...)))
 }
 
-// Error prints an error message with red cross to stderr.
+// Error writes an error line to stderr. Never suppressed.
 func Error(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(os.Stderr, "%s %s\n", ErrorStyle.Render(SymbolError), msg)
+	fmt.Fprintln(outStderr, errorC(fmt.Sprintf(format, args...)))
 }
 
-// Warn prints a warning message with yellow warning symbol.
+// Warn writes a warning line to stderr. Suppressed under --quiet.
 func Warn(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s %s\n", WarnStyle.Render(SymbolWarning), msg)
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, warnC(fmt.Sprintf(format, args...)))
 }
 
-// Info prints an info message with blue bullet.
+// Info writes an informational diagnostic line to stderr. Suppressed under
+// --quiet. Use Print for actual command results that should be pipeable.
 func Info(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s %s\n", InfoStyle.Render(SymbolInfo), msg)
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, infoC(fmt.Sprintf(format, args...)))
 }
 
-// Dim prints a dimmed message with gray color.
+// Dim writes a low-emphasis diagnostic line to stderr. Suppressed under --quiet.
 func Dim(format string, args ...any) {
-	fmt.Println(DimStyle.Render(fmt.Sprintf(format, args...)))
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, dimC(fmt.Sprintf(format, args...)))
 }
 
-// Bold prints a bold message.
+// Bold writes a bold diagnostic line to stderr. Suppressed under --quiet.
 func Bold(format string, args ...any) {
-	fmt.Println(BoldStyle.Render(fmt.Sprintf(format, args...)))
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, boldC(fmt.Sprintf(format, args...)))
 }
 
-// Code prints text styled as code (cyan).
+// Code writes a code-styled diagnostic line to stderr (kept for backwards
+// compat with existing callsites that want a cyan-ish tone).
 func Code(format string, args ...any) {
-	fmt.Println(CodeStyle.Render(fmt.Sprintf(format, args...)))
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, cyanC(fmt.Sprintf(format, args...)))
 }
 
-// Print prints a plain message (for when you need a newline without color).
+// Print writes a result line to STDOUT — what a script would consume. No
+// colour, no suppression. Use for the actual data the command produced.
 func Print(format string, args ...any) {
-	fmt.Println(fmt.Sprintf(format, args...))
+	fmt.Fprintln(outStdout, fmt.Sprintf(format, args...))
 }
 
-// Blank prints an empty line.
+// Blank emits a blank line on stderr (alignment for diagnostic output).
 func Blank() {
-	fmt.Println()
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr)
 }
 
-// UsageError returns a formatted error that includes a usage hint.
-// The hint is printed to stderr alongside the error so the user sees
-// both the problem and the correct invocation in one glance.
-// Example output:
-//
-//	✗ path to a directory is required
-//	  usage: srv add PATH --domain DOMAIN
+// UsageError returns a formatted error including a usage hint. Used by
+// command Pre/Run handlers when a required flag is missing.
 func UsageError(usage, format string, args ...any) error {
 	msg := fmt.Sprintf(format, args...)
-	hint := DimStyle.Render("  usage: " + usage)
+	hint := dimC("  usage: " + usage)
 	return fmt.Errorf("%s\n%s", msg, hint)
 }
 
-// VerboseLog prints a message only if verbose mode is enabled.
+// VerboseLog writes to stderr only when Verbose is true.
 func VerboseLog(format string, args ...any) {
-	if Verbose {
-		fmt.Println(DimStyle.Render(fmt.Sprintf(format, args...)))
+	if !Verbose {
+		return
 	}
+	fmt.Fprintln(outStderr, dimC(fmt.Sprintf(format, args...)))
 }
 
 // Indent returns a string with the given indentation level.
 func Indent(level int, format string, args ...any) string {
-	indent := strings.Repeat(constants.IndentString, level)
-	return indent + fmt.Sprintf(format, args...)
+	return strings.Repeat(constants.IndentString, level) + fmt.Sprintf(format, args...)
 }
 
-// IndentedSuccess prints an indented success message with checkmark.
+// IndentedSuccess writes an indented success line to stderr.
 func IndentedSuccess(level int, format string, args ...any) {
-	indent := strings.Repeat(constants.IndentString, level)
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s%s %s\n", indent, SuccessStyle.Render(SymbolSuccess), msg)
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, successC(Indent(level, format, args...)))
 }
 
-// IndentedError prints an indented error message with cross.
+// IndentedError writes an indented error line to stderr. Never suppressed.
 func IndentedError(level int, format string, args ...any) {
-	indent := strings.Repeat(constants.IndentString, level)
-	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(os.Stderr, "%s%s %s\n", indent, ErrorStyle.Render(SymbolError), msg)
+	fmt.Fprintln(outStderr, errorC(Indent(level, format, args...)))
 }
 
-// IndentedWarn prints an indented warning message with warning symbol.
+// IndentedWarn writes an indented warning to stderr.
 func IndentedWarn(level int, format string, args ...any) {
-	indent := strings.Repeat(constants.IndentString, level)
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s%s %s\n", indent, WarnStyle.Render(SymbolWarning), msg)
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, warnC(Indent(level, format, args...)))
 }
 
-// IndentedInfo prints an indented info message with bullet.
+// IndentedInfo writes an indented info line to stderr.
 func IndentedInfo(level int, format string, args ...any) {
-	indent := strings.Repeat(constants.IndentString, level)
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s%s %s\n", indent, InfoStyle.Render(SymbolInfo), msg)
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, infoC(Indent(level, format, args...)))
 }
 
-// IndentedDim prints an indented dimmed message.
+// IndentedDim writes an indented dim line to stderr.
 func IndentedDim(level int, format string, args ...any) {
-	fmt.Println(DimStyle.Render(Indent(level, format, args...)))
+	if Quiet {
+		return
+	}
+	fmt.Fprintln(outStderr, dimC(Indent(level, format, args...)))
 }
 
 // =============================================================================
-// Thread-safe output functions for parallel operations
+// Thread-safe variants for parallel operations
 // =============================================================================
 
-// SafeIndentedDim prints an indented dimmed message (thread-safe).
+// SafeIndentedDim writes a dim line under a mutex.
 func SafeIndentedDim(level int, format string, args ...any) {
+	if Quiet {
+		return
+	}
 	printMu.Lock()
 	defer printMu.Unlock()
-	fmt.Println(DimStyle.Render(Indent(level, format, args...)))
+	fmt.Fprintln(outStderr, dimC(Indent(level, format, args...)))
 }
 
-// SafeError prints an error message with symbol (thread-safe).
+// SafeError writes an error line under a mutex.
 func SafeError(format string, args ...any) {
 	printMu.Lock()
 	defer printMu.Unlock()
-	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(os.Stderr, "%s %s\n", ErrorStyle.Render(SymbolError), msg)
+	fmt.Fprintln(outStderr, errorC(fmt.Sprintf(format, args...)))
 }
 
-// SafeWarn prints a warning message with symbol (thread-safe).
+// SafeWarn writes a warning line under a mutex.
 func SafeWarn(format string, args ...any) {
+	if Quiet {
+		return
+	}
 	printMu.Lock()
 	defer printMu.Unlock()
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf("%s %s\n", WarnStyle.Render(SymbolWarning), msg)
+	fmt.Fprintln(outStderr, warnC(fmt.Sprintf(format, args...)))
 }
 
-// StatusColor returns a colored status string.
+// =============================================================================
+// Text colour helpers — colour a string in-place for tables / inline use
+// =============================================================================
+
+// StatusColor returns the status string with a colour appropriate to the value.
+// Returns the bare string for unknown values.
 func StatusColor(status string) string {
 	switch status {
-	case "running", "valid":
-		return SuccessStyle.Render(status)
-	case "stopped", "auto":
-		return DimStyle.Render(status)
-	case "broken", "expired", "missing":
-		return ErrorStyle.Render(status)
+	case "running", "valid", "active":
+		return successC(status)
+	case "stopped", "auto", "inactive":
+		return dimC(status)
+	case "broken", "expired", "missing", "failed":
+		return errorC(status)
 	case "expiring":
-		return WarnStyle.Render(status)
+		return warnC(status)
 	default:
-		// Check for partial status (e.g., "partial", "1/3 running")
 		if strings.HasPrefix(status, constants.StatusPartial) {
-			return WarnStyle.Render(status)
+			return warnC(status)
 		}
 		return status
 	}
 }
 
-// TypeColor returns a colored type string.
+// TypeColor returns "local" or "production" tinted for inline use in tables.
 func TypeColor(isLocal bool) string {
 	if isLocal {
-		return CyanStyle.Render("local")
+		return cyanC("local")
 	}
-	return SuccessStyle.Render("production")
+	return successC("production")
 }
 
-// Highlight returns text with cyan highlighting.
-func Highlight(s string) string {
-	return CyanStyle.Render(s)
-}
+// Highlight returns text with the highlight colour.
+func Highlight(s string) string { return cyanC(s) }
 
-// SuccessText returns green colored text without newline.
-func SuccessText(s string) string {
-	return SuccessStyle.Render(s)
-}
+// SuccessText / ErrorText / WarnText / InfoText / DimText return their input
+// tinted with the corresponding colour.
+func SuccessText(s string) string { return successC(s) }
+func ErrorText(s string) string   { return errorC(s) }
+func WarnText(s string) string    { return warnC(s) }
+func InfoText(s string) string    { return infoC(s) }
+func DimText(s string) string     { return dimC(s) }
+func AccentText(s string) string  { return purpleC(s) }
 
-// ErrorText returns red colored text without newline.
-func ErrorText(s string) string {
-	return ErrorStyle.Render(s)
-}
+// =============================================================================
+// Table output — plain ASCII, no lipgloss
+// =============================================================================
 
-// WarnText returns yellow colored text without newline.
-func WarnText(s string) string {
-	return WarnStyle.Render(s)
-}
-
-// InfoText returns blue colored text without newline.
-func InfoText(s string) string {
-	return InfoStyle.Render(s)
-}
-
-// DimText returns gray colored text without newline.
-func DimText(s string) string {
-	return DimStyle.Render(s)
-}
-
-// PrintTable prints a formatted table with colored headers.
+// PrintTable writes a column-aligned table to STDOUT (results, not diagnostics).
+// Headers are bold; rows are written verbatim so callers can pre-colour cells
+// with StatusColor / TypeColor / DimText etc.
+//
+// Width is computed from the visible character count (ANSI sequences stripped)
+// so coloured cells don't throw alignment off.
 func PrintTable(headers []string, rows [][]string) {
-	if len(rows) == 0 {
+	if len(headers) == 0 && len(rows) == 0 {
 		return
 	}
-
-	// Calculate column widths (accounting for ANSI escape codes)
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = len(stripAnsi(h))
 	}
 	for _, row := range rows {
 		for i, cell := range row {
-			// Strip ANSI codes for width calculation
-			plainCell := stripAnsi(cell)
-			if i < len(widths) && len(plainCell) > widths[i] {
-				widths[i] = len(plainCell)
+			if i >= len(widths) {
+				break
+			}
+			if w := len(stripAnsi(cell)); w > widths[i] {
+				widths[i] = w
 			}
 		}
 	}
 
-	// Print header
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(white)
+	// Header
 	for i, h := range headers {
-		fmt.Print(headerStyle.Render(fmt.Sprintf("%-*s", widths[i], h)))
+		visible := stripAnsi(h)
+		padding := widths[i] - len(visible)
+		fmt.Fprint(outStdout, boldC(h)+strings.Repeat(" ", padding))
 		if i < len(headers)-1 {
-			fmt.Print("  ")
+			fmt.Fprint(outStdout, "  ")
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(outStdout)
 
-	// Print separator line
-	for i, w := range widths {
-		fmt.Print(DimStyle.Render(strings.Repeat(constants.TableSeparator, w)))
-		if i < len(widths)-1 {
-			fmt.Print(DimStyle.Render(constants.TableSeparator + constants.TableSeparator))
-		}
-	}
-	fmt.Println()
-
-	// Print rows
+	// Rows
 	for _, row := range rows {
 		for i, cell := range row {
-			if i < len(widths) {
-				// Pad accounting for ANSI codes
-				plainCell := stripAnsi(cell)
-				padding := widths[i] - len(plainCell)
-				fmt.Print(cell + strings.Repeat(" ", padding))
-				if i < len(row)-1 {
-					fmt.Print("  ")
-				}
+			if i >= len(widths) {
+				break
+			}
+			visible := stripAnsi(cell)
+			padding := widths[i] - len(visible)
+			fmt.Fprint(outStdout, cell+strings.Repeat(" ", padding))
+			if i < len(row)-1 {
+				fmt.Fprint(outStdout, "  ")
 			}
 		}
-		fmt.Println()
+		fmt.Fprintln(outStdout)
 	}
 }
 
-// stripAnsi removes ANSI/VT100 escape sequences from a string so that
-// PrintTable can calculate accurate display widths.
-// It handles all CSI sequences (ESC [ ... <letter>) including SGR colour
-// codes (ESC[...m), cursor movement, and line-erase sequences.
+// stripAnsi removes ANSI/VT100 escape sequences so PrintTable can compute
+// visible column widths.
 func stripAnsi(s string) string {
 	var result strings.Builder
 	inEscape := false
@@ -483,7 +364,6 @@ func stripAnsi(s string) string {
 			continue
 		}
 		if inEscape {
-			// A CSI/OSC sequence ends on the first ASCII letter.
 			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
 				inEscape = false
 			}
