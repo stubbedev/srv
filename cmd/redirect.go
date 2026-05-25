@@ -209,34 +209,16 @@ func validateRedirectInput() (*redirectInput, error) {
 // Redirect Certificate Setup
 // =============================================================================
 
+// setupRedirectCertificate ensures mkcert is installed and a cert exists for
+// the redirect's source domain. Delegates to the shared helper used by `srv
+// proxy`.
 func setupRedirectCertificate(input *redirectInput) error {
-	if err := traefik.CheckMkcert(); err != nil {
-		return err
-	}
-	if !traefik.IsCAInstalled() {
-		ui.Dim("Installing mkcert CA...")
-		res, err := traefik.InstallCA()
-		if err != nil {
-			return fmt.Errorf("failed to install mkcert CA: %w", err)
-		}
-		reportCAInstall(res, false)
-	}
-
-	siteName := constants.RedirectConfigPrefix + input.name
-	// Prefix with underscore so it sorts apart from real sites and never
-	// collides with a user-named site of the same string.
-	siteName = "_" + siteName
-
-	renewed, err := traefik.EnsureLocalCert(siteName, []string{input.domain}, input.wildcard)
-	if err != nil {
-		return fmt.Errorf("failed to generate certificate: %w", err)
-	}
-	if renewed {
-		ui.Dim("Generated SSL certificate for %s", input.domain)
-	}
-	return nil
+	return ensureLocalCertForResource(redirectSiteName(input.name), input.domain, input.wildcard)
 }
 
+// redirectSiteName is the synthetic site name under which a redirect's local
+// cert is stored. Prefixed with underscore so it sorts apart from real sites
+// and never collides with a user-named site of the same string.
 func redirectSiteName(name string) string {
 	return "_" + constants.RedirectConfigPrefix + name
 }
@@ -494,20 +476,7 @@ func runRedirectList(cmd *cobra.Command, args []string) error {
 
 // plainRedirectSSLStatus mirrors getRedirectSSLStatus without colour for json.
 func plainRedirectSSLStatus(name, domain string) string {
-	if domain == "" {
-		return ""
-	}
-	cert := traefik.GetLocalCertInfo(redirectSiteName(name), domain)
-	switch {
-	case !cert.Exists:
-		return "missing"
-	case cert.IsExpired:
-		return "expired"
-	case cert.DaysLeft <= constants.CertExpiryWarningDays:
-		return "expiring"
-	default:
-		return "valid"
-	}
+	return localCertStatus(redirectSiteName(name), domain)
 }
 
 // =============================================================================
@@ -515,21 +484,7 @@ func plainRedirectSSLStatus(name, domain string) string {
 // =============================================================================
 
 func getRedirectSSLStatus(name, domain string) string {
-	if domain == "" {
-		return ui.DimText("-")
-	}
-	siteName := redirectSiteName(name)
-	cert := traefik.GetLocalCertInfo(siteName, domain)
-	if !cert.Exists {
-		return ui.StatusColor("missing")
-	}
-	if cert.IsExpired {
-		return ui.StatusColor("expired")
-	}
-	if cert.DaysLeft <= constants.CertExpiryWarningDays {
-		return ui.StatusColor("expiring")
-	}
-	return ui.StatusColor("valid")
+	return localCertStatusColored(redirectSiteName(name), domain)
 }
 
 func getRedirectNames() []string {

@@ -201,36 +201,15 @@ func validateProxyInput() (*proxyInput, error) {
 // Proxy Certificate Setup
 // =============================================================================
 
-// setupProxyCertificate ensures mkcert is installed and generates/renews the certificate.
+// setupProxyCertificate ensures mkcert is installed and a cert exists for
+// the proxy's domain. Delegates to the shared helper used by `srv redirect`.
 func setupProxyCertificate(input *proxyInput) error {
-	// Setup mkcert
-	if err := traefik.CheckMkcert(); err != nil {
-		return err
-	}
-
-	// Auto-install CA if not already installed
-	if !traefik.IsCAInstalled() {
-		ui.Dim("Installing mkcert CA...")
-		res, err := traefik.InstallCA()
-		if err != nil {
-			return fmt.Errorf("failed to install mkcert CA: %w", err)
-		}
-		reportCAInstall(res, false)
-	}
-
-	// Generate certificate (or renew if expiring)
-	// Use "_proxy-{name}" as the site name for cert storage
-	proxySiteName := "_proxy-" + input.name
-	renewed, err := traefik.EnsureLocalCert(proxySiteName, []string{input.domain}, input.wildcard)
-	if err != nil {
-		return fmt.Errorf("failed to generate certificate: %w", err)
-	}
-	if renewed {
-		ui.Dim("Generated SSL certificate for %s", input.domain)
-	}
-
-	return nil
+	return ensureLocalCertForResource(proxyCertSiteName(input.name), input.domain, input.wildcard)
 }
+
+// proxyCertSiteName is the synthetic site name under which a proxy's local
+// cert is stored. Prefixed so it never collides with a real site's certs.
+func proxyCertSiteName(name string) string { return "_proxy-" + name }
 
 // =============================================================================
 // Proxy Container Network Setup
@@ -517,20 +496,7 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 
 // plainProxySSLStatus mirrors getProxySSLStatus without colour codes for json.
 func plainProxySSLStatus(name, domain string) string {
-	if domain == "" {
-		return ""
-	}
-	cert := traefik.GetLocalCertInfo("_proxy-"+name, domain)
-	switch {
-	case !cert.Exists:
-		return "missing"
-	case cert.IsExpired:
-		return "expired"
-	case cert.DaysLeft <= constants.CertExpiryWarningDays:
-		return "expiring"
-	default:
-		return "valid"
-	}
+	return localCertStatus(proxyCertSiteName(name), domain)
 }
 
 // =============================================================================
@@ -539,24 +505,7 @@ func plainProxySSLStatus(name, domain string) string {
 
 // getProxySSLStatus returns a formatted SSL status string for a proxy.
 func getProxySSLStatus(name, domain string) string {
-	if domain == "" {
-		return ui.DimText("-")
-	}
-
-	// All proxies use local mkcert certificates
-	// Use "_proxy-{name}" as the site name for cert storage
-	proxySiteName := "_proxy-" + name
-	cert := traefik.GetLocalCertInfo(proxySiteName, domain)
-	if !cert.Exists {
-		return ui.StatusColor("missing")
-	}
-	if cert.IsExpired {
-		return ui.StatusColor("expired")
-	}
-	if cert.DaysLeft <= constants.CertExpiryWarningDays {
-		return ui.StatusColor("expiring")
-	}
-	return ui.StatusColor("valid")
+	return localCertStatusColored(proxyCertSiteName(name), domain)
 }
 
 func getProxyNames() []string {
