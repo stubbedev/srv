@@ -63,7 +63,7 @@ test:
     go test -timeout 60s ./...
 
 # Run tests with coverage
-test-cover: mkcert
+test-cover:
     go test -coverprofile=coverage.out ./...
     go tool cover -html=coverage.out -o coverage.html
     @echo "Coverage report: coverage.html"
@@ -72,7 +72,7 @@ test-cover: mkcert
 # Per-package thresholds enforce we don't regress in pkgs we've invested in.
 COVERAGE_THRESHOLD := "79"
 
-cover-check: mkcert
+cover-check:
     #!/usr/bin/env bash
     set -euo pipefail
     go test -covermode=atomic -coverprofile=coverage.out ./... >/dev/null
@@ -94,8 +94,6 @@ mod:
 # Remove build artifacts
 clean:
     rm -f {{BINARY}}
-    rm -f {{MKCERT_BIN}}
-    rm -f {{MKCERT_VERSION_FILE}}
     rm -f coverage.out coverage.html
 
 # Install binary to GOPATH/bin
