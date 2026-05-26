@@ -37,43 +37,25 @@ func TestValidateSiteSetupStatic(t *testing.T) {
 	}
 }
 
-func TestValidateSiteSetupPHPProjectErrors(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "composer.json"), []byte(`{}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := validateSiteSetup(dir); err == nil {
-		t.Fatal("expected error: PHP project with no Dockerfile / docker-compose.yml")
-	}
-}
-
-func TestValidateSiteSetupNodeRejected(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"scripts":{"start":"node ."}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := validateSiteSetup(dir); err == nil {
-		t.Fatal("expected error: Node project with no Dockerfile / docker-compose.yml")
-	}
-}
-
-func TestValidateSiteSetupRubyRejected(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Gemfile"), []byte(`gem "rails"`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := validateSiteSetup(dir); err == nil {
-		t.Fatal("expected error: Ruby project with no Dockerfile / docker-compose.yml")
-	}
-}
-
-func TestValidateSiteSetupPythonRejected(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := validateSiteSetup(dir); err == nil {
-		t.Fatal("expected error: Python project with no Dockerfile / docker-compose.yml")
+// Projects that carry language markers (composer.json, package.json, Gemfile,
+// requirements.txt …) but no Dockerfile or docker-compose.yml fall through to
+// static — srv doesn't own language runtimes anymore, so the markers are not
+// special-cased.
+func TestValidateSiteSetupLanguageMarkerFallsThroughToStatic(t *testing.T) {
+	for _, marker := range []string{"composer.json", "package.json", "Gemfile", "requirements.txt"} {
+		t.Run(marker, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, marker), []byte(""), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			setup, err := validateSiteSetup(dir)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if !setup.isStatic {
+				t.Errorf("expected static fallback, got %+v", setup)
+			}
+		})
 	}
 }
 

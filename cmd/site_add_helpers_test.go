@@ -43,27 +43,15 @@ func TestApplyTypeOverrideStatic(t *testing.T) {
 	}
 }
 
-func TestApplyTypeOverridePHPRejected(t *testing.T) {
-	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "php"); err == nil {
-		t.Fatal("expected error: --type php no longer supported")
-	}
-}
-
-func TestApplyTypeOverrideNodeRejected(t *testing.T) {
-	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "node"); err == nil {
-		t.Fatal("expected error: --type node no longer supported")
-	}
-}
-
-func TestApplyTypeOverrideRubyRejected(t *testing.T) {
-	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "ruby"); err == nil {
-		t.Fatal("expected error: --type ruby no longer supported")
-	}
-}
-
-func TestApplyTypeOverridePythonRejected(t *testing.T) {
-	if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), "python"); err == nil {
-		t.Fatal("expected error: --type python no longer supported")
+func TestApplyTypeOverrideLanguageRejected(t *testing.T) {
+	// Language types (php/node/ruby/python) were dropped when srv stopped
+	// owning runtimes — they must error like any other unknown type.
+	for _, lang := range []string{"php", "node", "ruby", "python"} {
+		t.Run(lang, func(t *testing.T) {
+			if _, err := applyTypeOverride(&siteSetup{}, t.TempDir(), lang); err == nil {
+				t.Fatalf("expected error: --type %s no longer supported", lang)
+			}
+		})
 	}
 }
 

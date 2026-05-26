@@ -29,16 +29,14 @@ var shellCmd = &cobra.Command{
 	Short: "Open an interactive shell in a site's container",
 	Long: `Open an interactive shell (sh) in the primary container for a site.
 
-For PHP sites the default is the php-fpm container (srv-SITE-php).
-Use --service web to get a shell in the nginx container instead.
+For static and dockerfile sites the single container is used.
 
-For Node, Ruby, Python, and Dockerfile sites the single app container is used.
-
-For compose sites the first service container is used; use --service to pick one.
+For compose sites the first service container is used; pass --service to
+pick a different one.
 
 Examples:
   srv site shell mysite
-  srv site shell mysite --service web   # nginx container for PHP sites`,
+  srv site shell mysite --service api`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			_ = cmd.Help()

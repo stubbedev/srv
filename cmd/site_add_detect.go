@@ -1,12 +1,12 @@
 // Package cmd — site_add_detect.go contains the project-type detection
-// flow for `srv add`: probing the filesystem for compose/PHP/Node/Ruby/etc.,
-// honouring the --type override, and producing a one-liner detection summary.
+// flow for `srv add`: probing the filesystem for compose / Dockerfile /
+// static, honouring the --type override, and producing a one-liner
+// detection summary.
 package cmd
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -16,11 +16,11 @@ import (
 // validateSiteSetup validates the path and discovers compose / dockerfile /
 // static site. Detection order (when --type is not specified):
 //  1. docker-compose.yml present → compose site
-//  2. language project detected (composer.json/.php, package.json, Gemfile,
-//     requirements.txt/pyproject.toml/Pipfile) without a Dockerfile or
-//     docker-compose.yml → ERROR pointing at `srv scaffold <lang>` or --type
-//  3. Dockerfile present         → Dockerfile site
-//  4. otherwise                  → static site
+//  2. Dockerfile present         → Dockerfile site
+//  3. otherwise                  → static site
+//
+// srv does not own language runtimes — if a project needs PHP, Node, Ruby,
+// Python, etc., the user provides the Dockerfile or docker-compose.yml.
 func validateSiteSetup(pathArg string) (*siteSetup, error) {
 	sitePath, err := site.ResolvePath(pathArg)
 	if err != nil {
@@ -51,20 +51,7 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		return setup, nil
 	}
 
-	// 2. Language project without a Dockerfile / docker-compose.yml: srv no
-	//    longer owns runtime versions. Refuse and point at scaffold + --type.
-	if lang := detectLanguageProject(sitePath); lang != "" {
-		return nil, fmt.Errorf(
-			"this looks like a %s project but no Dockerfile or docker-compose.yml is present.\n"+
-				"  srv no longer manages language runtimes directly.\n"+
-				"  options:\n"+
-				"    1. `srv scaffold --lang %s` to generate a Dockerfile + docker-compose.yml in the project\n"+
-				"    2. write your own Dockerfile / docker-compose.yml and re-run `srv add`\n"+
-				"    3. pass `--type static` to serve only the static files in the project",
-			lang, lang)
-	}
-
-	// 3. Try bare Dockerfile detection.
+	// 2. Try bare Dockerfile detection.
 	dockerfileInfo, err := site.DetectDockerfileSite(sitePath)
 	if err != nil {
 		return nil, fmt.Errorf("could not check for Dockerfile: %w", err)
@@ -75,42 +62,9 @@ func validateSiteSetup(pathArg string) (*siteSetup, error) {
 		return setup, nil
 	}
 
-	// 4. Fall back to static site.
+	// 3. Fall back to static site.
 	setup.isStatic = true
 	return setup, nil
-}
-
-// languageMarkers maps a language label to the project-root files that would
-// have made srv claim it before the runtime strip. Probed in declaration
-// order; first hit wins. PHP also falls back to a `.php` file scan via
-// site.DetectRawPHPSite (covers projects without composer.json).
-var languageMarkers = []struct {
-	lang  string
-	files []string
-}{
-	{"php", []string{"composer.json"}},
-	{"node", []string{"package.json", "deno.json"}},
-	{"ruby", []string{"Gemfile"}},
-	{"python", []string{"requirements.txt", "pyproject.toml", "Pipfile"}},
-}
-
-// detectLanguageProject returns the language label (php/node/ruby/python) of
-// a project at dir that srv would have previously managed a runtime for.
-// Returns "" when none of the language markers are present. Used to surface
-// a hard error in `srv add` directing the user at `srv scaffold` or --type.
-func detectLanguageProject(dir string) string {
-	for _, m := range languageMarkers {
-		for _, f := range m.files {
-			if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-				return m.lang
-			}
-		}
-	}
-	// PHP fallback: raw .php files at the root without composer.json.
-	if ok, _ := site.DetectRawPHPSite(dir); ok {
-		return "php"
-	}
-	return ""
 }
 
 // applyTypeOverride forces a specific site type, running detection only for that type.
@@ -132,7 +86,7 @@ func applyTypeOverride(setup *siteSetup, sitePath, typeStr string) (*siteSetup, 
 		}
 		setup.composePath = composePath
 	default:
-		return nil, fmt.Errorf("unknown site type %q — valid types: dockerfile, static, compose (language runtimes are user-owned now; use `srv scaffold` to generate a Dockerfile)", typeStr)
+		return nil, fmt.Errorf("unknown site type %q — valid types: dockerfile, static, compose", typeStr)
 	}
 	return setup, nil
 }

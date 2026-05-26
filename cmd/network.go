@@ -1,7 +1,7 @@
 // Package cmd — network.go implements `srv network` for attaching a site's
 // container(s) to additional external Docker networks. Used to reach
 // user-managed service containers (MySQL, Redis, Elasticsearch, …) by their
-// container name from inside the FrankenPHP container.
+// container name from inside the site's container.
 package cmd
 
 import (
@@ -20,9 +20,8 @@ import (
 var networkCmd = &cobra.Command{
 	Use:   "network",
 	Short: "Manage extra Docker networks attached to a site",
-	Long: `Attach a site's container(s) to additional external Docker networks so PHP
-code (or any other in-container process) can reach user-managed containers
-by name.
+	Long: `Attach a site's container(s) to additional external Docker networks so the
+in-container process can reach user-managed containers by name.
 
 Typical use: you run MySQL/Redis/Elasticsearch via your own docker-compose
 elsewhere, and want srv-managed sites to talk to those containers by their

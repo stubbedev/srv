@@ -8,8 +8,8 @@
 //
 // Related files: compose.go (docker-compose parsing), metadata.go (the
 // on-disk metadata.yml schema and I/O), static.go (static-site config
-// generation, including Traefik label builders that PHP and other site
-// types reuse).
+// generation, including Traefik label builders that other srv-managed
+// site types reuse).
 package site
 
 import (
@@ -107,7 +107,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 
 // siteContainerStatus returns the container status for a site using the most
 // efficient available method:
-//   - Static/PHP sites have a single container with a known name → Docker SDK inspect (no subprocess).
+//   - Static/Dockerfile sites have a single container with a known name → Docker SDK inspect (no subprocess).
 //   - Compose sites have their containers associated with a working-dir label → Docker SDK list (no subprocess).
 //   - Fallback (no service name, unknown type): subprocess docker compose ps.
 func siteContainerStatus(s Site) string {

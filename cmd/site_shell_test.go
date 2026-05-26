@@ -20,7 +20,7 @@ func TestSiteShellContainer(t *testing.T) {
 	cases := []struct {
 		name string
 		s    site.Site
-		want string // "" means use phpFPM helper, else exact match
+		want string
 	}{
 		{"dockerfile", site.Site{Name: "x", Type: site.SiteTypeDockerfile}, "srv-x-app"},
 		{"compose", site.Site{Name: "y", Type: site.SiteTypeCompose, ServiceName: "web"}, "web"},

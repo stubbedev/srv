@@ -41,7 +41,7 @@ Checks performed:
   - Local SSL certificate validity
   - mkcert installation
   - Site metadata validity
-  - PHP site .env host-loopback references
+  - .env host-loopback references in container-backed sites
   - Ownership of ~/.config/srv (use --fix-perms to repair)`,
 	RunE: runDoctor,
 }
@@ -355,8 +355,8 @@ func checkSitesValid() int {
 
 // checkSiteEnvHostLoopback scans every container-backed site's `.env` for
 // host-loopback references that won't resolve from inside the container.
-// Applies to dockerfile / compose / node / ruby / python sites — anywhere
-// the app code runs in a container that has its own loopback namespace.
+// Applies to every site whose app code runs in a container with its own
+// loopback namespace (compose, dockerfile).
 //
 // Heuristics:
 //   - lines matching `*_HOST(S)?=...127.0.0.1` or `*_ENDPOINT=...://127.0.0.1...`
@@ -399,7 +399,7 @@ func checkSiteEnvHostLoopback() int {
 	ui.IndentedDim(1, "These sites run in a container; 127.0.0.1 inside the container is the container itself.")
 	ui.IndentedDim(1, "Fix one of:")
 	ui.IndentedDim(2, "(a) rewrite to host.docker.internal — works because srv adds extra_hosts")
-	ui.IndentedDim(2, "(b) attach the FPM container to the host service's docker network and use its container name")
+	ui.IndentedDim(2, "(b) attach the site's container to the host service's docker network and use its container name")
 	ui.IndentedDim(2, "    srv network attach <site> <docker-network>")
 	ui.Blank()
 	return checked

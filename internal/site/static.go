@@ -1,7 +1,7 @@
 // Package site — static.go generates the on-disk artifacts for static
 // (non-compose) sites: nginx.conf for the static container, the static-site
-// docker-compose.yml, and the Traefik label builders that other site types
-// (PHP, Node, …) reuse to declare their routes.
+// docker-compose.yml, and the Traefik label builders that dockerfile-type
+// sites reuse to declare their routes.
 package site
 
 import (

@@ -25,7 +25,7 @@ var reloadCmd = &cobra.Command{
 from the site's metadata.yml.
 
 Compose-type sites pick up routing changes via Traefik's file provider
-without a restart. Srv-managed sites (php/static/node/...) need a
+without a restart. Srv-managed sites (static, dockerfile) need a
 container restart to apply changes baked into Docker labels — pass
 --restart to do that in one step.`,
 	RunE: runReload,

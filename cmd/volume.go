@@ -1,6 +1,6 @@
 // Package cmd — volume.go implements `srv volume` for managing extra
 // bind-mounts on a site's container. Used to expose host paths (TEMP dirs,
-// nix-profile binaries, demo asset trees) into the FrankenPHP container.
+// nix-profile binaries, demo asset trees) into the site's container.
 package cmd
 
 import (

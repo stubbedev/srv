@@ -31,7 +31,7 @@ var addFlags struct {
 	internalHTTP   bool
 	force          bool
 	skipValidation bool
-	typeOverride   string // Force site type: php/node/ruby/python/dockerfile/static/compose
+	typeOverride   string // Force site type: dockerfile/static/compose
 	// Static site options
 	spa   bool
 	cache bool
@@ -109,7 +109,7 @@ func init() {
 		return nil, cobra.ShellCompDirectiveDefault
 	})
 	// Type override
-	addCmd.Flags().StringVar(&addFlags.typeOverride, "type", "", "Force site type: php, node, ruby, python, dockerfile, static, compose")
+	addCmd.Flags().StringVar(&addFlags.typeOverride, "type", "", "Force site type: dockerfile, static, compose")
 	_ = addCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"dockerfile", "static", "compose"}, cobra.ShellCompDirectiveNoFileComp
 	})

@@ -1,29 +1,10 @@
-// Package constants — runtime.go holds the per-language constants used when
-// srv generates docker-compose configs for sites it owns directly (Node,
-// Ruby, Python, Dockerfile). PHP runtimes are no longer managed by srv —
-// users bring their own Dockerfile or scaffold one with `srv scaffold php`.
+// Package constants — runtime.go holds the constants used when srv generates
+// docker-compose configs for the two site types it owns directly: static
+// (nginx-fronted) and dockerfile (user-provided Dockerfile). Language
+// runtimes (PHP/Node/Ruby/Python) are user-owned — write your own
+// Dockerfile or docker-compose.yml and srv will attach Traefik routing on
+// top.
 package constants
-
-// =============================================================================
-// PHP Constants (used only by the scaffold command + detection)
-// =============================================================================
-
-const (
-	// FrankenPHPImageLatest is the FrankenPHP alpine Docker image (latest stable PHP).
-	FrankenPHPImageLatest = "dunglas/frankenphp:alpine"
-	// FrankenPHPImageFormat is the format string for versioned FrankenPHP alpine images.
-	FrankenPHPImageFormat = "dunglas/frankenphp:php%s-alpine"
-	// PHPVersionLatest is the sentinel value meaning "use the latest Docker tag".
-	PHPVersionLatest = "latest"
-)
-
-// PHP framework identifiers (used by detection + scaffold templates).
-const (
-	PHPFrameworkLaravel   = "laravel"
-	PHPFrameworkSymfony   = "symfony"
-	PHPFrameworkWordPress = "wordpress"
-	PHPFrameworkGeneric   = "generic"
-)
 
 // =============================================================================
 // Nginx Constants

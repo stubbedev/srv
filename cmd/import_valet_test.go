@@ -115,9 +115,10 @@ func TestBuildImportPlanGrouping(t *testing.T) {
 		{Domain: "other.test", ProjectPath: "/srv/other", IsPHP: true},
 	}
 	plan := buildImportPlan(sites)
-	// Each PHP site now produces TWO steps: scaffold + add.
-	if len(plan) != 4 {
-		t.Errorf("expected 4 steps (2 grouped sites × scaffold+add), got %d (%v)", len(plan), plan)
+	// PHP sites now produce ONE commented `srv add` step each: srv doesn't
+	// scaffold runtimes anymore; the user provides the Dockerfile.
+	if len(plan) != 2 {
+		t.Errorf("expected 2 steps (one per grouped PHP project), got %d (%v)", len(plan), plan)
 	}
 	var addLine string
 	for _, step := range plan {
@@ -131,9 +132,13 @@ func TestBuildImportPlanGrouping(t *testing.T) {
 	if !strings.Contains(addLine, "--alias cms-admin.test") {
 		t.Errorf("aliases not folded into add: %q", addLine)
 	}
-	// Scaffold step must come first.
-	if !strings.Contains(plan[0].line, "scaffold") {
-		t.Errorf("first step should be scaffold, got %q", plan[0].line)
+	if !strings.HasPrefix(addLine, "#") {
+		t.Errorf("PHP add line should be commented out, got %q", addLine)
+	}
+	for _, step := range plan {
+		if step.args != nil {
+			t.Errorf("PHP step should have nil args so --apply skips it, got %v", step.args)
+		}
 	}
 }
 

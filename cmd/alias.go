@@ -195,7 +195,7 @@ func runAliasList(cmd *cobra.Command, args []string) error {
 
 // regenerateSiteRouting rewrites the Traefik file-provider config for a
 // compose-type site after its domain set changes. Container-label sites
-// (PHP/static/node/...) need a restart to pick up the new label-derived rule;
+// (static, dockerfile) need a restart to pick up the new label-derived rule;
 // the caller surfaces that hint to the user.
 func regenerateSiteRouting(siteName string, meta *site.SiteMetadata) error {
 	if meta.Type != site.SiteTypeCompose {

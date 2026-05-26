@@ -39,6 +39,11 @@ the equivalent srv commands. Recognises PHP/FastCGI sites, reverse proxies,
 :88 internal listeners, /path → port splits, regex rewrite locations, and
 @fallback prod-mirror locations.
 
+PHP sites are emitted as commented-out 'srv add' lines: srv no longer
+manages language runtimes, so each project needs a user-provided
+Dockerfile or docker-compose.yml before the add line can be uncommented
+and run.
+
 Default mode is dry-run: it only prints. Pass --apply to execute each
 command via the same shell.`,
 	RunE: runImportValet,
@@ -395,24 +400,13 @@ func buildImportPlan(sites []*valet.Site) []importStep {
 	return plan
 }
 
-// planPHPSite emits TWO import steps for a PHP project: first a `srv
-// scaffold` to write a Dockerfile + docker-compose.yml into the project,
-// then an `srv add` against that project. srv no longer owns PHP
-// runtimes directly, so the import path has to materialise something the
-// dockerfile/compose flow can pick up.
-//
-// Returned as a single importStep whose args/line cover the scaffold call;
-// the add command and any route attachments are listed as notes (and are
-// also emitted as follow-up importSteps via planPHPFollowups).
+// planPHPSite emits a commented-out `srv add` step for a PHP project. srv
+// no longer manages language runtimes, so the project needs a user-provided
+// Dockerfile or docker-compose.yml before `srv add` will succeed. The line
+// is left commented so --apply skips it; the user uncomments it after
+// preparing the project.
 func planPHPSite(g *importGroup) []importStep {
 	s := g.canonical
-	framework := detectPHPFrameworkForImport(s.ProjectPath)
-
-	scaffoldArgs := []string{"scaffold", "--lang", "php", "--framework", framework, "--dir", s.ProjectPath, "--force"}
-	scaffoldStep := importStep{
-		line: "srv " + strings.Join(scaffoldArgs, " "),
-		args: scaffoldArgs,
-	}
 
 	addArgs := []string{"add", s.ProjectPath, "--domain", s.Domain, "--local"}
 	if s.Wildcard {
@@ -431,46 +425,26 @@ func planPHPSite(g *importGroup) []importStep {
 		addArgs = append(addArgs, "--alias", a)
 	}
 
-	addNotes := []string{}
+	notes := []string{
+		"needs a Dockerfile or docker-compose.yml in the project — write one, then uncomment this line",
+	}
 	for _, r := range s.Routes {
-		addNotes = append(addNotes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
+		notes = append(notes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
 	}
 	for _, alias := range g.aliases {
 		for _, r := range alias.Routes {
-			addNotes = append(addNotes, fmt.Sprintf("post-add (from %s): srv route add <name> %s", alias.Domain, routeFlags(r)))
+			notes = append(notes, fmt.Sprintf("post-add (from %s): srv route add <name> %s", alias.Domain, routeFlags(r)))
 		}
 	}
 	for _, n := range s.UnknownNotes {
-		addNotes = append(addNotes, "unhandled: "+n)
-	}
-	addStep := importStep{
-		line:  "srv " + strings.Join(addArgs, " "),
-		args:  addArgs,
-		notes: addNotes,
+		notes = append(notes, "unhandled: "+n)
 	}
 
-	return []importStep{scaffoldStep, addStep}
-}
-
-// detectPHPFrameworkForImport probes a project dir for the framework markers
-// the scaffold command supports. Returns "generic" when nothing matches.
-func detectPHPFrameworkForImport(dir string) string {
-	if dir == "" {
-		return "generic"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "artisan")); err == nil {
-		return "laravel"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "wp-config.php")); err == nil {
-		return "wordpress"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "wp-content")); err == nil {
-		return "wordpress"
-	}
-	if _, err := os.Stat(filepath.Join(dir, "bin", "console")); err == nil {
-		return "symfony"
-	}
-	return "generic"
+	return []importStep{{
+		line:  "# php site (needs Dockerfile/docker-compose.yml): srv " + strings.Join(addArgs, " "),
+		args:  nil, // commented — --apply skips it
+		notes: notes,
+	}}
 }
 
 // planLooseSite emits a step for non-PHP entries (proxies, unresolved PHP).
