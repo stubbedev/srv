@@ -41,6 +41,7 @@ Available on every command:
   - [`srv internal list`](#srv-internal-list) — List sites with the internal listener enabled
 - [`srv list`](#srv-list) — List all sites
 - [`srv logs`](#srv-logs) — Show site logs
+- [`srv mcp`](#srv-mcp) — Start the srv MCP server (stdio)
 - [`srv metrics`](#srv-metrics) — Manage the optional metrics stack (prometheus + grafana)
   - [`srv metrics disable`](#srv-metrics-disable) — Stop and remove the metrics stack containers
   - [`srv metrics enable`](#srv-metrics-enable) — Render the metrics compose stack and start containers
@@ -520,6 +521,35 @@ srv logs [SITE] [flags]
 | `--follow`, `-f` | `false` | Follow log output |
 | `--since` | — | Show logs since timestamp (e.g., 10m, 1h) |
 | `--tail` | — | Number of lines to show from the end |
+
+## `srv mcp`
+
+Start the srv MCP server (stdio)
+
+```
+Run the Model Context Protocol server on stdio so AI agents can drive
+srv the same way a human does from the CLI. Reads (list sites, get site,
+list proxies, …) are exposed today; mutating operations (add/remove sites,
+lifecycle, install) are still being extracted from the CLI layer and will
+land in follow-up changes.
+
+Intended to be launched by an MCP client config such as:
+
+  {
+    "mcpServers": {
+      "srv": {
+        "command": "srv",
+        "args": ["mcp"]
+      }
+    }
+  }
+```
+
+Usage:
+
+```
+srv mcp
+```
 
 ## `srv metrics`
 

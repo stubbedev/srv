@@ -156,6 +156,7 @@ srv add /var/www/myapp --domain example.com
 | `srv import valet` | Translate `~/.config/valet/Nginx/*` (or `~/.valet/Nginx/*`) into srv commands |
 | `srv metrics enable\|disable\|status` | Opt-in Prometheus + Grafana stack scraping Traefik |
 | `srv daemon start\|stop\|restart\|status\|logs\|install\|uninstall` | Manage the watch daemon |
+| `srv mcp` | Start the [Model Context Protocol](#mcp-server) server on stdio so AI agents can drive srv |
 
 ## `srv add`
 
@@ -598,6 +599,41 @@ srv metrics disable
 Both UIs are routed through Traefik with mkcert-signed TLS; loopback
 ports are not exposed. Grafana ships with a pre-wired Prometheus
 datasource. Import dashboard ID 17347 for a per-router Traefik overview.
+
+## MCP server
+
+`srv mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
+server on stdio so AI agents can drive srv the same way a human does
+from the CLI. The read-only surface is complete today (sites, proxies,
+redirects, validation, paths, version); mutating tools beyond
+`reload_site` are still being extracted from CLI handlers and will land
+in follow-ups.
+
+Wire it into an MCP client by pointing at the binary:
+
+```json
+{
+  "mcpServers": {
+    "srv": {
+      "command": "srv",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Available tools:
+
+| Tool | Description |
+|---|---|
+| `version` | srv binary version + commit + build date |
+| `paths` | Config paths (`~/.config/srv`, traefik conf dir, etc.) |
+| `list_sites` | All registered sites with name, domain, type, status |
+| `get_site` | Full metadata for one site |
+| `validate_site` | Parse + validate a site's metadata.yml |
+| `list_proxies` / `get_proxy` | Proxy inventory + per-proxy metadata |
+| `list_redirects` | Redirect inventory |
+| `reload_site` | Re-apply a site's metadata.yml without restart |
 
 ## Declarative config files
 
