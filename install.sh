@@ -65,8 +65,7 @@ detect_platform() {
   case "$OS" in
   linux) OS="linux" ;;
   darwin) OS="darwin" ;;
-  freebsd) OS="freebsd" ;;
-  mingw* | msys* | cygwin*) OS="windows" ;;
+  mingw* | msys* | cygwin*) error "Windows is not supported by srv releases. Use brew on macOS/Linux or build from source." ;;
   *) error "Unsupported OS: $OS" ;;
   esac
 
@@ -79,12 +78,11 @@ detect_platform() {
   esac
 
   PLATFORM="${OS}-${ARCH}"
-  if [ "$OS" = "windows" ]; then
-    BINARY="srv.exe"
-  fi
 }
 
-# Get latest release version
+# Get latest release version. Sets VERSION (with leading v, e.g. v1.2.3) and
+# VERSION_NUM (without, e.g. 1.2.3) — release artifacts encode the bare version
+# while the release tag carries the v prefix.
 get_latest_version() {
   info "Fetching latest version..."
   if command -v curl >/dev/null 2>&1; then
@@ -97,6 +95,7 @@ get_latest_version() {
   if [ -z "$VERSION" ]; then
     error "Failed to get latest version"
   fi
+  VERSION_NUM="${VERSION#v}"
 }
 
 # Download a URL to a temp file, print the temp file path
@@ -111,57 +110,73 @@ fetch_url() {
   echo "$tmpfile"
 }
 
-# Download binary and verify checksum
+# Download tarball, verify checksum, extract, print the extracted binary path
 download() {
-  URL="https://github.com/${REPO}/releases/download/${VERSION}/srv-${PLATFORM}"
-  CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
+  TARBALL="srv-${VERSION_NUM}-${PLATFORM}.tar.gz"
+  URL="https://github.com/${REPO}/releases/download/${VERSION}/${TARBALL}"
+  SHA_URL="${URL}.sha256"
 
   info "Downloading srv ${VERSION} for ${PLATFORM}..." >&2
 
-  TMPFILE=$(fetch_url "$URL") || error "Download failed"
+  TARFILE=$(fetch_url "$URL") || error "Download failed (${URL})"
 
-  # Verify checksum before making the file executable so a corrupt or
-  # malicious binary is never left as an executable on disk.
   if command -v sha256sum >/dev/null 2>&1; then
-    info "Verifying checksum..."
-    CHECKSUMS_FILE=$(fetch_url "$CHECKSUMS_URL") || { rm -f "$TMPFILE"; error "Failed to download checksums"; }
-    EXPECTED=$(grep "srv-${PLATFORM}$" "$CHECKSUMS_FILE" | awk '{print $1}')
-    rm -f "$CHECKSUMS_FILE"
+    info "Verifying checksum..." >&2
+    SHAFILE=$(fetch_url "$SHA_URL") || { rm -f "$TARFILE"; error "Failed to download checksum (${SHA_URL})"; }
+    EXPECTED=$(awk '{print $1}' "$SHAFILE")
+    rm -f "$SHAFILE"
     if [ -z "$EXPECTED" ]; then
-      rm -f "$TMPFILE"
-      error "No checksum found for srv-${PLATFORM} in checksums.txt"
+      rm -f "$TARFILE"
+      error "No checksum found in ${TARBALL}.sha256"
     fi
-    ACTUAL=$(sha256sum "$TMPFILE" | awk '{print $1}')
+    ACTUAL=$(sha256sum "$TARFILE" | awk '{print $1}')
     if [ "$ACTUAL" != "$EXPECTED" ]; then
-      rm -f "$TMPFILE"
+      rm -f "$TARFILE"
       error "Checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
     fi
-    info "Checksum verified"
+    info "Checksum verified" >&2
   fi
 
-  chmod +x "$TMPFILE"
-  echo "$TMPFILE"
+  EXTRACT_DIR=$(mktemp -d)
+  if ! tar -xzf "$TARFILE" -C "$EXTRACT_DIR"; then
+    rm -f "$TARFILE"
+    rm -rf "$EXTRACT_DIR"
+    error "Failed to extract ${TARBALL}"
+  fi
+  rm -f "$TARFILE"
+
+  STAGE="${EXTRACT_DIR}/srv-${VERSION_NUM}-${PLATFORM}"
+  if [ ! -x "${STAGE}/srv" ]; then
+    rm -rf "$EXTRACT_DIR"
+    error "Extracted tarball did not contain ${STAGE}/srv"
+  fi
+
+  chmod +x "${STAGE}/srv"
+  echo "${STAGE}/srv"
 }
 
 # Install binary
 install_binary() {
-  TMPFILE=$1
+  SRC=$1
   info "Installing to ${INSTALL_DIR}..."
-  if ! $SUDO mv "$TMPFILE" "${INSTALL_DIR}/${BINARY}"; then
+  if ! $SUDO mv "$SRC" "${INSTALL_DIR}/${BINARY}"; then
     # If installation failed and we haven't already tried fallback
     if [ "$INSTALL_DIR" != "$FALLBACK_DIR" ]; then
       warn "Failed to install to ${INSTALL_DIR}"
       use_fallback_dir
       info "Retrying installation to ${INSTALL_DIR}..."
-      if ! mv "$TMPFILE" "${INSTALL_DIR}/${BINARY}"; then
-        rm -f "$TMPFILE"
+      if ! mv "$SRC" "${INSTALL_DIR}/${BINARY}"; then
+        rm -f "$SRC"
         error "Failed to install binary to ${INSTALL_DIR}"
       fi
     else
-      rm -f "$TMPFILE"
+      rm -f "$SRC"
       error "Failed to install binary to ${INSTALL_DIR}"
     fi
   fi
+  # Clean up the parent extract dir if it's now empty.
+  rmdir "$(dirname "$SRC")" 2>/dev/null || true
+  rmdir "$(dirname "$(dirname "$SRC")")" 2>/dev/null || true
 }
 
 # Verify installation
@@ -202,8 +217,8 @@ main() {
   check_sudo
   detect_platform
   get_latest_version
-  TMPFILE=$(download)
-  install_binary "$TMPFILE"
+  SRC=$(download)
+  install_binary "$SRC"
   verify
 }
 

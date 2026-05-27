@@ -39,6 +39,22 @@ Overkill when you have:
 
 ## Installation
 
+### Via Homebrew (macOS / Linux)
+
+```bash
+brew install stubbedev/srv/srv
+```
+
+This installs the binary, pulls in `mkcert` as a dependency, and registers a
+`brew services` recipe. To run the watch daemon in the background:
+
+```bash
+brew services start srv
+```
+
+Don't enable both `brew services start srv` and `srv daemon install` — they
+both register supervisor units that race over the same Docker watcher.
+
 ### Via install script
 
 ```bash
@@ -47,9 +63,11 @@ curl -fsSL https://raw.githubusercontent.com/stubbedev/srv/master/install.sh | s
 
 ### Via releases
 
-Download the binary for your platform from [releases](https://github.com/stubbedev/srv/releases/latest).
+Download the tarball for your platform from [releases](https://github.com/stubbedev/srv/releases/latest), then extract and place `srv` on your `PATH`.
 
-**Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (amd64, arm64)
+**Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (amd64, arm64).
+Brew formula covers darwin/linux amd64+arm64; armv7 and 386 are install-script
+or manual-download only.
 
 **Runtime requirements:**
 - Docker
