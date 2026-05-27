@@ -43,15 +43,15 @@ func TestNewServerRegistersTools(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"version":         true,
-		"paths":           true,
-		"list_sites":      true,
-		"get_site":        true,
-		"validate_site":   true,
-		"list_proxies":    true,
-		"get_proxy":       true,
-		"list_redirects":  true,
-		"reload_site":     true,
+		"version":        true,
+		"paths":          true,
+		"list_sites":     true,
+		"get_site":       true,
+		"validate_site":  true,
+		"list_proxies":   true,
+		"get_proxy":      true,
+		"list_redirects": true,
+		"reload_site":    true,
 	}
 
 	got := make(map[string]bool, len(res.Tools))
