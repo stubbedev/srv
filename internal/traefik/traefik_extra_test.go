@@ -9,6 +9,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
 
@@ -52,19 +53,41 @@ func TestGetEmailMissingNoPrompt(t *testing.T) {
 }
 
 func TestPortConflictStopHintKnownProcess(t *testing.T) {
+	// On Linux the hint uses systemctl; on macOS it uses `brew services`.
+	// Assert the platform-appropriate verb is present so the assertion
+	// stays meaningful regardless of where the tests run.
 	cases := []string{"nginx", "apache2", "httpd", "caddy", "lighttpd"}
 	for _, p := range cases {
 		c := PortConflict{Port: 80, Process: p}
-		if !strings.Contains(c.StopHint(), "systemctl stop "+p) {
-			t.Errorf("StopHint for %s = %q", p, c.StopHint())
+		hint := c.StopHint()
+		if platform.IsDarwin() {
+			// apache2/httpd both map to brew's `httpd` formula.
+			expectedTail := p
+			if p == "apache2" {
+				expectedTail = "httpd"
+			}
+			if !strings.Contains(hint, "brew services stop "+expectedTail) {
+				t.Errorf("StopHint for %s on macOS = %q", p, hint)
+			}
+			continue
+		}
+		if !strings.Contains(hint, "systemctl stop "+p) {
+			t.Errorf("StopHint for %s on linux = %q", p, hint)
 		}
 	}
 }
 
 func TestPortConflictStopHintUnknownProcess(t *testing.T) {
 	c := PortConflict{Port: 80, Process: "weirdservice"}
-	if !strings.Contains(c.StopHint(), "systemctl stop weirdservice") {
-		t.Errorf("got %q", c.StopHint())
+	hint := c.StopHint()
+	if platform.IsDarwin() {
+		if !strings.Contains(hint, "brew services stop weirdservice") {
+			t.Errorf("got %q", hint)
+		}
+		return
+	}
+	if !strings.Contains(hint, "systemctl stop weirdservice") {
+		t.Errorf("got %q", hint)
 	}
 }
 

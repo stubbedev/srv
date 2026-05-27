@@ -20,7 +20,18 @@ import (
 	dockerclient "github.com/docker/docker/client"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/platform"
 )
+
+// notRunningErr renders the "docker is not running" message with a platform-
+// appropriate hint. macOS has no `systemctl`, so we point at Docker Desktop /
+// `colima start` instead.
+func notRunningErr() error {
+	if platform.IsDarwin() {
+		return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop, or run `colima start` if you're on Colima")
+	}
+	return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
+}
 
 // Timeout constants for Docker operations.
 const (
@@ -123,7 +134,7 @@ func EnsureRunning() error {
 
 	cli, err := newClient()
 	if err != nil {
-		return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
+		return notRunningErr()
 	}
 	defer func() { _ = cli.Close() }()
 
@@ -131,7 +142,7 @@ func EnsureRunning() error {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
 		}
-		return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
+		return notRunningErr()
 	}
 	return nil
 }

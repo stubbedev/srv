@@ -8,8 +8,38 @@ import (
 	"fmt"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell"
 )
+
+// stopCmd returns the platform-appropriate command to stop a host service.
+// macOS Homebrew services use `brew services`, Linux distros use systemd.
+// Process names normalised so e.g. macOS's `httpd` and Linux's `apache2`
+// both map cleanly.
+func stopCmd(proc string) (cmd []string, hint string) {
+	if platform.IsDarwin() {
+		brewName := proc
+		switch proc {
+		case "apache2", "httpd":
+			brewName = "httpd"
+		}
+		args := []string{"brew", "services", "stop", brewName}
+		return args, fmt.Sprintf("sudo %s", joinShell(args))
+	}
+	args := []string{"systemctl", "stop", proc}
+	return args, fmt.Sprintf("sudo %s", joinShell(args))
+}
+
+func joinShell(args []string) string {
+	out := ""
+	for i, a := range args {
+		if i > 0 {
+			out += " "
+		}
+		out += a
+	}
+	return out
+}
 
 // CheckPortAvailable checks if a port is available for binding.
 func CheckPortAvailable(port int) bool {
@@ -30,16 +60,17 @@ type PortConflict struct {
 
 // StopHint returns an actionable command string to stop the conflicting
 // process, or a generic message if the process could not be identified.
+// On macOS the hint references `brew services` (the canonical Homebrew
+// service manager); on Linux it references systemctl.
 func (c PortConflict) StopHint() string {
-	switch c.Process {
-	case "nginx", "lighttpd", "caddy", "apache2", "httpd":
-		return fmt.Sprintf("sudo systemctl stop %s", c.Process)
-	default:
-		if c.Process != "" {
-			return fmt.Sprintf("sudo systemctl stop %s", c.Process)
-		}
-		return fmt.Sprintf("identify and stop the process using port %d (try: sudo ss -tlnp | grep :%d)", c.Port, c.Port)
+	if c.Process != "" {
+		_, hint := stopCmd(c.Process)
+		return hint
 	}
+	if platform.IsDarwin() {
+		return fmt.Sprintf("identify and stop the process using port %d (try: sudo lsof -i :%d)", c.Port, c.Port)
+	}
+	return fmt.Sprintf("identify and stop the process using port %d (try: sudo ss -tlnp | grep :%d)", c.Port, c.Port)
 }
 
 // CanAutoFix reports whether srv knows how to fix this conflict automatically.
@@ -52,10 +83,12 @@ func (c PortConflict) CanAutoFix() bool {
 }
 
 // AutoFix attempts to automatically resolve the port conflict.
+// Uses `brew services stop` on macOS and `systemctl stop` on Linux.
 func (c PortConflict) AutoFix() error {
 	switch c.Process {
 	case "nginx", "lighttpd", "caddy", "apache2", "httpd":
-		return shell.SudoRun("systemctl", "stop", c.Process)
+		args, _ := stopCmd(c.Process)
+		return shell.SudoRun(args...)
 	default:
 		return fmt.Errorf("no automatic fix available for process %q", c.Process)
 	}
