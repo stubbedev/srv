@@ -45,6 +45,9 @@ jobs:
       - name: Regenerate schemas
         run: go run ./cmd/gen-schema
 
+      - name: Regenerate CLI docs
+        run: go run ./cmd/gen-docs
+
       - name: Commit and push fixes
         id: commit
         run: |
@@ -98,6 +101,15 @@ jobs:
           if [ -n "$(git status --porcelain schemas/)" ]; then
             echo "schemas/ is out of date. Run 'just schemas' and commit."
             git --no-pager diff schemas/
+            exit 1
+          fi
+
+      - name: Verify CLI docs are up to date
+        run: |
+          go run ./cmd/gen-docs
+          if [ -n "$(git status --porcelain docs/cli.md)" ]; then
+            echo "docs/cli.md is out of date. Run 'just sync-docs' and commit."
+            git --no-pager diff docs/cli.md
             exit 1
           fi
 

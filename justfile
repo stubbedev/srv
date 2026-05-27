@@ -53,6 +53,10 @@ lint:
 schemas:
     go run ./cmd/gen-schema
 
+# Regenerate docs/cli.md from the cobra command tree
+sync-docs:
+    go run ./cmd/gen-docs
+
 # Run all checks (fmt, vet, lint, test) - useful for CI
 check: fmt vet lint test
 

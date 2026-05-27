@@ -105,6 +105,10 @@ srv add /var/www/myapp --domain example.com
 
 ## Commands
 
+> Full reference, auto-generated from the binary: **[docs/cli.md](docs/cli.md)**.
+> The summary tables below cover the most common operations; everything below
+> exists for muscle memory and quick scanning.
+
 ### Sites
 
 | Command | Description |
