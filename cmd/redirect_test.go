@@ -372,6 +372,7 @@ func TestWriteRedirectDNSConfig(t *testing.T) {
 	content := string(data)
 
 	wants := []string{
+		"# yaml-language-server: $schema=" + constants.RedirectDNSSchemaURL,
 		"dns:",
 		"source: old.test",
 		"target: new.example.com",
@@ -380,6 +381,9 @@ func TestWriteRedirectDNSConfig(t *testing.T) {
 		if !strings.Contains(content, w) {
 			t.Errorf("missing %q in:\n%s", w, content)
 		}
+	}
+	if !strings.HasPrefix(content, "# yaml-language-server:") {
+		t.Errorf("schema modeline must be the first line; got:\n%s", content)
 	}
 	// DNS-only files must NOT carry any Traefik schema — that would cause
 	// the file provider to instantiate a real HTTP router.

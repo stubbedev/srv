@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/redirect-dns.schema.json",
+  "$defs": {
+    "DNSBlock": {
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "dns": {
+      "$ref": "#/$defs/DNSBlock"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "title": "srv DNS-only redirect"
+}

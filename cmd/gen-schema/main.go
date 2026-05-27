@@ -19,6 +19,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/proxy"
+	"github.com/stubbedev/srv/internal/redirect"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -56,6 +57,12 @@ func main() {
 			id:       constants.ProxyMetadataSchemaURL,
 			filename: "proxy-metadata.schema.json",
 			value:    &proxy.Metadata{},
+		},
+		{
+			title:    "srv DNS-only redirect",
+			id:       constants.RedirectDNSSchemaURL,
+			filename: "redirect-dns.schema.json",
+			value:    &redirect.DNSOnlyConfig{},
 		},
 	}
 

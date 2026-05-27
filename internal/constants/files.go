@@ -32,6 +32,9 @@ const (
 	UserConfigSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/config.schema.json"
 	// ProxyMetadataSchemaURL is the JSON Schema URL stamped into generated proxy metadata.yml files.
 	ProxyMetadataSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/proxy-metadata.schema.json"
+	// RedirectDNSSchemaURL is the JSON Schema URL stamped into DNS-only redirect-*.yml files.
+	// HTTP redirect files are Traefik dynamic config and are not covered by a srv schema.
+	RedirectDNSSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/redirect-dns.schema.json"
 	// NginxConfFile is the nginx configuration filename.
 	NginxConfFile = "nginx.conf"
 	// UserConfigFile is the user configuration filename.
