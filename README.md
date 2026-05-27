@@ -14,6 +14,29 @@ What you get:
 - Auto-provisioned Let's Encrypt certificates for production domains
 - Multi-host aliases, internal plain-HTTP listener, per-site path/regex routes
 
+## When srv is (and isn't) worth it
+
+srv is an **edge layer**: Traefik, mkcert/ACME, and dnsmasq, wired together with
+a CLI that knows how to manage them per-site. It is not a PaaS — there is no
+runtime, no buildpack, no app manager.
+
+Worth it when you have:
+- A dev box where every project should be reachable at `<name>.test` with
+  browser-trusted HTTPS, the same way, with one command per project
+- A server fronting multiple sites or apps where you'd otherwise hand-craft
+  Traefik configs and ACME wiring per host
+- A multi-tenant app served under many hostnames (one SAN cert, one router,
+  many `Host` rules)
+- A mix of containerised apps, static sites, plain `localhost:PORT` dev
+  servers, and 301/DNS-layer redirects under a single TLS edge
+
+Overkill when you have:
+- A single project. Run FrankenPHP or Caddy with a self-signed cert directly;
+  srv won't save you enough wiring to justify the install.
+- An existing reverse-proxy setup you're happy with (nginx-proxy, Caddy,
+  bare Traefik, Kubernetes Ingress). srv overlaps with those, it doesn't
+  layer on top.
+
 ## Installation
 
 ### Via install script
@@ -207,10 +230,11 @@ language runtimes — the user provides them. Any project root with a
 `docker-compose.yml` is a compose site. srv attaches Traefik routing and
 leaves your files alone.
 
-A minimal compose example for a PHP app using FrankenPHP:
+### Worked example: Laravel with local HTTPS
+
+Drop this `docker-compose.yml` in your Laravel project root:
 
 ```yaml
-# docker-compose.yml
 services:
   app:
     image: dunglas/frankenphp:alpine
@@ -219,19 +243,42 @@ services:
       - .:/app
     expose:
       - "80"
+    environment:
+      SERVER_NAME: ":80"   # Traefik terminates TLS; container speaks plain HTTP
     extra_hosts:
       - "host.docker.internal:host-gateway"
 ```
 
-Then:
+Point Laravel at the public hostname in `.env`:
 
-```bash
-srv add . --domain myapp.test --local
+```env
+APP_URL=https://mylaravel.test
+ASSET_URL=https://mylaravel.test
+TRUSTED_PROXIES=*
 ```
 
-srv detects the compose file, generates Traefik labels for the chosen
-service, joins the srv network, and provisions a mkcert certificate. Your
-`Dockerfile`, `docker-compose.yml`, and `.env` stay untouched.
+`TRUSTED_PROXIES=*` (or the equivalent in `App\Http\Middleware\TrustProxies`)
+is required so Laravel respects `X-Forwarded-Proto: https` from Traefik —
+otherwise it generates `http://` URLs and you'll hit mixed-content errors.
+
+Register the site:
+
+```bash
+cd ~/projects/mylaravel
+srv add . --domain mylaravel.test --local
+```
+
+srv detects the compose file, mints a mkcert cert, registers the hostname
+with dnsmasq, attaches Traefik routing labels to the `app` service, and
+runs `docker compose up -d`. Visit `https://mylaravel.test` — browser-trusted
+TLS, no warnings.
+
+For host-side MySQL/Redis/Mailpit listening on the host's loopback, set
+`DB_HOST=host.docker.internal` (etc.) in `.env`; the `extra_hosts` entry
+above wires that up. For services in another `docker compose` stack of
+yours, use `srv network attach mylaravel <network_name>` and address them
+by container hostname. See "[Talking to host services from inside a container](#talking-to-host-services-from-inside-a-container)"
+below for the full set of options.
 
 ## Proxies (non-Docker upstreams)
 
