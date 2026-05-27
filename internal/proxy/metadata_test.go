@@ -1,10 +1,13 @@
 package proxy
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -81,6 +84,26 @@ func TestRemove(t *testing.T) {
 	}
 	if Exists("x") {
 		t.Error("expected gone")
+	}
+}
+
+func TestWriteEmitsSchemaModeline(t *testing.T) {
+	root := setupSrvRoot(t)
+	if err := Write(Metadata{Name: "api", Domains: []string{"api.test"}}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "proxies", "api", constants.MetadataFile))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	got := string(data)
+	wantLine := "# yaml-language-server: $schema=" + constants.ProxyMetadataSchemaURL
+	if !strings.Contains(got, wantLine) {
+		t.Errorf("proxy metadata.yml missing schema modeline; got:\n%s", got)
+	}
+	if !strings.HasPrefix(got, "# yaml-language-server:") {
+		t.Errorf("schema modeline must be the first line; got:\n%s", got)
 	}
 }
 

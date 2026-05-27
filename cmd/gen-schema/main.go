@@ -18,6 +18,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -49,6 +50,12 @@ func main() {
 			id:       constants.UserConfigSchemaURL,
 			filename: "config.schema.json",
 			value:    &config.UserConfig{},
+		},
+		{
+			title:    "srv proxy metadata",
+			id:       constants.ProxyMetadataSchemaURL,
+			filename: "proxy-metadata.schema.json",
+			value:    &proxy.Metadata{},
 		},
 	}
 

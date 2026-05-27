@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/proxy-metadata.schema.json",
+  "$defs": {
+    "Route": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable handle for the route used by 'srv route' CLI."
+        },
+        "path": {
+          "type": "string",
+          "description": "PathPrefix to match (e.g. /api)."
+        },
+        "path_regex": {
+          "type": "string",
+          "description": "Regex pattern to match (Traefik PathRegexp)."
+        },
+        "rewrite": {
+          "type": "string",
+          "description": "ReplacePathRegex replacement (e.g. /v1/$1)."
+        },
+        "upstream": {
+          "$ref": "#/$defs/Upstream"
+        },
+        "preserve_host": {
+          "type": "boolean",
+          "description": "Whether to preserve the Host header (default true)."
+        },
+        "pass_range_headers": {
+          "type": "boolean",
+          "description": "Forward Range/If-Range headers for byte-range requests."
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Traefik router priority override."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Upstream": {
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "localhost",
+            "container",
+            "url"
+          ],
+          "description": "Upstream target type."
+        },
+        "port": {
+          "type": "integer",
+          "description": "Port when kind=localhost or kind=container."
+        },
+        "container": {
+          "type": "string",
+          "description": "Container name when kind=container."
+        },
+        "url": {
+          "type": "string",
+          "description": "Full URL when kind=url (e.g. https://api.example.com)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "domains": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "wildcard": {
+      "type": "boolean"
+    },
+    "is_local": {
+      "type": "boolean"
+    },
+    "routes": {
+      "items": {
+        "$ref": "#/$defs/Route"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "title": "srv proxy metadata"
+}

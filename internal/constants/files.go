@@ -30,6 +30,8 @@ const (
 	MetadataSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/metadata.schema.json"
 	// UserConfigSchemaURL is the JSON Schema URL stamped into generated config.yml files.
 	UserConfigSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/config.schema.json"
+	// ProxyMetadataSchemaURL is the JSON Schema URL stamped into generated proxy metadata.yml files.
+	ProxyMetadataSchemaURL = "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/proxy-metadata.schema.json"
 	// NginxConfFile is the nginx configuration filename.
 	NginxConfFile = "nginx.conf"
 	// UserConfigFile is the user configuration filename.
