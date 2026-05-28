@@ -47,7 +47,7 @@ func reloadSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in reloadSiteI
 	}
 	res, err := site.Reload(in.Name)
 	if err != nil {
-		return nil, reloadSiteOut{OK: false, Error: err.Error()}, nil
+		return nil, reloadSiteOut{OK: false, Error: err.Error()}, nil //nolint:nilerr // reload failure reported in payload, not as call error
 	}
 	out := reloadSiteOut{OK: true}
 	if res != nil {

@@ -208,13 +208,13 @@ func validateSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in validateS
 	}
 	meta, err := site.ReadSiteMetadata(in.Name)
 	if err != nil {
-		return nil, validateSiteOut{OK: false, Error: err.Error()}, nil
+		return nil, validateSiteOut{OK: false, Error: err.Error()}, nil //nolint:nilerr // validation failure reported in payload, not as call error
 	}
 	if meta == nil {
 		return nil, validateSiteOut{OK: false, Error: "site has no metadata.yml"}, nil
 	}
 	if err := site.ValidateMetadata(meta); err != nil {
-		return nil, validateSiteOut{OK: false, Error: err.Error()}, nil
+		return nil, validateSiteOut{OK: false, Error: err.Error()}, nil //nolint:nilerr // validation failure reported in payload, not as call error
 	}
 	return nil, validateSiteOut{OK: true}, nil
 }

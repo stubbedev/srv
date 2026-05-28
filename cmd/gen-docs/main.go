@@ -75,7 +75,7 @@ func writeCommand(b *strings.Builder, c *cobra.Command, parents []string) {
 	if c.HasParent() {
 		path := strings.Join(append(append([]string{}, parents...), c.Name()), " ")
 		fmt.Fprintf(b, "## `srv %s`\n\n", path)
-		if c.Aliases != nil && len(c.Aliases) > 0 {
+		if len(c.Aliases) > 0 {
 			fmt.Fprintf(b, "Aliases: `%s`\n\n", strings.Join(c.Aliases, "`, `"))
 		}
 		if s := strings.TrimSpace(c.Short); s != "" {
