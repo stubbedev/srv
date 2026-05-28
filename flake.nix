@@ -25,7 +25,7 @@
             version = version;
             src = self;
 
-            vendorHash = "sha256-1Jkmx43+dAe5bwjrzjxU4OX6UjRBxqtPD6Z81XKlTBU=";
+            vendorHash = "sha256-G9qXDGhKs7mWO8jv52JGEjp0bNqy43NWLicCQ6vQvyY=";
 
             ldflags = [
               "-s"
