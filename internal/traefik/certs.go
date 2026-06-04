@@ -11,7 +11,9 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/mkcert"
+	"github.com/stubbedev/srv/internal/validate"
 )
 
 // CheckMkcert verifies mkcert is available on $PATH.
@@ -63,6 +65,12 @@ func LocalCertsExist(siteName, domain string) bool {
 // RemoveLocalCerts removes SSL certificates for a specific site.
 // Returns an error if removal fails for files that exist.
 func RemoveLocalCerts(siteName, domain string) error {
+	if err := validate.NoTraversal(siteName); err != nil {
+		return err
+	}
+	if err := validate.NoTraversal(domain); err != nil {
+		return err
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -92,6 +100,14 @@ func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 	if len(domains) == 0 {
 		return fmt.Errorf("no domains supplied for cert generation")
 	}
+	if err := validate.NoTraversal(siteName); err != nil {
+		return err
+	}
+	for _, d := range domains {
+		if err := validate.NoTraversal(d); err != nil {
+			return err
+		}
+	}
 	if err := CheckMkcert(); err != nil {
 		return err
 	}
@@ -101,8 +117,11 @@ func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 		return err
 	}
 
+	// 0700: the directory holds private keys. mkcert writes the *.key files
+	// 0600, but a private cert dir keeps the .crt files and the listing itself
+	// from being world-readable too.
 	certDir := cfg.SiteCertsDir(siteName)
-	if err := os.MkdirAll(certDir, constants.DirPermDefault); err != nil {
+	if err := os.MkdirAll(certDir, constants.DirPermPrivate); err != nil {
 		return fmt.Errorf("failed to create certs directory: %w", err)
 	}
 
@@ -245,13 +264,8 @@ func UpdateDynamicConfig() error {
 	// Write atomically so Traefik (which watches this file) never reads a
 	// partial/truncated config between the truncate and the final write.
 	dynamicPath := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
-	tmp := dynamicPath + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content.String()), constants.FilePermDefault); err != nil {
+	if err := fsutil.AtomicWriteFile(dynamicPath, []byte(content.String()), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dynamic config: %w", err)
-	}
-	if err := os.Rename(tmp, dynamicPath); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("failed to replace dynamic config: %w", err)
 	}
 
 	return nil
@@ -320,6 +334,38 @@ type CertInfo struct {
 	// can use this to surface the corruption to the user instead of treating
 	// it as "just regenerate quietly."
 	Corrupt bool
+}
+
+// CertStatus is the lifecycle state of a local certificate, used by list and
+// doctor views.
+type CertStatus string
+
+// Certificate lifecycle states. Order of precedence is corrupt > missing >
+// expired > expiring > valid (see Status).
+const (
+	CertStatusCorrupt  CertStatus = "corrupt"
+	CertStatusMissing  CertStatus = "missing"
+	CertStatusExpired  CertStatus = "expired"
+	CertStatusExpiring CertStatus = "expiring"
+	CertStatusValid    CertStatus = "valid"
+)
+
+// Status classifies the certificate into a single lifecycle state. It is the
+// one place this precedence lives — list, inspect, and doctor all call it
+// instead of re-deriving the same switch.
+func (c CertInfo) Status() CertStatus {
+	switch {
+	case c.Corrupt:
+		return CertStatusCorrupt
+	case !c.Exists:
+		return CertStatusMissing
+	case c.IsExpired:
+		return CertStatusExpired
+	case c.DaysLeft <= constants.CertExpiryWarningDays:
+		return CertStatusExpiring
+	default:
+		return CertStatusValid
+	}
 }
 
 // GetLocalCertInfo returns information about a specific site's SSL certificate.

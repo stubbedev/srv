@@ -315,17 +315,18 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 
 	// For manual conflicts, print instructions and return an error.
 	if len(manual) > 0 {
-		msg := "cannot start: the following ports are already in use\n"
+		var msg strings.Builder
+		msg.WriteString("cannot start: the following ports are already in use\n")
 		for _, c := range manual {
 			if c.Process != "" {
-				msg += fmt.Sprintf("\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
+				fmt.Fprintf(&msg, "\n  :%d (%s) is held by %s", c.Port, c.Name, c.Process)
 			} else {
-				msg += fmt.Sprintf("\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
+				fmt.Fprintf(&msg, "\n  :%d (%s) is held by an unknown process", c.Port, c.Name)
 			}
-			msg += fmt.Sprintf("\n    stop it with: %s\n", c.StopHint())
+			fmt.Fprintf(&msg, "\n    stop it with: %s\n", c.StopHint())
 		}
-		msg += "\nThen run 'srv install' again."
-		return fmt.Errorf("%s", msg)
+		msg.WriteString("\nThen run 'srv install' again.")
+		return fmt.Errorf("%s", msg.String())
 	}
 
 	// For fixable conflicts, describe them and bail unless --yes is passed.
@@ -349,12 +350,13 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 
 	// Re-check: give the OS a moment and verify the ports are now free.
 	if remaining := traefik.CheckPortConflicts(); len(remaining) > 0 {
-		msg := "ports still in use after fix attempt:\n"
+		var msg strings.Builder
+		msg.WriteString("ports still in use after fix attempt:\n")
 		for _, c := range remaining {
-			msg += fmt.Sprintf("\n  :%d (%s) — stop it with: %s\n", c.Port, c.Name, c.StopHint())
+			fmt.Fprintf(&msg, "\n  :%d (%s) — stop it with: %s\n", c.Port, c.Name, c.StopHint())
 		}
-		msg += "\nRun 'srv install' again."
-		return fmt.Errorf("%s", msg)
+		msg.WriteString("\nRun 'srv install' again.")
+		return fmt.Errorf("%s", msg.String())
 	}
 
 	return nil

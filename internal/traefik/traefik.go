@@ -17,7 +17,9 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/platform"
+	"github.com/stubbedev/srv/internal/yamlpatch"
 )
 
 // TraefikYML is the static Traefik configuration template.
@@ -67,7 +69,7 @@ entryPoints:
 providers:
   docker:
     exposedByDefault: false
-    network: "{{NETWORK}}"
+    network: ""
   file:
     directory: /etc/traefik/conf
     watch: true
@@ -75,7 +77,7 @@ providers:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: "{{EMAIL}}"
+      email: ""
       storage: /etc/traefik/certs/acme.json
       httpChallenge:
         entryPoint: web
@@ -248,13 +250,8 @@ func writeEnvFile(path string, envMap map[string]string) error {
 	}
 
 	// Write atomically so a crash mid-write never produces a partial file.
-	tmp := path + constants.ExtTmp
-	if err := os.WriteFile(tmp, []byte(content.String()), constants.FilePermACME); err != nil {
+	if err := fsutil.AtomicWriteFile(path, []byte(content.String()), constants.FilePermACME); err != nil {
 		return fmt.Errorf("failed to write env file: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("failed to install env file: %w", err)
 	}
 	return nil
 }
@@ -412,16 +409,21 @@ var managedTraefikSections = []string{"providers", "certificatesResolvers"}
 // verbatim from the existing file. If the existing file is malformed YAML, the call fails
 // rather than silently overwriting it — the user's customizations are too valuable to drop.
 func writeOrMergeTraefikYML(path, networkName, email string) error {
-	// Prepare the template with substitutions
-	templateYML := strings.ReplaceAll(TraefikYML, "{{NETWORK}}", networkName)
-	templateYML = strings.ReplaceAll(templateYML, "{{EMAIL}}", email)
+	// Render the template by setting networkName/email structurally rather than
+	// by textual substitution: email is user-supplied, so splicing it into the
+	// YAML text could break the document or inject sibling keys. yamlpatch.Set
+	// encodes each value as a YAML scalar node, which is injection-safe.
+	templateYML, err := renderTraefikTemplate(networkName, email)
+	if err != nil {
+		return err
+	}
 
 	// Check if file exists
 	existingData, err := os.ReadFile(path)
 	if err != nil {
 		// File doesn't exist, write fresh
 		if os.IsNotExist(err) {
-			return os.WriteFile(path, []byte(templateYML), constants.FilePermDefault)
+			return fsutil.AtomicWriteFile(path, templateYML, constants.FilePermDefault)
 		}
 		return fmt.Errorf("failed to read existing traefik.yml: %w", err)
 	}
@@ -434,7 +436,7 @@ func writeOrMergeTraefikYML(path, networkName, email string) error {
 
 	// Parse template config
 	var template map[string]any
-	if err := yaml.Unmarshal([]byte(templateYML), &template); err != nil {
+	if err := yaml.Unmarshal(templateYML, &template); err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
@@ -447,7 +449,25 @@ func writeOrMergeTraefikYML(path, networkName, email string) error {
 		return fmt.Errorf("failed to marshal merged config: %w", err)
 	}
 
-	return os.WriteFile(path, output, constants.FilePermDefault)
+	return fsutil.AtomicWriteFile(path, output, constants.FilePermDefault)
+}
+
+// renderTraefikTemplate parses the static-config template and sets the
+// docker-provider network and ACME email by dotted path. Using yamlpatch (the
+// YAML AST) instead of string replacement keeps untrusted values (email)
+// encoded as scalars so they cannot alter the document structure.
+func renderTraefikTemplate(networkName, email string) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(TraefikYML), &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse traefik.yml template: %w", err)
+	}
+	if err := yamlpatch.SetPath(&doc, "providers.docker.network", networkName); err != nil {
+		return nil, fmt.Errorf("failed to set provider network: %w", err)
+	}
+	if err := yamlpatch.SetPath(&doc, "certificatesResolvers.letsencrypt.acme.email", email); err != nil {
+		return nil, fmt.Errorf("failed to set acme email: %w", err)
+	}
+	return yamlpatch.Marshal(&doc)
 }
 
 // mergeTraefikConfigs merges existing config with template.

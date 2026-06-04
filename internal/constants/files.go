@@ -14,6 +14,9 @@ const (
 	FilePermACME os.FileMode = 0o600
 	// DirPermDefault is the default permission for directories (rwxr-xr-x).
 	DirPermDefault os.FileMode = 0o755
+	// DirPermPrivate is the permission for directories holding secrets such as
+	// private keys (rwx------).
+	DirPermPrivate os.FileMode = 0o700
 )
 
 // =============================================================================

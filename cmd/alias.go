@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -90,11 +91,9 @@ func runAliasAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("site %s has no canonical domain", siteName)
 	}
 
-	for _, d := range meta.Domains {
-		if d == alias {
-			ui.Dim("Alias %q already configured for %s", alias, siteName)
-			return nil
-		}
+	if slices.Contains(meta.Domains, alias) {
+		ui.Dim("Alias %q already configured for %s", alias, siteName)
+		return nil
 	}
 
 	meta.Domains = append(meta.Domains, alias)

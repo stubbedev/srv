@@ -130,19 +130,7 @@ func plainSSLStatus(s site.Site) string {
 	if !s.IsLocal {
 		return "auto"
 	}
-	cert := traefik.GetLocalCertInfo(s.Name, s.Domain())
-	switch {
-	case cert.Corrupt:
-		return "corrupt"
-	case !cert.Exists:
-		return "missing"
-	case cert.IsExpired:
-		return "expired"
-	case cert.DaysLeft <= constants.CertExpiryWarningDays:
-		return "expiring"
-	default:
-		return "valid"
-	}
+	return string(traefik.GetLocalCertInfo(s.Name, s.Domain()).Status())
 }
 
 // formatDomainsForList renders a site's domains for the `srv list` table.
@@ -182,20 +170,7 @@ func getSSLStatus(s site.Site) string {
 
 	if s.IsLocal {
 		// Local site - check mkcert certificate (named after the primary domain)
-		cert := traefik.GetLocalCertInfo(s.Name, s.Domain())
-		if cert.Corrupt {
-			return ui.StatusColor("corrupt")
-		}
-		if !cert.Exists {
-			return ui.StatusColor("missing")
-		}
-		if cert.IsExpired {
-			return ui.StatusColor("expired")
-		}
-		if cert.DaysLeft <= constants.CertExpiryWarningDays {
-			return ui.StatusColor("expiring")
-		}
-		return ui.StatusColor("valid")
+		return ui.StatusColor(string(traefik.GetLocalCertInfo(s.Name, s.Domain()).Status()))
 	}
 
 	// Production site - Let's Encrypt (auto-managed)

@@ -3,6 +3,8 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,6 +71,41 @@ func TestDaemonLogWritesTimestamped(t *testing.T) {
 func TestDaemonLogNilFileNoCrash(t *testing.T) {
 	d := &Daemon{}
 	d.log("safe %d", 1)
+}
+
+// TestDaemonLogConcurrent confirms log() is safe under concurrent callers
+// (signal, metadata-watcher, and event goroutines all call it). Run with
+// `go test -race` this fails without the logMu guard; it also asserts every
+// line lands intact (no interleaving/truncation).
+func TestDaemonLogConcurrent(t *testing.T) {
+	root := setupSrvRoot(t)
+	d := &Daemon{cfg: &config.Config{Root: root}}
+	logPath := filepath.Join(root, "concurrent.log")
+	f, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	d.logFile = f
+
+	const goroutines, perGoroutine = 8, 50
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				d.log("g%d-line%d", id, i)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	data, _ := os.ReadFile(logPath)
+	lines := strings.Count(string(data), "\n")
+	if want := goroutines * perGoroutine; lines != want {
+		t.Errorf("got %d log lines, want %d (interleaved/lost writes)", lines, want)
+	}
 }
 
 func TestRefreshContainerMappingNoSites(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/validate"
 )
 
 // DNSAlias is a "type=dns" redirect entry parsed from a redirect-<name>.yml file.
@@ -69,7 +70,20 @@ func ScanRedirectAliases() ([]DNSAlias, error) {
 		if parsed.DNS == nil {
 			continue
 		}
+		// These files are meant to be hand-edited, so the CLI's input validation
+		// no longer protects them. Re-validate here: source and target are
+		// interpolated into dnsmasq `address=/<source>/<ip>` directives, so a
+		// crafted hostname containing '/' or whitespace could inject extra
+		// dnsmasq config lines. Skip invalid entries (with a warning) instead.
 		short := strings.TrimSuffix(strings.TrimPrefix(name, constants.RedirectConfigPrefix), constants.ExtYAML)
+		if err := validate.Domain(parsed.DNS.Source); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: redirect %q: invalid dns.source %q, skipping: %v\n", short, parsed.DNS.Source, err)
+			continue
+		}
+		if err := validate.Domain(parsed.DNS.Target); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: redirect %q: invalid dns.target %q, skipping: %v\n", short, parsed.DNS.Target, err)
+			continue
+		}
 		out = append(out, DNSAlias{
 			Name:   short,
 			Source: parsed.DNS.Source,

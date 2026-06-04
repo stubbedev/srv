@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell"
 )
@@ -696,10 +697,13 @@ func UpdateDnsmasqConfig() error {
 	if err := os.MkdirAll(hostsDir, constants.DirPermDefault); err != nil {
 		return fmt.Errorf("failed to create dnsmasq hosts dir: %w", err)
 	}
-	if err := os.WriteFile(hostsPath, []byte(hostsBody), constants.FilePermDefault); err != nil {
+	// Write atomically: dnsmasq watches the hostsdir (and is SIGHUP'd on a
+	// conf change), so a plain truncating write exposes a window where dnsmasq
+	// reads a partial file and fails to resolve a domain.
+	if err := fsutil.AtomicWriteFile(hostsPath, []byte(hostsBody), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dnsmasq hosts file: %w", err)
 	}
-	if err := os.WriteFile(dnsmasqPath, []byte(confBody), constants.FilePermDefault); err != nil {
+	if err := fsutil.AtomicWriteFile(dnsmasqPath, []byte(confBody), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
 	}
 

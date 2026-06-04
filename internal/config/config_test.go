@@ -372,48 +372,8 @@ func TestLoadUserConfigInvalidYAML(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "f")
-	if err := atomicWriteFile(path, []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "hi" {
-		t.Errorf("contents = %q", data)
-	}
-	// Temp file must be cleaned up after rename.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("tmp file remains: %v", err)
-	}
-}
-
-func TestAtomicWriteFileTempCreateFails(t *testing.T) {
-	// Parent path doesn't exist — WriteFile on the .tmp will fail.
-	path := "/nonexistent-path-srv-cfgtest/should-fail"
-	if err := atomicWriteFile(path, []byte("x"), 0o644); err == nil {
-		t.Error("expected error when parent dir missing")
-	}
-}
-
-func TestAtomicWriteFileRenameFails(t *testing.T) {
-	dir := t.TempDir()
-	// Make the destination path a non-empty directory so Rename fails.
-	dest := filepath.Join(dir, "dest")
-	if err := os.MkdirAll(filepath.Join(dest, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Place a file inside so the dir is non-empty.
-	if err := os.WriteFile(filepath.Join(dest, "sub", "f"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := atomicWriteFile(dest, []byte("y"), 0o644); err == nil {
-		t.Error("expected rename err over non-empty dir")
-	}
-}
+// Atomic-write behaviour is covered by internal/fsutil; config.go delegates to
+// fsutil.AtomicWriteFile.
 
 func TestLoadCachesPanicSafe(t *testing.T) {
 	// Already covered, but verify config Reset works repeatedly without issue.
