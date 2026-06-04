@@ -9,25 +9,25 @@ import (
 	"github.com/stubbedev/srv/internal/site"
 )
 
-// registerWriteTools binds mutating tools. The surface is intentionally
-// limited to safe / idempotent operations for now — sites and proxies
-// have validation + creation flows tightly coupled to the CLI layer that
-// need extraction before they can be MCP-exposed. The TODO list below
-// tracks what's still CLI-only.
+// registerWriteTools binds mutating tools. Orchestration lives in the internal
+// packages (site, proxy, redirect, traefik) so the CLI and MCP share it.
 //
-// TODO (follow-up work, extract from cmd/ helpers):
-//   - add_site, remove_site
-//   - add_proxy, remove_proxy
-//   - add_redirect, remove_redirect, redirect_reload
-//   - site lifecycle: start_site, stop_site, restart_site
-//   - alias add/remove, internal enable/disable
-//   - install (environment bootstrap)
+// Privileged steps (mkcert CA install, systemd-resolved drop-in) cannot prompt
+// for a password over stdio, so the server runs sudo non-interactively; tools
+// that need an uninstalled CA preflight-check and return an actionable error
+// rather than hanging.
+//
+// Still CLI-only (interactive or environment-level): install/uninstall,
+// import valet, the proxy `--fallback` sidecar, shell/open.
 func registerWriteTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "reload_site",
 		Description: "Re-apply a site's metadata.yml without restarting the container. The daemon normally does this automatically on file save; call this to force a sync from MCP (for example after a write to metadata.yml made via another tool). Idempotent.",
 		Annotations: writeAnno("Reload site", false, true, true),
 	}, reloadSiteTool)
+
+	registerProxyWriteTools(srv)
+	registerRedirectWriteTools(srv)
 }
 
 type reloadSiteIn struct {

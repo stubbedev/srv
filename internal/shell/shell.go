@@ -48,6 +48,36 @@ type Runner interface {
 // because it returns a restore func.
 var Default Runner = OSRunner{}
 
+// nonInteractive, when true, makes every sudo invocation use `sudo -n` so it
+// fails fast with "a password is required" instead of blocking on a password
+// prompt. The MCP server enables this at startup because it runs over stdio
+// with no TTY — a sudo prompt there would hang the protocol stream. The CLI
+// leaves it false so interactive sudo works as usual.
+var nonInteractive bool
+
+// SetNonInteractive toggles non-interactive sudo. Call SetNonInteractive(true)
+// from any surface that cannot service a password prompt (the MCP server).
+func SetNonInteractive(v bool) { nonInteractive = v }
+
+// IsNonInteractive reports whether sudo is in non-interactive mode.
+func IsNonInteractive() bool { return nonInteractive }
+
+// sudoArgs prepends -n to the sudo argument list when non-interactive mode is
+// on, so the call returns an error instead of prompting for a password.
+func sudoArgs(args []string) []string {
+	if nonInteractive {
+		return append([]string{"-n"}, args...)
+	}
+	return args
+}
+
+// SudoFunctional reports whether sudo can run without prompting right now
+// (creds cached or NOPASSWD). Used as a preflight so a surface that cannot
+// prompt can return an actionable error before attempting a privileged step.
+func SudoFunctional() bool {
+	return exec.Command("sudo", "-n", "true").Run() == nil
+}
+
 // SwapDefault replaces Default with r and returns a function that restores
 // the previous value. Intended for use with t.Cleanup in tests:
 //
@@ -150,12 +180,14 @@ func (OSRunner) RunWithStdin(stdin string, name string, args ...string) error {
 	return cmd.Run()
 }
 
-func (r OSRunner) SudoRun(args ...string) error { return r.Run("sudo", args...) }
+func (r OSRunner) SudoRun(args ...string) error { return r.Run("sudo", sudoArgs(args)...) }
 
-func (r OSRunner) SudoRunQuiet(args ...string) ([]byte, error) { return r.RunQuiet("sudo", args...) }
+func (r OSRunner) SudoRunQuiet(args ...string) ([]byte, error) {
+	return r.RunQuiet("sudo", sudoArgs(args)...)
+}
 
 func (r OSRunner) SudoWrite(path, content string) error {
-	return r.RunWithStdin(content, "sudo", "tee", path)
+	return r.RunWithStdin(content, "sudo", sudoArgs([]string{"tee", path})...)
 }
 
 func (r OSRunner) SudoMkdir(path string) error { return r.SudoRun("mkdir", "-p", path) }

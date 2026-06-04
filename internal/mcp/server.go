@@ -7,6 +7,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/shell"
 )
 
 // version is the srv version advertised by the MCP server. Overridden via
@@ -64,6 +65,11 @@ func newServer() *mcpsdk.Server {
 // Serve boots the MCP server on stdio and blocks until the client
 // disconnects or ctx is cancelled. Returns nil on clean shutdown.
 func Serve(ctx context.Context) error {
+	// MCP runs over stdio with no TTY, so a sudo password prompt would hang the
+	// protocol stream. Force non-interactive sudo: privileged steps (mkcert CA
+	// install, systemd-resolved drop-in, firewall) fail fast with an actionable
+	// error instead of blocking. Operators run those once from a terminal.
+	shell.SetNonInteractive(true)
 	if err := newServer().Run(ctx, &mcpsdk.StdioTransport{}); err != nil {
 		return fmt.Errorf("mcp server: %w", err)
 	}

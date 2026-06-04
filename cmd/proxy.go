@@ -258,13 +258,36 @@ func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error
 // =============================================================================
 
 func runProxyAdd(cmd *cobra.Command, args []string) error {
-	// Validate input
-	input, err := validateProxyInput()
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	cfg, err := config.Load()
+	// The standard (no-fallback) flow is shared with the MCP add_proxy tool via
+	// internal/proxy.Add. The --fallback sidecar is a CLI-only feature handled
+	// inline below because it rewrites the target before the config is written.
+	if proxyAddFlags.fallbackURL == "" {
+		res, err := proxy.Add(cfg, proxy.AddSpec{
+			Name:      proxyAddFlags.name,
+			Domain:    proxyAddFlags.domain,
+			Port:      proxyAddFlags.port,
+			Container: proxyAddFlags.container,
+			Wildcard:  proxyAddFlags.wildcard,
+			Force:     proxyAddFlags.force,
+		})
+		if err != nil {
+			return err
+		}
+		for _, w := range res.Warnings {
+			ui.Warn("%s", w)
+		}
+		ui.Success("Proxy '%s' created", res.Name)
+		ui.Dim("https://%s -> %s", res.Domain, res.TargetURL)
+		return nil
+	}
+
+	// Validate input
+	input, err := validateProxyInput()
 	if err != nil {
 		return err
 	}
@@ -380,46 +403,18 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Read proxy config to get domain before removing
-	proxyInfo := readProxyConfig(cfg, name)
-
-	// Remove proxy config file
-	proxyFile := filepath.Join(cfg.TraefikConfDir(), constants.ProxyConfigPrefix+name+constants.ExtYAML)
-	if err := os.Remove(proxyFile); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("proxy '%s' not found", name)
-		}
-		return fmt.Errorf("failed to remove proxy: %w", err)
-	}
-
-	// Remove certificate and DNS if we found the domain
-	if proxyInfo.Domain != "" {
-		// Use "_proxy-{name}" as the site name for cert storage
-		proxySiteName := "_proxy-" + name
-		if err := traefik.RemoveLocalCerts(proxySiteName, proxyInfo.Domain); err != nil {
-			ui.Warn("Failed to remove certificate: %v", err)
-		}
-		if err := traefik.UnregisterLocalDomain(proxyInfo.Domain); err != nil {
-			ui.Warn("Failed to unregister DNS for %s: %v", proxyInfo.Domain, err)
-		}
-	}
-
-	// Tear down the fallback sidecar if one was configured for this proxy.
+	// Tear down the fallback sidecar (CLI-only feature) first, then delegate the
+	// shared removal (config, cert, DNS, routes, metadata) to internal/proxy so
+	// the CLI and the MCP remove_proxy tool stay in lockstep.
 	if err := removeFallbackSidecar(cfg, name); err != nil {
 		ui.Warn("Failed to remove fallback sidecar: %v", err)
 	}
-
-	// Drop the proxy metadata sidecar and its routes Traefik file.
-	if err := traefik.RemoveRoutesConfig(cfg, name); err != nil {
-		ui.Warn("Failed to remove proxy routes config: %v", err)
+	warnings, err := proxy.RemoveProxy(cfg, name)
+	if err != nil {
+		return err
 	}
-	if err := proxy.Remove(name); err != nil {
-		ui.Warn("Failed to remove proxy metadata: %v", err)
-	}
-
-	// Update Traefik dynamic config
-	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Failed to update Traefik config: %v", err)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
 
 	ui.Success("Proxy '%s' removed", name)

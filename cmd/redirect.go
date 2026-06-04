@@ -239,62 +239,34 @@ func runRedirectAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	redirectFile := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
-	if _, err := os.Stat(redirectFile); err == nil && !redirectAddFlags.force {
-		return fmt.Errorf("redirect '%s' already exists. Use --force to overwrite", input.name)
-	}
-
-	if input.dnsOnly {
-		return runRedirectAddDNSOnly(cfg, input)
-	}
-
-	if err := setupRedirectCertificate(input); err != nil {
+	// Orchestration (validation, cert, DNS, config write) lives in
+	// internal/redirect so the CLI and the MCP add_redirect tool share it.
+	res, err := redirect.Add(cfg, redirect.AddSpec{
+		Name:      input.name,
+		Domain:    input.domain,
+		To:        input.to,
+		Permanent: input.permanent,
+		Wildcard:  input.wildcard,
+		DNSOnly:   input.dnsOnly,
+		Force:     redirectAddFlags.force,
+	})
+	if err != nil {
 		return err
 	}
-
-	if err := traefik.RegisterLocalDomain(input.domain, input.wildcard); err != nil {
-		ui.Warn("Failed to register DNS for %s: %v", input.domain, err)
+	for _, w := range res.Warnings {
+		ui.Warn("%s", w)
 	}
-
-	if err := writeRedirectConfig(cfg, input); err != nil {
-		return err
+	if res.DNSOnly {
+		ui.Success("Redirect '%s' created (DNS-only)", res.Name)
+		ui.Dim("%s -> %s (dnsmasq A-record swap, no TLS, no Traefik)", res.Domain, res.Target)
+		return nil
 	}
-
-	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Failed to update Traefik config: %v", err)
-	}
-
 	code := "301"
 	if !input.permanent {
 		code = "302"
 	}
-	ui.Success("Redirect '%s' created", input.name)
-	ui.Dim("https://%s -> %s (%s)", input.domain, input.to, code)
-	return nil
-}
-
-// runRedirectAddDNSOnly creates a DNS-alias redirect: writes the metadata
-// yaml as the source of truth and re-renders dnsmasq.conf from the scan.
-func runRedirectAddDNSOnly(cfg *config.Config, input *redirectInput) error {
-	if err := writeRedirectDNSConfig(cfg, input); err != nil {
-		return err
-	}
-	// Surface upfront whether the target resolves at all — saves the user from
-	// adding a typo'd target and only noticing when the redirect silently
-	// doesn't work.
-	resolved := traefik.ResolveAliases([]traefik.DNSAlias{{Source: input.domain, Target: input.to}})
-	if len(resolved) > 0 && resolved[0].ResolveErr != nil {
-		ui.Warn("Target %s could not be resolved (%v). The entry is written but dnsmasq will skip it until resolution succeeds.", input.to, resolved[0].ResolveErr)
-	} else if len(resolved) > 0 {
-		ui.Dim("Resolved %s -> %s", input.to, resolved[0].IP)
-	}
-
-	if err := traefik.UpdateDnsmasqConfig(); err != nil {
-		ui.Warn("Failed to update dnsmasq config: %v", err)
-	}
-
-	ui.Success("Redirect '%s' created (DNS-only)", input.name)
-	ui.Dim("%s -> %s (dnsmasq A-record swap, no TLS, no Traefik)", input.domain, input.to)
+	ui.Success("Redirect '%s' created", res.Name)
+	ui.Dim("https://%s -> %s (%s)", res.Domain, res.Target, code)
 	return nil
 }
 
@@ -306,40 +278,13 @@ func runRedirectRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	info := readRedirectConfig(cfg, name)
-
-	redirectFile := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+name+constants.ExtYAML)
-	if err := os.Remove(redirectFile); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("redirect '%s' not found", name)
-		}
-		return fmt.Errorf("failed to remove redirect: %w", err)
+	warnings, err := redirect.RemoveRedirect(cfg, name)
+	if err != nil {
+		return err
 	}
-
-	if info.DNSOnly {
-		// DNS-alias redirects have no cert and no Traefik conf. Just
-		// re-render dnsmasq so the entry disappears from address= lines.
-		if err := traefik.UpdateDnsmasqConfig(); err != nil {
-			ui.Warn("Failed to update dnsmasq config: %v", err)
-		}
-		ui.Success("Redirect '%s' removed", name)
-		return nil
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-
-	if info.Domain != "" {
-		siteName := redirectSiteName(name)
-		if err := traefik.RemoveLocalCerts(siteName, info.Domain); err != nil {
-			ui.Warn("Failed to remove certificate: %v", err)
-		}
-		if err := traefik.UnregisterLocalDomain(info.Domain); err != nil {
-			ui.Warn("Failed to unregister DNS for %s: %v", info.Domain, err)
-		}
-	}
-
-	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Failed to update Traefik config: %v", err)
-	}
-
 	ui.Success("Redirect '%s' removed", name)
 	return nil
 }
@@ -576,20 +521,9 @@ func readRedirectConfig(cfg *config.Config, name string) redirectConfigInfo {
 	return info
 }
 
-// writeRedirectDNSConfig writes a DNS-only redirect yaml. Schema is intentionally
-// minimal so it reads as plain configuration rather than embedded Traefik
-// internals — the yaml IS the canonical source of truth that the dnsmasq
-// scanner reads back. The yaml-language-server modeline points editors at the
-// DNS-only schema; HTTP-redirect files (Traefik dynamic config) carry no
-// modeline because Traefik owns that shape.
+// writeRedirectDNSConfig writes a DNS-only redirect yaml. The rendering lives in
+// internal/redirect (shared with the MCP add_redirect tool); this wrapper keeps
+// the cmd-side call site and tests stable.
 func writeRedirectDNSConfig(cfg *config.Config, input *redirectInput) error {
-	body := redirect.DNSOnlyConfig{DNS: redirect.DNSBlock{Source: input.domain, Target: input.to}}
-	data, err := yaml.Marshal(&body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal redirect config: %w", err)
-	}
-	content := fmt.Sprintf("# yaml-language-server: $schema=%s\n# Redirect (DNS alias) for %s - generated by srv\n# Edit and run 'srv redirect reload %s' to re-resolve the target.\n%s",
-		constants.RedirectDNSSchemaURL, input.name, input.name, data)
-	redirectFile := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
-	return os.WriteFile(redirectFile, []byte(content), constants.FilePermDefault)
+	return redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to)
 }

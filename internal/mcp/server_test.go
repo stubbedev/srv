@@ -20,6 +20,8 @@ var wantTools = []string{
 	"daemon_status", "daemon_log", "metrics_status",
 	// write
 	"reload_site",
+	"add_proxy", "remove_proxy",
+	"add_redirect", "remove_redirect",
 }
 
 // TestNewServerRegistersTools spins up the server over an in-memory transport,

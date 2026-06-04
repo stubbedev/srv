@@ -153,6 +153,27 @@ func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 // RenewThresholdDays is the number of days before expiry to trigger auto-renewal.
 const RenewThresholdDays = constants.CertExpiryWarningDays
 
+// EnsureResourceCert ensures mkcert is available, the local CA is installed,
+// and a cert exists for (siteName, domain). It is the headless core shared by
+// `srv proxy add` / `srv redirect add` (which wrap it with CLI progress
+// reporting) and the MCP add_proxy / add_redirect tools. Returns whether a cert
+// was (re)issued.
+func EnsureResourceCert(siteName, domain string, wildcard bool) (renewed bool, err error) {
+	if err := CheckMkcert(); err != nil {
+		return false, err
+	}
+	if !IsCAInstalled() {
+		if _, err := InstallCA(); err != nil {
+			return false, fmt.Errorf("failed to install mkcert CA: %w", err)
+		}
+	}
+	renewed, err = EnsureLocalCert(siteName, []string{domain}, wildcard)
+	if err != nil {
+		return false, fmt.Errorf("failed to generate certificate: %w", err)
+	}
+	return renewed, nil
+}
+
 // EnsureLocalCert generates an SSL certificate for a site if it doesn't exist
 // or if the existing certificate is expired, expiring soon, missing the
 // requested wildcard SAN, or missing one of the requested domains.
