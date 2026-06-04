@@ -256,8 +256,8 @@ func checkDNS() int {
 //   - a non-.local fails     → real "System DNS not configured" issue
 //   - only .local names fail → the mDNS-interception case: .local is reserved
 //     for mDNS (RFC 6762) and on hosts running Avahi with nss-mdns ahead of
-//     systemd-resolved it never reaches srv's DNS. srv publishes .local names
-//     to Avahi (/etc/avahi/hosts); the guidance reflects that rather than the
+//     systemd-resolved (the common Linux default) it never reaches srv's DNS,
+//     so the guidance points at .test or the nss ordering fix rather than the
 //     misleading "re-add the site".
 func checkSystemDNSResolution(domains []string) int {
 	var realFail, localFail []string
@@ -286,8 +286,9 @@ func checkSystemDNSResolution(domains []string) int {
 	}
 	if len(localFail) > 0 {
 		ui.IndentedWarn(1, ".local not resolving via system resolver: %s", strings.Join(localFail, ", "))
-		ui.IndentedDim(1, ".local is reserved for mDNS; srv publishes it to Avahi (/etc/avahi/hosts).")
-		ui.IndentedDim(1, "Ensure avahi-daemon is running, or prefer a .test domain for local dev.")
+		ui.IndentedDim(1, ".local is reserved for mDNS — nss-mdns intercepts it before srv's DNS.")
+		ui.IndentedDim(1, "Fastest fix: use a .test domain (no mDNS conflict, zero config).")
+		ui.IndentedDim(1, "To keep .local: make nss 'resolve' win (NixOS: services.avahi.nssmdns4 = false).")
 		issues++
 	}
 	return issues
