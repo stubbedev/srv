@@ -208,7 +208,13 @@ func CreateNetwork(name string) error {
 }
 
 // ComposeUp runs docker compose up -d in the specified directory.
-// Uses --remove-orphans to clean up stale containers.
+//
+// NOTE: srv groups every stack (each site + the metrics stack) under one shared
+// compose project ("srv"), so --remove-orphans MUST NOT be passed here — docker
+// would treat every other stack's containers as orphans of the current compose
+// file and delete them, so starting one site would wipe the metrics stack and
+// the other sites. (Only the traefik/dns stack has its own project.) Per-stack
+// orphan cleanup is given up in exchange for not nuking sibling stacks.
 func ComposeUp(dir string) error {
 	return ComposeUpWithProfile(dir, "")
 }
@@ -220,8 +226,9 @@ func ComposeUpBuild(dir string) error {
 }
 
 // ComposeUpWithProfile runs docker compose up -d with a specific profile.
+// See ComposeUp for why --remove-orphans is deliberately omitted.
 func ComposeUpWithProfile(dir, profile string) error {
-	args := []string{"up", "-d", "--remove-orphans"}
+	args := []string{"up", "-d"}
 	if profile != "" {
 		return Compose(dir, append([]string{"--profile", profile}, args...)...)
 	}
@@ -230,18 +237,20 @@ func ComposeUpWithProfile(dir, profile string) error {
 
 // ComposeUpBuildWithProfile runs docker compose up -d --build with a specific profile.
 func ComposeUpBuildWithProfile(dir, profile string) error {
-	args := []string{"up", "-d", "--build", "--remove-orphans"}
+	args := []string{"up", "-d", "--build"}
 	if profile != "" {
 		return Compose(dir, append([]string{"--profile", profile}, args...)...)
 	}
 	return Compose(dir, args...)
 }
 
-// ComposeDown runs docker compose down in the specified directory.
-// Passes --remove-orphans so containers from previous compose versions get
-// cleaned up too.
+// ComposeDown runs docker compose down in the specified directory. It does NOT
+// pass --remove-orphans: under the shared "srv" compose project that would tear
+// down every other stack's containers (other sites + metrics), not just this
+// one's. Down already removes the containers/networks defined in this dir's
+// compose file, which is the intended scope.
 func ComposeDown(dir string) error {
-	return Compose(dir, "down", "--remove-orphans")
+	return Compose(dir, "down")
 }
 
 // composePrefixedExec is the swappable seam for ComposePrefixed.

@@ -830,3 +830,39 @@ func TestPrefixWriterPropagatesError(t *testing.T) {
 		t.Error("expected propagated error")
 	}
 }
+
+// TestComposeUpDownNoRemoveOrphans guards the fix for the shared-project wipe:
+// srv runs every site + the metrics stack under one compose project, so passing
+// --remove-orphans on up/down would delete sibling stacks' containers. These
+// helpers must never pass it.
+func TestComposeUpDownNoRemoveOrphans(t *testing.T) {
+	var got [][]string
+	defer SwapComposeExec(func(dir string, quiet bool, args ...string) error {
+		got = append(got, args)
+		return nil
+	})()
+
+	if err := ComposeUp("/x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ComposeUpWithProfile("/x", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ComposeUpBuild("/x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ComposeDown("/x"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 4 {
+		t.Fatalf("expected 4 compose calls, got %d", len(got))
+	}
+	for _, args := range got {
+		for _, a := range args {
+			if a == "--remove-orphans" {
+				t.Errorf("--remove-orphans must not be passed (would wipe sibling stacks): %v", args)
+			}
+		}
+	}
+}
