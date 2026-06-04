@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -176,22 +177,7 @@ func (c *Config) SaveUserConfig(userCfg *UserConfig) error {
 
 	header := "# yaml-language-server: $schema=" + constants.UserConfigSchemaURL + "\n" +
 		"# srv user config\n"
-	return atomicWriteFile(configPath, append([]byte(header), data...), constants.FilePermDefault)
-}
-
-// atomicWriteFile writes data to a file atomically by writing to a temp file first.
-// If the rename fails, the temp file is cleaned up.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	tmp := path + constants.ExtTmp
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		// Best-effort cleanup of temp file
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return fsutil.AtomicWriteFile(configPath, append([]byte(header), data...), constants.FilePermDefault)
 }
 
 // GetParkedPaths returns the list of parked directories from config.yml.

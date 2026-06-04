@@ -102,6 +102,50 @@ func TestScanRedirectAliases(t *testing.T) {
 			t.Errorf("malformed file should be skipped; got %+v", aliases)
 		}
 	})
+
+	// These redirect-*.yml files are hand-editable, so a crafted source/target
+	// could otherwise inject extra dnsmasq directives via the `address=/…/…`
+	// line. ScanRedirectAliases must re-validate and drop bad entries.
+	t.Run("rejects source/target that could inject dnsmasq directives", func(t *testing.T) {
+		injections := map[string]string{
+			// A slash closes the address= token and starts a new directive.
+			"inject-source": "dns:\n  source: \"evil.test/127.0.0.1\\nlog-queries\"\n  target: ok.test\n",
+			// Whitespace / newline in the target.
+			"inject-target": "dns:\n  source: ok.test\n  target: \"x.test\\nserver=/evil/6.6.6.6\"\n",
+			// A bare slash in the source.
+			"slash-source": "dns:\n  source: \"a/b.test\"\n  target: ok.test\n",
+			// Empty source.
+			"empty-source": "dns:\n  source: \"\"\n  target: ok.test\n",
+		}
+		t.Run("negative: malicious entries are skipped", func(t *testing.T) {
+			defer setupDNSTestEnv(t)()
+			for name, body := range injections {
+				writeRedirectFile(t, name, body)
+			}
+			aliases, err := ScanRedirectAliases()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(aliases) != 0 {
+				t.Errorf("expected all malicious entries skipped, got %+v", aliases)
+			}
+		})
+
+		t.Run("positive: a clean entry alongside bad ones still parses", func(t *testing.T) {
+			defer setupDNSTestEnv(t)()
+			for name, body := range injections {
+				writeRedirectFile(t, name, body)
+			}
+			writeRedirectFile(t, "clean", "dns:\n  source: good.test\n  target: ok.example.com\n")
+			aliases, err := ScanRedirectAliases()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(aliases) != 1 || aliases[0].Source != "good.test" || aliases[0].Target != "ok.example.com" {
+				t.Errorf("only the clean entry should survive; got %+v", aliases)
+			}
+		})
+	})
 }
 
 func TestResolveAliases(t *testing.T) {

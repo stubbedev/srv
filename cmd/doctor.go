@@ -295,9 +295,10 @@ func checkCertificateExpiry() int {
 	expired := 0
 	expiringSoon := 0
 	for _, cert := range certs {
-		if cert.IsExpired {
+		switch cert.Status() {
+		case traefik.CertStatusExpired:
 			expired++
-		} else if cert.DaysLeft <= constants.CertExpiryWarningDays {
+		case traefik.CertStatusExpiring:
 			expiringSoon++
 		}
 	}

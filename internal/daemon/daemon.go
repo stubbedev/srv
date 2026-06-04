@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,11 +32,13 @@ const refreshCooldown = 5 * time.Second
 
 // Daemon watches Docker events and auto-connects containers to the srv network.
 type Daemon struct {
-	cfg             *config.Config
-	networkName     string
-	containers      map[string]string // container name -> site name mapping
-	ctx             context.Context
-	cancel          context.CancelFunc
+	cfg         *config.Config
+	networkName string
+	containers  map[string]string // container name -> site name mapping
+	ctx         context.Context
+	cancel      context.CancelFunc
+	logMu       sync.Mutex // serialises concurrent log() writes from the
+	// signal, metadata-watcher, and Docker-event goroutines.
 	logFile         *os.File
 	lastRefreshTime time.Time // guards against refresh storms
 	// WatchMetadata controls whether the daemon also watches site metadata.yml
@@ -133,6 +136,8 @@ func (d *Daemon) Run() error {
 func (d *Daemon) log(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	d.logMu.Lock()
+	defer d.logMu.Unlock()
 	if d.logFile != nil {
 		_, _ = fmt.Fprintf(d.logFile, "[%s] %s\n", timestamp, msg)
 	}

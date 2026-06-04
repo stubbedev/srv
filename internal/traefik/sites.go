@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/fsutil"
 )
 
 // BuildHostRule returns the Traefik router rule for one or more domains. With
@@ -47,33 +48,6 @@ type SiteRouteConfig struct {
 // This allows routing to Docker compose services without modifying the project's compose files.
 // The config is written to ~/.config/srv/traefik/conf/site-{name}.yml
 func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
-	// Build the config using proper types to avoid YAML injection
-	type Server struct {
-		URL string `yaml:"url"`
-	}
-	type LoadBalancer struct {
-		Servers []Server `yaml:"servers"`
-	}
-	type Service struct {
-		LoadBalancer LoadBalancer `yaml:"loadBalancer"`
-	}
-	type TLSConfig struct {
-		CertResolver string `yaml:"certResolver,omitempty"`
-	}
-	type Router struct {
-		Rule        string     `yaml:"rule"`
-		EntryPoints []string   `yaml:"entryPoints"`
-		Service     string     `yaml:"service"`
-		TLS         *TLSConfig `yaml:"tls,omitempty"`
-	}
-	type HTTP struct {
-		Routers  map[string]Router  `yaml:"routers"`
-		Services map[string]Service `yaml:"services"`
-	}
-	type SiteConfig struct {
-		HTTP HTTP `yaml:"http"`
-	}
-
 	routerName := constants.SiteConfigPrefix + route.Name
 	serviceName := constants.SiteConfigPrefix + route.Name
 
@@ -82,7 +56,7 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 	// We use the container name directly since Traefik resolves via Docker network
 	serviceURL := fmt.Sprintf("http://%s:%d", route.ServiceName, route.Port)
 
-	router := Router{
+	router := dynRouter{
 		Rule:        BuildHostRule(route.Domains, route.Wildcard),
 		EntryPoints: []string{constants.EntryPointWebsecure},
 		Service:     serviceName,
@@ -90,13 +64,13 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 
 	if route.IsLocal {
 		// Local SSL uses file provider certificates (no certResolver)
-		router.TLS = &TLSConfig{}
+		router.TLS = localTLS()
 	} else {
 		// Production uses Let's Encrypt
-		router.TLS = &TLSConfig{CertResolver: constants.CertResolverLetsEncrypt}
+		router.TLS = resolverTLS(constants.CertResolverLetsEncrypt)
 	}
 
-	routers := map[string]Router{
+	routers := map[string]dynRouter{
 		routerName: router,
 	}
 
@@ -104,7 +78,7 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 	// same backend service. Used by sites that opt in via listeners: [internal].
 	for _, l := range route.Listeners {
 		if l == constants.ListenerInternal {
-			routers[routerName+"-internal"] = Router{
+			routers[routerName+"-internal"] = dynRouter{
 				Rule:        BuildHostRule(route.Domains, route.Wildcard),
 				EntryPoints: []string{constants.EntryPointInternal},
 				Service:     serviceName,
@@ -112,20 +86,20 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 		}
 	}
 
-	siteConfig := SiteConfig{
-		HTTP: HTTP{
+	siteConfig := DynConfig{
+		HTTP: dynHTTP{
 			Routers: routers,
-			Services: map[string]Service{
+			Services: map[string]dynService{
 				serviceName: {
-					LoadBalancer: LoadBalancer{
-						Servers: []Server{{URL: serviceURL}},
+					LoadBalancer: dynLoadBalancer{
+						Servers: []dynServer{{URL: serviceURL}},
 					},
 				},
 			},
 		},
 	}
 
-	data, err := yaml.Marshal(&siteConfig)
+	data, err := MarshalDynConfig(siteConfig)
 	if err != nil {
 		return fmt.Errorf("failed to marshal site config: %w", err)
 	}
@@ -143,8 +117,9 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 
 	content := header + string(data)
 
+	// Atomic write: Traefik watches this file and must never read it truncated.
 	siteFile := filepath.Join(cfg.TraefikConfDir(), constants.SiteConfigPrefix+route.Name+constants.ExtYAML)
-	return os.WriteFile(siteFile, []byte(content), constants.FilePermDefault)
+	return fsutil.AtomicWriteFile(siteFile, []byte(content), constants.FilePermDefault)
 }
 
 // RemoveSiteRouteConfig removes the Traefik file provider config for a site.

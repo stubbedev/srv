@@ -118,6 +118,15 @@ func (d *Daemon) handleWatchEvent(w *fsnotify.Watcher, state *watchState, event 
 		return
 	}
 
+	// A site directory was removed: drop its watch and per-site debounce/reload
+	// state so the watcher does not leak inotify descriptors and the reloadMu
+	// map does not grow without bound as sites churn.
+	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 && isDirectChild(d.cfg.SitesDir, event.Name) {
+		_ = w.Remove(event.Name)
+		state.forgetSite(filepath.Base(event.Name))
+		return
+	}
+
 	// Only act on metadata.yml events.
 	if filepath.Base(event.Name) != constants.MetadataFile {
 		return
@@ -150,6 +159,22 @@ func (s *watchState) scheduleReload(siteName string, delay time.Duration, fire f
 		s.mu.Unlock()
 		fire()
 	})
+}
+
+// forgetSite drops all per-site state for a removed site: its pending debounce
+// timer, the watched-count, and its reload mutex. Bounds the growth of timers
+// and reloadMu as sites are added and removed over a long-lived daemon.
+func (s *watchState) forgetSite(siteName string) {
+	s.mu.Lock()
+	if t, ok := s.timers[siteName]; ok {
+		t.Stop()
+		delete(s.timers, siteName)
+	}
+	if s.count > 0 {
+		s.count--
+	}
+	s.mu.Unlock()
+	s.reloadMu.Delete(siteName)
 }
 
 // reloadSite acquires the per-site mutex and dispatches site.Reload.

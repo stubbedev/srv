@@ -137,27 +137,8 @@ func TestWriteSiteMetadataAtomicWrite(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFileTmpError(t *testing.T) {
-	// Parent missing → WriteFile on .tmp fails.
-	if err := atomicWriteFile("/nonexistent-srv-site/x", []byte("d"), 0o644); err == nil {
-		t.Error("expected err")
-	}
-}
-
-func TestAtomicWriteFileRenameFails(t *testing.T) {
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "dest")
-	// Make destination a non-empty dir so Rename fails.
-	if err := os.MkdirAll(filepath.Join(dest, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dest, "sub", "f"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := atomicWriteFile(dest, []byte("y"), 0o644); err == nil {
-		t.Error("expected rename err")
-	}
-}
+// Atomic-write behaviour is covered by internal/fsutil; metadata.go delegates
+// to fsutil.AtomicWriteFile.
 
 func TestRemoveSiteMetadataReadOnlyParent(t *testing.T) {
 	// Try removing through a path where RemoveAll succeeds even for missing.

@@ -7,11 +7,38 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
+	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
+
+// scanConfigNames lists the short names of every Traefik conf file matching
+// prefix + <name> + .yml. Shared by `srv proxy list` and `srv redirect list`,
+// which differ only in the filename prefix they scan for.
+func scanConfigNames(prefix string) []string {
+	cfg, err := config.Load()
+	if err != nil {
+		ui.VerboseLog("Warning: could not load config: %v", err)
+		return nil
+	}
+	entries, err := os.ReadDir(cfg.TraefikConfDir())
+	if err != nil {
+		ui.VerboseLog("Warning: could not read traefik conf dir: %v", err)
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, constants.ExtYAML) {
+			names = append(names, strings.TrimSuffix(strings.TrimPrefix(name, prefix), constants.ExtYAML))
+		}
+	}
+	return names
+}
 
 // ensureLocalCertForResource verifies mkcert is on $PATH, installs the local
 // CA if needed, and issues / renews a cert for siteName + domain (+ wildcard).
@@ -39,24 +66,14 @@ func ensureLocalCertForResource(siteName, domain string, wildcard bool) error {
 	return nil
 }
 
-// localCertStatus returns one of "missing" / "expired" / "expiring" / "valid"
-// for the cert pair (siteName, domain). Returns "" when domain is empty.
-// Plain-text variant used by `--format json` outputs.
+// localCertStatus returns one of "corrupt" / "missing" / "expired" /
+// "expiring" / "valid" for the cert pair (siteName, domain). Returns "" when
+// domain is empty. Plain-text variant used by `--format json` outputs.
 func localCertStatus(siteName, domain string) string {
 	if domain == "" {
 		return ""
 	}
-	cert := traefik.GetLocalCertInfo(siteName, domain)
-	switch {
-	case !cert.Exists:
-		return "missing"
-	case cert.IsExpired:
-		return "expired"
-	case cert.DaysLeft <= constants.CertExpiryWarningDays:
-		return "expiring"
-	default:
-		return "valid"
-	}
+	return string(traefik.GetLocalCertInfo(siteName, domain).Status())
 }
 
 // localCertStatusColored wraps localCertStatus with ui.StatusColor / ui.DimText
