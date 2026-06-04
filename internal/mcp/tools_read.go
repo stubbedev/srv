@@ -188,7 +188,7 @@ func getSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in getSiteIn) (*m
 			Status:  s.Status,
 			Broken:  s.IsBroken,
 		},
-		Metadata: toJSONMap(meta),
+		Metadata: redactedJSONMap(meta),
 		Dir:      s.Dir,
 		Domains:  s.Domains,
 	}, nil
@@ -248,7 +248,7 @@ func getProxyTool(_ context.Context, _ *mcpsdk.CallToolRequest, in getProxyIn) (
 	if m == nil {
 		return nil, getProxyOut{}, fmt.Errorf("proxy %q not found", in.Name)
 	}
-	return nil, getProxyOut{Proxy: toJSONMap(m)}, nil
+	return nil, getProxyOut{Proxy: redactedJSONMap(m)}, nil
 }
 
 // ─── redirects ───────────────────────────────────────────────────────

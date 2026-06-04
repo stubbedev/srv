@@ -8,11 +8,22 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestNewServerRegistersTools spins up the server over an in-memory
-// transport, asks for the tool list, and asserts the read tools surface
-// at minimum is present. Keeps the assertion broad (set of names) so
-// adding a new tool doesn't break the test, but removing or renaming
-// an existing one does.
+// wantTools is the authoritative, exact set of MCP tools srv advertises.
+// TestNewServerRegistersTools asserts the advertised set matches this exactly —
+// adding, removing, renaming, or duplicating a tool without updating this list
+// fails the test, keeping the surface honest (mirrors treeman's guard test).
+var wantTools = []string{
+	// read
+	"version", "paths", "list_sites", "get_site", "validate_site",
+	"list_proxies", "get_proxy", "list_redirects",
+	// diagnostics
+	"daemon_status", "daemon_log", "metrics_status",
+	// write
+	"reload_site",
+}
+
+// TestNewServerRegistersTools spins up the server over an in-memory transport,
+// lists the advertised tools, and asserts the set equals wantTools exactly.
 func TestNewServerRegistersTools(t *testing.T) {
 	srv := newServer()
 	if srv == nil {
@@ -42,25 +53,26 @@ func TestNewServerRegistersTools(t *testing.T) {
 		t.Fatalf("list tools: %v", err)
 	}
 
-	want := map[string]bool{
-		"version":        true,
-		"paths":          true,
-		"list_sites":     true,
-		"get_site":       true,
-		"validate_site":  true,
-		"list_proxies":   true,
-		"get_proxy":      true,
-		"list_redirects": true,
-		"reload_site":    true,
+	want := make(map[string]bool, len(wantTools))
+	for _, n := range wantTools {
+		want[n] = true
 	}
 
-	got := make(map[string]bool, len(res.Tools))
+	got := make(map[string]int, len(res.Tools))
 	for _, tool := range res.Tools {
-		got[tool.Name] = true
+		got[tool.Name]++
+	}
+	for name, count := range got {
+		if count > 1 {
+			t.Errorf("tool %q registered %d times (duplicate)", name, count)
+		}
+		if !want[name] {
+			t.Errorf("unexpected tool %q advertised — add it to wantTools or remove the registration", name)
+		}
 	}
 	for name := range want {
-		if !got[name] {
-			t.Errorf("missing tool %q in registered set %v", name, got)
+		if got[name] == 0 {
+			t.Errorf("missing tool %q in advertised set", name)
 		}
 	}
 }
