@@ -27,6 +27,24 @@ func newCfg(t *testing.T) *config.Config {
 	}
 }
 
+func TestIsConfigured(t *testing.T) {
+	cfg := newCfg(t)
+	// Negative: nothing written yet.
+	if IsConfigured(cfg) {
+		t.Error("IsConfigured should be false before the stack is written")
+	}
+	// Positive: compose file present.
+	if err := os.MkdirAll(Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ComposePath(cfg), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !IsConfigured(cfg) {
+		t.Error("IsConfigured should be true once docker-compose.yml exists")
+	}
+}
+
 func TestDir(t *testing.T) {
 	cfg := newCfg(t)
 	if got, want := Dir(cfg), filepath.Join(cfg.Root, "metrics"); got != want {

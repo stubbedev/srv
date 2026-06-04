@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/firewall"
+	"github.com/stubbedev/srv/internal/metrics"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
@@ -65,6 +66,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	issues += checkTraefik()
 	issues += checkDNS()
 	issues += checkCertificates()
+	issues += checkMetrics()
 	issues += checkSitesValid()
 	issues += checkSiteEnvHostLoopback()
 	issues += checkConfigDirOwnership(doctorFlags.fixPerms)
@@ -292,6 +294,29 @@ func checkSystemDNSResolution(domains []string) int {
 		issues++
 	}
 	return issues
+}
+
+// checkMetrics flags the common "route live, backend dead" case: the metrics
+// stack was enabled (its routes/cert/DNS persist) but its containers are not
+// running — so grafana.local / prometheus.local return 502. Only reports when
+// the stack is configured at all; an unused metrics feature is silent.
+func checkMetrics() int {
+	cfg, err := config.Load()
+	if err != nil || !metrics.IsConfigured(cfg) {
+		return 0
+	}
+	ui.Bold("Metrics")
+	prom := docker.IsContainerRunning(metrics.PrometheusContainer)
+	graf := docker.IsContainerRunning(metrics.GrafanaContainer)
+	if prom && graf {
+		ui.IndentedSuccess(1, "Stack running (https://%s)", metrics.GrafanaDomain)
+		ui.Blank()
+		return 0
+	}
+	ui.IndentedWarn(1, "Routes configured but stack not running — grafana.local/prometheus.local will 502")
+	ui.IndentedDim(1, "Run 'srv metrics enable' (or 'srv install') to start it")
+	ui.Blank()
+	return 1
 }
 
 // checkCertificates verifies mkcert installation and certificate status

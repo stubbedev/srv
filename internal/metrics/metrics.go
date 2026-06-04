@@ -48,6 +48,21 @@ func Dir(cfg *config.Config) string {
 	return filepath.Join(cfg.Root, "metrics")
 }
 
+// ComposePath returns the metrics stack's docker-compose.yml path.
+func ComposePath(cfg *config.Config) string {
+	return filepath.Join(Dir(cfg), "docker-compose.yml")
+}
+
+// IsConfigured reports whether the metrics stack has been set up — i.e.
+// `srv metrics enable` ran at some point and left its compose file on disk.
+// Used by `srv install` to bring a previously-enabled stack back up (it does
+// not survive a reboot otherwise) and by `srv doctor` to detect routes that
+// point at a stopped stack.
+func IsConfigured(cfg *config.Config) bool {
+	_, err := os.Stat(ComposePath(cfg))
+	return err == nil
+}
+
 // TraefikConfigPath returns the Traefik file-provider yaml that routes
 // grafana.local + prometheus.local at the stack's two containers.
 func TraefikConfigPath(cfg *config.Config) string {

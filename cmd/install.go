@@ -11,6 +11,7 @@ import (
 	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/firewall"
+	"github.com/stubbedev/srv/internal/metrics"
 	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
@@ -215,6 +216,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		steps.Next("Starting %d site(s)", len(sites))
 		startSites(sites)
 		steps.Done("Sites started")
+	}
+
+	// Re-up a previously-enabled metrics stack. Its routes/cert/DNS persist but
+	// the containers do not survive a reboot, so without this grafana.local /
+	// prometheus.local 502 until the user re-runs `srv metrics enable`.
+	if metrics.IsConfigured(cfg) {
+		steps.Next("Restarting metrics stack")
+		if err := docker.ComposeUp(metrics.Dir(cfg)); err != nil {
+			ui.Warn("Failed to restart metrics stack: %v", err)
+			steps.Skip("Metrics stack skipped")
+		} else {
+			steps.Done("Metrics stack running (https://%s)", metrics.GrafanaDomain)
+		}
 	}
 
 	ui.Blank()
