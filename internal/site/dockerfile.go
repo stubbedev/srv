@@ -85,7 +85,7 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	StampSrvLabels(labels, name, string(meta.Type))
 
 	cf := composeFile{
-		Name: constants.ComposeProjectName,
+		Name: constants.ComposeProjectFor(name),
 		Services: map[string]composeService{
 			"app": {
 				ContainerName: containerName,

@@ -211,6 +211,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// One-time migration off the legacy shared "srv" compose project (which made
+	// `compose up/down` on one stack remove the others as orphans). Each stack
+	// now uses its own project. Regenerate the generated compose files so they
+	// carry the new per-stack project name, then clear the old project's
+	// containers so the per-stack `up` below can reuse their fixed
+	// container_names without a conflict. All idempotent once migrated.
+	if metrics.IsConfigured(cfg) {
+		if err := metrics.WriteStack(cfg); err != nil {
+			ui.Warn("Failed to regenerate metrics stack: %v", err)
+		}
+	}
+	for _, s := range sites {
+		if _, err := site.ForceReload(s.Name); err != nil {
+			ui.Warn("Failed to regenerate config for %s: %v", s.Name, err)
+		}
+	}
+	if err := docker.RemoveComposeProjectContainers(constants.ComposeProjectName); err != nil {
+		ui.Warn("Failed to migrate legacy compose project: %v", err)
+	}
+
 	// Step 6: Start all sites (if any)
 	if len(sites) > 0 {
 		steps.Next("Starting %d site(s)", len(sites))

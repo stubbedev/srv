@@ -25,9 +25,15 @@ const (
 	RedirectConfigPrefix = "redirect-"
 	// RoutesConfigPrefix is the prefix for per-site extra route configuration files.
 	RoutesConfigPrefix = "routes-"
-	// ComposeProjectName groups every srv-managed compose project under one
-	// umbrella so `docker compose ls` aggregates them into a single row.
+	// ComposeProjectName is the LEGACY shared compose project that grouped every
+	// srv stack (each site + the metrics stack) under one umbrella. That sharing
+	// was a bug: `compose up/down` on one stack treats the others as orphans.
+	// Each stack now uses its own project (ComposeProjectFor / MetricsComposeProject);
+	// this constant remains only for the one-time migration that clears
+	// containers still labelled with the old shared project.
 	ComposeProjectName = "srv"
+	// MetricsComposeProject is the dedicated compose project for the metrics stack.
+	MetricsComposeProject = "srv-metrics"
 	// LabelSrvSite is the Docker label attached to every srv-managed container.
 	LabelSrvSite = "dev.srv.site"
 	// LabelSrvType is the Docker label identifying the site type.

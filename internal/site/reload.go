@@ -72,7 +72,15 @@ func writeLastReloadHash(cfg *config.Config, name, hash string) {
 // no-op for compose sites and a deterministic regeneration for srv-managed sites.
 // Returns an error only when the site cannot be validated or written; cert /
 // DNS subsystem failures are reported as Warnings on the result.
-func Reload(name string) (*ReloadResult, error) {
+func Reload(name string) (*ReloadResult, error) { return reload(name, false) }
+
+// ForceReload regenerates a site's artifacts even when its metadata is unchanged
+// since the last apply. Used by `srv install` to migrate generated files (e.g.
+// the compose project name) to the current binary's templates without needing a
+// metadata edit.
+func ForceReload(name string) (*ReloadResult, error) { return reload(name, true) }
+
+func reload(name string, force bool) (*ReloadResult, error) {
 	meta, err := ReadSiteMetadata(name)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
@@ -93,9 +101,9 @@ func Reload(name string) (*ReloadResult, error) {
 
 	// Short-circuit when nothing changed since the last apply. Daemon-driven
 	// reloads on the same site fire repeatedly during editor saves; this is
-	// the cheapest possible no-op for those.
+	// the cheapest possible no-op for those. ForceReload skips the short-circuit.
 	currentHash := computeMetadataHash(meta)
-	if currentHash != "" && currentHash == readLastReloadHash(cfg, name) {
+	if !force && currentHash != "" && currentHash == readLastReloadHash(cfg, name) {
 		res.Skipped = true
 		return res, nil
 	}

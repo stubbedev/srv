@@ -257,9 +257,9 @@ func StampSrvLabels(labels map[string]string, siteName, siteType string) {
 }
 
 // buildStaticComposeConfig builds the docker-compose configuration for a static site.
-func buildStaticComposeConfig(containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) composeFile {
+func buildStaticComposeConfig(project, containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) composeFile {
 	return composeFile{
-		Name: constants.ComposeProjectName,
+		Name: project,
 		Services: map[string]composeService{
 			"web": {
 				ContainerName: containerName,
@@ -336,7 +336,7 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) error {
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
 	StampSrvLabels(labels, name, string(meta.Type))
-	composeConfig := buildStaticComposeConfig(containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
+	composeConfig := buildStaticComposeConfig(constants.ComposeProjectFor(name), containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
 
 	data, err := yaml.Marshal(&composeConfig)
 	if err != nil {

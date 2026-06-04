@@ -253,6 +253,27 @@ func ComposeDown(dir string) error {
 	return Compose(dir, "down")
 }
 
+// RemoveComposeProjectContainers force-removes every container belonging to the
+// given compose project (matched by the com.docker.compose.project label). Used
+// for the one-time migration off the legacy shared "srv" project to per-stack
+// projects: the old containers must be removed before a per-stack `up` can
+// reuse their fixed container_names without a name conflict. No-op when none
+// match.
+func RemoveComposeProjectContainers(project string) error {
+	out, err := exec.Command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
+	if err != nil {
+		return fmt.Errorf("list project %q containers: %w", project, err)
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := exec.Command("docker", append([]string{"rm", "-f"}, ids...)...).Run(); err != nil {
+		return fmt.Errorf("remove project %q containers: %w", project, err)
+	}
+	return nil
+}
+
 // composePrefixedExec is the swappable seam for ComposePrefixed.
 var composePrefixedExec = defaultComposePrefixedExec
 

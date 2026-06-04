@@ -246,7 +246,7 @@ volumes:
   prometheus-data:
   grafana-data:
 `,
-		constants.ComposeProjectName,
+		constants.MetricsComposeProject,
 		PrometheusImage, PrometheusContainer, PrometheusHostPort,
 		constants.LabelSrvSite, PrometheusDomain, constants.LabelSrvType,
 		GrafanaImage, GrafanaContainer,
@@ -306,7 +306,7 @@ networks:
     name: %s
     external: true
 `,
-		constants.ComposeProjectName,
+		constants.MetricsComposeProject,
 		PrometheusImage, PrometheusContainer,
 		constants.LabelSrvSite, PrometheusDomain, constants.LabelSrvType,
 		GrafanaImage, GrafanaContainer,
