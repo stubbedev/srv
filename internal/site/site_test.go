@@ -66,7 +66,10 @@ func TestSanitizeName(t *testing.T) {
 func TestResolvePath(t *testing.T) {
 	// Test absolute path
 	t.Run("absolute path", func(t *testing.T) {
-		tmpDir := t.TempDir()
+		tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
 		result, err := ResolvePath(tmpDir)
 		if err != nil {
 			t.Fatalf("ResolvePath failed: %v", err)

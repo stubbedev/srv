@@ -51,6 +51,12 @@ server {
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// macOS resolves /var/folders symlinks to /private/var/folders; ParseFile
+	// EvalSymlinks the project path, so compare against the resolved form.
+	projectDir, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(projectDir, filepath.Join(sitesDir, "kontainer")); err != nil {
 		t.Fatal(err)
 	}
@@ -188,6 +194,12 @@ func TestResolveValetProjectPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(project, filepath.Join(sitesDir, "kontainer")); err != nil {
+		t.Fatal(err)
+	}
+	// macOS resolves /var/folders symlinks; resolveValetProjectPath returns the
+	// EvalSymlinks form, so expect the resolved path.
+	project, err := filepath.EvalSymlinks(project)
+	if err != nil {
 		t.Fatal(err)
 	}
 
