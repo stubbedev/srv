@@ -23,6 +23,26 @@ import (
 // LocalDomains are the TLDs used for local development.
 var LocalDomains = []string{"test", "local", "localhost"}
 
+// routingTLDs are the local TLDs srv routes to dnsmasq wholesale. `local` is
+// deliberately excluded: it is reserved for mDNS (RFC 6762), so claiming the
+// entire `~local` / `/local/` TLD would hijack every LAN mDNS name (other
+// hosts, printers, `ssh foo.local`) to dnsmasq. srv instead routes its own
+// `.local` domains by exact name (see the resolver builders), leaving the rest
+// of `.local` to the system's mDNS resolver.
+var routingTLDs = []string{"test", "localhost"}
+
+// isUnderRoutingTLD reports whether bare equals or is a subdomain of a
+// TLD-wide-routed local TLD. `.local` names return false so they are routed
+// per-name rather than swallowing the whole mDNS TLD.
+func isUnderRoutingTLD(bare string) bool {
+	for _, tld := range routingTLDs {
+		if bare == tld || strings.HasSuffix(bare, "."+tld) {
+			return true
+		}
+	}
+	return false
+}
+
 // WildcardPrefix marks a registry entry as a wildcard domain (apex + one-level subdomains).
 const WildcardPrefix = "*."
 
@@ -128,18 +148,6 @@ func setupSystemdResolved() error {
 	return updateSystemdResolvedConfig(domains)
 }
 
-// isUnderLocalTLD reports whether domain is the same as, or a subdomain of,
-// one of the standard local TLDs (.test/.local/.localhost). Such domains are
-// already routed by the per-TLD entry, so they need no per-domain routing rule.
-func isUnderLocalTLD(domain string) bool {
-	for _, tld := range LocalDomains {
-		if domain == tld || strings.HasSuffix(domain, "."+tld) {
-			return true
-		}
-	}
-	return false
-}
-
 // updateSystemdResolvedConfig writes /etc/systemd/resolved.conf.d/srv-local.conf
 // so that systemd-resolved routes queries for each registered local domain
 // (and the standard local TLDs) through dnsmasq on 127.0.0.1:53.
@@ -157,15 +165,17 @@ func updateSystemdResolvedConfig(domains []string) error {
 	// registered domain that is NOT already covered by a local TLD entry.
 	// The ~ prefix tells systemd-resolved to route matching queries to this
 	// DNS server rather than to the default.
-	routingDomains := make([]string, 0, len(LocalDomains)+len(domains))
-	for _, tld := range LocalDomains {
+	routingDomains := make([]string, 0, len(routingTLDs)+len(domains))
+	for _, tld := range routingTLDs {
 		routingDomains = append(routingDomains, "~"+tld)
 	}
 	for _, d := range domains {
 		bare := BareDomain(d)
-		if isUnderLocalTLD(bare) {
+		if isUnderRoutingTLD(bare) {
 			continue
 		}
+		// .local domains land here and get a per-name route (~grafana.local),
+		// so unrelated .local names still reach mDNS via systemd-resolved.
 		routingDomains = append(routingDomains, "~"+bare)
 	}
 
@@ -238,9 +248,12 @@ func updateMacOSResolverConfig(domains []string) error {
 
 	nameserver := "nameserver " + constants.LocalhostIP + "\n"
 
-	// Build the full set of names that should have resolver files.
+	// Build the full set of names that should have resolver files. The TLD-wide
+	// files cover .test/.localhost; .local is NOT given a TLD-wide
+	// /etc/resolver/local file (that would hijack all Bonjour .local names) —
+	// each registered .local domain gets its own per-name resolver file below.
 	wanted := make(map[string]struct{})
-	for _, tld := range LocalDomains {
+	for _, tld := range routingTLDs {
 		wanted[tld] = struct{}{}
 	}
 	for _, d := range domains {
@@ -306,14 +319,16 @@ func updateNetworkManagerConfig(domains []string) error {
 
 	var content strings.Builder
 	content.WriteString("# srv local DNS configuration\n")
-	for _, tld := range LocalDomains {
+	for _, tld := range routingTLDs {
 		fmt.Fprintf(&content, "server=/%s/%s\n", tld, constants.LocalhostIP)
 	}
 	for _, d := range domains {
 		bare := BareDomain(d)
-		if isUnderLocalTLD(bare) {
+		if isUnderRoutingTLD(bare) {
 			continue
 		}
+		// .local domains get a per-name server= line; other .local names stay
+		// on mDNS rather than being routed wholesale to dnsmasq.
 		fmt.Fprintf(&content, "server=/%s/%s\n", bare, constants.LocalhostIP)
 	}
 

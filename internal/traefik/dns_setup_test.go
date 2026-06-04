@@ -70,6 +70,29 @@ func TestUpdateSystemdResolvedConfigSkipsTLDChildren(t *testing.T) {
 	}
 }
 
+// .local must be routed per-name, never as the whole ~local TLD, so unrelated
+// LAN mDNS names (other-host.local) keep resolving via mDNS.
+func TestUpdateSystemdResolvedConfigDotLocalPerName(t *testing.T) {
+	fake := shelltest.New(nil)
+	swapShell(t, fake)
+	if err := updateSystemdResolvedConfig([]string{"grafana.local"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fake.Snapshot() {
+		if c.Method != "SudoWrite" {
+			continue
+		}
+		if !strings.Contains(c.Stdin, "~grafana.local") {
+			t.Errorf("grafana.local should be routed per-name: %q", c.Stdin)
+		}
+		for _, tok := range strings.Fields(c.Stdin) {
+			if tok == "~local" {
+				t.Errorf("~local TLD-wide route must not be emitted: %q", c.Stdin)
+			}
+		}
+	}
+}
+
 func TestUpdateSystemdResolvedConfigMkdirErr(t *testing.T) {
 	fake := shelltest.New(map[string]shelltest.Response{
 		"sudo:mkdir": {Err: errors.New("boom")},

@@ -9,25 +9,26 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 )
 
-func TestIsUnderLocalTLD(t *testing.T) {
+func TestIsUnderRoutingTLD(t *testing.T) {
 	cases := []struct {
 		in   string
 		want bool
 	}{
 		{"foo.test", true},
 		{"a.b.test", true},
-		{"foo.local", true},
 		{"foo.localhost", true},
 		{"foo.com", false},
 		{"test", true},
-		{"local", true},
 		{"localhost", true},
 		{"", false},
 		{"falsetest", false},
+		// .local is NOT TLD-wide routed (reserved for mDNS) — per-name only.
+		{"foo.local", false},
+		{"local", false},
 	}
 	for _, c := range cases {
-		if got := isUnderLocalTLD(c.in); got != c.want {
-			t.Errorf("isUnderLocalTLD(%q) = %v, want %v", c.in, got, c.want)
+		if got := isUnderRoutingTLD(c.in); got != c.want {
+			t.Errorf("isUnderRoutingTLD(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }
