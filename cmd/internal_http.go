@@ -3,8 +3,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -62,57 +60,39 @@ func init() {
 
 func runInternalEnable(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
-	meta, err := site.ReadSiteMetadata(siteName)
+	// Orchestration shared with the MCP set_internal_listener tool.
+	changed, warnings, err := site.SetInternalListener(siteName, true)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-	if site.HasListener(meta.Listeners, constants.ListenerInternal) {
+	if !changed {
 		ui.Dim("Site %s already has the internal listener enabled", siteName)
 		return nil
 	}
-	meta.Listeners = append(meta.Listeners, constants.ListenerInternal)
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("failed to update site metadata: %w", err)
+	primary := siteName
+	if meta, _ := site.ReadSiteMetadata(siteName); meta != nil {
+		primary = meta.PrimaryDomain()
 	}
-	if err := regenerateSiteRouting(siteName, meta); err != nil {
-		ui.Warn("Failed to refresh routing config: %v", err)
-	}
-	ui.Success("Enabled internal listener for %s (http://%s:%d)", siteName, meta.PrimaryDomain(), constants.PortInternal)
+	ui.Success("Enabled internal listener for %s (http://%s:%d)", siteName, primary, constants.PortInternal)
 	ui.Dim("Run `srv restart %s` to apply.", siteName)
 	return nil
 }
 
 func runInternalDisable(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
-	meta, err := site.ReadSiteMetadata(siteName)
+	changed, warnings, err := site.SetInternalListener(siteName, false)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-	filtered := meta.Listeners[:0]
-	removed := false
-	for _, l := range meta.Listeners {
-		if l == constants.ListenerInternal {
-			removed = true
-			continue
-		}
-		filtered = append(filtered, l)
-	}
-	if !removed {
+	if !changed {
 		ui.Dim("Site %s does not have the internal listener enabled", siteName)
 		return nil
-	}
-	meta.Listeners = filtered
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("failed to update site metadata: %w", err)
-	}
-	if err := regenerateSiteRouting(siteName, meta); err != nil {
-		ui.Warn("Failed to refresh routing config: %v", err)
 	}
 	ui.Success("Disabled internal listener for %s", siteName)
 	ui.Dim("Run `srv restart %s` to apply.", siteName)

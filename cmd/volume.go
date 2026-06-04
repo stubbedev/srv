@@ -87,33 +87,14 @@ func runVolumeAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, err := site.ReadSiteMetadata(siteName)
+	// Orchestration shared with the MCP add_volume tool.
+	warnings, err := site.AddVolume(siteName, mount)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-
-	for _, existing := range meta.Volumes {
-		if existing.Target == mount.Target {
-			return fmt.Errorf("a volume with target %q is already attached — remove it first", mount.Target)
-		}
-	}
-	// Don't let the user shadow the project bind at /app.
-	if mount.Target == "/app" || strings.HasPrefix(mount.Target, "/app/") {
-		return fmt.Errorf("target %q overlaps the project bind at /app — pick a different container path", mount.Target)
-	}
-
-	meta.Volumes = append(meta.Volumes, mount)
-
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := site.Reload(siteName); err != nil {
-		ui.Warn("Failed to refresh site config: %v", err)
-	}
-
 	ui.Success("Attached %s → %s%s to %s", mount.Source, mount.Target, roSuffix(mount.ReadOnly), siteName)
 	ui.Dim("Run 'srv restart %s' for the change to take effect.", siteName)
 	return nil
@@ -122,35 +103,13 @@ func runVolumeAdd(cmd *cobra.Command, args []string) error {
 func runVolumeRemove(cmd *cobra.Command, args []string) error {
 	siteName, target := args[0], args[1]
 
-	meta, err := site.ReadSiteMetadata(siteName)
+	warnings, err := site.RemoveVolume(siteName, target)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-
-	filtered := meta.Volumes[:0]
-	removed := false
-	for _, v := range meta.Volumes {
-		if v.Target == target {
-			removed = true
-			continue
-		}
-		filtered = append(filtered, v)
-	}
-	if !removed {
-		return fmt.Errorf("no volume with target %q attached to %s", target, siteName)
-	}
-	meta.Volumes = filtered
-
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := site.Reload(siteName); err != nil {
-		ui.Warn("Failed to refresh site config: %v", err)
-	}
-
 	ui.Success("Removed volume %s from %s", target, siteName)
 	ui.Dim("Run 'srv restart %s' for the change to take effect.", siteName)
 	return nil

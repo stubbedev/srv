@@ -4,14 +4,11 @@ package cmd
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/site"
-	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -76,42 +73,18 @@ func runAliasAdd(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
 	alias := strings.ToLower(strings.TrimSpace(args[1]))
 
-	if err := ValidateDomain(alias); err != nil {
-		return fmt.Errorf("invalid alias: %w", err)
-	}
-
-	meta, err := site.ReadSiteMetadata(siteName)
+	// Orchestration is shared with the MCP add_alias tool (internal/site).
+	changed, warnings, err := site.AddAlias(siteName, alias)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-	if len(meta.Domains) == 0 {
-		return fmt.Errorf("site %s has no canonical domain", siteName)
-	}
-
-	if slices.Contains(meta.Domains, alias) {
+	if !changed {
 		ui.Dim("Alias %q already configured for %s", alias, siteName)
 		return nil
 	}
-
-	meta.Domains = append(meta.Domains, alias)
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("failed to update site metadata: %w", err)
-	}
-
-	if meta.IsLocal {
-		if err := traefik.RegisterLocalDomain(alias, meta.Wildcard); err != nil {
-			ui.Warn("Failed to register DNS for %s: %v", alias, err)
-		}
-		generateLocalCert(siteName, meta.Domains, meta.Wildcard)
-	}
-
-	if err := regenerateSiteRouting(siteName, meta); err != nil {
-		ui.Warn("Failed to refresh routing config: %v", err)
-	}
-
 	ui.Success("Added alias %s → %s", alias, siteName)
 	ui.Dim("Run `srv restart %s` to apply the new routing.", siteName)
 	return nil
@@ -121,47 +94,13 @@ func runAliasRemove(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
 	alias := strings.ToLower(strings.TrimSpace(args[1]))
 
-	meta, err := site.ReadSiteMetadata(siteName)
+	warnings, err := site.RemoveAlias(siteName, alias)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-	if len(meta.Domains) > 0 && meta.Domains[0] == alias {
-		return fmt.Errorf("%s is the canonical domain — remove the site to drop it", alias)
-	}
-
-	filtered := meta.Domains[:0]
-	removed := false
-	for _, d := range meta.Domains {
-		if d == alias {
-			removed = true
-			continue
-		}
-		filtered = append(filtered, d)
-	}
-	if !removed {
-		return fmt.Errorf("alias %q is not registered for %s", alias, siteName)
-	}
-	meta.Domains = filtered
-
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("failed to update site metadata: %w", err)
-	}
-
-	if meta.IsLocal {
-		if err := traefik.UnregisterLocalDomain(alias); err != nil {
-			ui.Warn("Failed to unregister DNS for %s: %v", alias, err)
-		}
-		// Regenerate cert without the dropped alias.
-		generateLocalCert(siteName, meta.Domains, meta.Wildcard)
-	}
-
-	if err := regenerateSiteRouting(siteName, meta); err != nil {
-		ui.Warn("Failed to refresh routing config: %v", err)
-	}
-
 	ui.Success("Removed alias %s from %s", alias, siteName)
 	ui.Dim("Run `srv restart %s` to apply the routing change.", siteName)
 	return nil
@@ -190,27 +129,4 @@ func runAliasList(cmd *cobra.Command, args []string) error {
 		ui.Print("  Alias:     %s", alias)
 	}
 	return nil
-}
-
-// regenerateSiteRouting rewrites the Traefik file-provider config for a
-// compose-type site after its domain set changes. Container-label sites
-// (static, dockerfile) need a restart to pick up the new label-derived rule;
-// the caller surfaces that hint to the user.
-func regenerateSiteRouting(siteName string, meta *site.SiteMetadata) error {
-	if meta.Type != site.SiteTypeCompose {
-		return nil
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	return traefik.WriteSiteRouteConfig(cfg, traefik.SiteRouteConfig{
-		Name:        siteName,
-		Domains:     meta.Domains,
-		ServiceName: meta.ServiceName,
-		Port:        meta.Port,
-		IsLocal:     meta.IsLocal,
-		Wildcard:    meta.Wildcard,
-		Listeners:   meta.Listeners,
-	})
 }

@@ -22,6 +22,10 @@ var wantTools = []string{
 	"reload_site",
 	"add_proxy", "remove_proxy",
 	"add_redirect", "remove_redirect",
+	// site lifecycle + mutators
+	"start_site", "stop_site", "restart_site",
+	"add_alias", "remove_alias", "set_internal_listener",
+	"add_volume", "remove_volume",
 }
 
 // TestNewServerRegistersTools spins up the server over an in-memory transport,

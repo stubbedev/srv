@@ -160,24 +160,8 @@ func TestRunAliasRemoveMissingSite(t *testing.T) {
 	}
 }
 
-func TestRegenerateSiteRoutingNonCompose(t *testing.T) {
-	if err := regenerateSiteRouting("x", &site.SiteMetadata{Type: site.SiteTypeStatic}); err != nil {
-		t.Errorf("static should be no-op, got %v", err)
-	}
-}
-
-func TestRegenerateSiteRoutingCompose(t *testing.T) {
-	setupSrvRoot(t)
-	meta := &site.SiteMetadata{
-		Type:        site.SiteTypeCompose,
-		Domains:     []string{"x.local"},
-		ServiceName: "x-web",
-		Port:        80,
-	}
-	if err := regenerateSiteRouting("x", meta); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
+// Routing regeneration moved to internal/site (regenerateRouting), covered by
+// the alias/internal mutator tests there.
 
 func TestRunAliasAddHappy(t *testing.T) {
 	setupSrvRoot(t)

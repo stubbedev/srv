@@ -28,6 +28,7 @@ func registerWriteTools(srv *mcpsdk.Server) {
 
 	registerProxyWriteTools(srv)
 	registerRedirectWriteTools(srv)
+	registerSiteWriteTools(srv)
 }
 
 type reloadSiteIn struct {
