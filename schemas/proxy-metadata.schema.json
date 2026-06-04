@@ -37,7 +37,8 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "description": "Route attaches an extra Traefik router to a site, used for path-prefix splits\n(e.g. /app → WebSocket on :6001) or regex rewrites (e.g. /videos/...)."
     },
     "Upstream": {
       "properties": {
@@ -64,7 +65,8 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "description": "Upstream points a route at a backend. Exactly one of Port/Container/URL is\nset per Kind."
     }
   },
   "properties": {
@@ -95,5 +97,6 @@
   },
   "additionalProperties": false,
   "type": "object",
-  "title": "srv proxy metadata"
+  "title": "srv proxy metadata",
+  "description": "Metadata captures everything `srv route` needs to know about a proxy:\nthe canonical domain (+ aliases), local-CA flag, wildcard flag, and any\nattached routes. Stored at ~/.config/srv/proxies/\u003cname\u003e/metadata.yml."
 }

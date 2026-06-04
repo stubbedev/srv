@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/stubbedev/srv/internal/config"
 )
 
@@ -42,21 +44,8 @@ func TestIsWildcardEntry(t *testing.T) {
 	}
 }
 
-func TestYamlSingleQuote(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"hello", "'hello'"},
-		{"it's", "'it''s'"},
-		{"", "''"},
-		{"''", "''''''"},
-	}
-	for _, c := range cases {
-		if got := yamlSingleQuote(c.in); got != c.want {
-			t.Errorf("yamlSingleQuote(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
+// Credential safety is now structural (yaml.Marshal of a typed model), so the
+// behaviour is asserted by the round-trip test TestDockerComposeTemplateCreds.
 
 func TestBuildHostRuleSingle(t *testing.T) {
 	got := BuildHostRule([]string{"blog.local"}, false)
@@ -236,15 +225,60 @@ func TestRoutesConfigPath(t *testing.T) {
 	}
 }
 
-func TestDockerComposeTemplateContainsCreds(t *testing.T) {
-	out := DockerComposeTemplate("netname", "/sites", "user1", "pa''ss")
-	if !strings.Contains(out, "'user1'") {
-		t.Error("user not quoted")
+// composeDoc parses a rendered docker-compose string for assertions.
+type composeDoc struct {
+	Services map[string]struct {
+		Environment []string `yaml:"environment"`
+		Volumes     []string `yaml:"volumes"`
+	} `yaml:"services"`
+	Networks map[string]struct {
+		Name string `yaml:"name"`
+	} `yaml:"networks"`
+}
+
+// TestDockerComposeTemplateCreds: positive — ordinary values land in the right
+// fields; negative — credentials and a sites path containing YAML-hostile
+// characters round-trip verbatim and cannot break the document or inject keys.
+func TestDockerComposeTemplateCreds(t *testing.T) {
+	const (
+		user = "user1"
+		// Quotes, colon, newline, and a fake env var — all YAML-hostile.
+		pass     = "p:a\"s'’s\n- INJECTED=1"
+		sitesDir = "/sites:with\"quote"
+		network  = "net'name"
+	)
+	out, err := DockerComposeTemplate(network, sitesDir, user, pass)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "'pa''''ss'") {
-		t.Errorf("password not escaped: %q", out[:300])
+
+	var doc composeDoc
+	if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("hostile values broke the document: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "netname") {
-		t.Error("network missing")
+
+	dns := doc.Services["dns"]
+	wantEnv := []string{"HTTP_USER=" + user, "HTTP_PASS=" + pass}
+	if len(dns.Environment) != 2 || dns.Environment[0] != wantEnv[0] || dns.Environment[1] != wantEnv[1] {
+		t.Errorf("env not round-tripped:\ngot:  %q\nwant: %q", dns.Environment, wantEnv)
+	}
+	// The injected "- INJECTED=1" line must be part of the password scalar, not
+	// a sibling list element.
+	if len(dns.Environment) != 2 {
+		t.Errorf("password leaked into an extra environment entry: %q", dns.Environment)
+	}
+	if doc.Networks["traefik"].Name != network {
+		t.Errorf("network name = %q, want %q", doc.Networks["traefik"].Name, network)
+	}
+	traefik := doc.Services["traefik"]
+	wantVol := sitesDir + ":/etc/traefik/sites:ro"
+	found := false
+	for _, v := range traefik.Volumes {
+		if v == wantVol {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("sites volume not round-tripped, want %q in %q", wantVol, traefik.Volumes)
 	}
 }

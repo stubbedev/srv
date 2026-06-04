@@ -19,5 +19,6 @@
   },
   "additionalProperties": false,
   "type": "object",
-  "title": "srv user config"
+  "title": "srv user config",
+  "description": "UserConfig holds user-configurable settings stored in config.yml."
 }

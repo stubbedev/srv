@@ -12,7 +12,8 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "description": "DNSBlock is the source → target pair persisted in a DNS-only redirect.\n`source` is the hostname dnsmasq pins; `target` is a bare hostname\nresolved at write time + on `srv redirect reload`."
     }
   },
   "properties": {
@@ -22,5 +23,6 @@
   },
   "additionalProperties": false,
   "type": "object",
-  "title": "srv DNS-only redirect"
+  "title": "srv DNS-only redirect",
+  "description": "DNSOnlyConfig is the on-disk shape of a `redirect-\u003cname\u003e.yml` file when\nthe redirect is DNS-only (created via `srv redirect add --dns-only`).\nHTTP redirects use Traefik's dynamic-config shape under `http:` and are\nintentionally not represented here."
 }

@@ -73,13 +73,33 @@ func main() {
 	}
 }
 
-func emit(dir string, t target) error {
+// modulePath is the Go module path; used to key harvested doc comments.
+const modulePath = "github.com/stubbedev/srv"
+
+// newReflector builds a reflector that harvests Go doc comments from the repo
+// source so every struct field carries its comment as a JSON Schema
+// `description` — that is what editors show as hover/completion hints. gen-schema
+// always runs from the repo root (`go run ./cmd/gen-schema`), so the source is
+// on disk and AddGoComments can walk it. A harvest failure is non-fatal: the
+// schema is still emitted, just without descriptions.
+func newReflector() *jsonschema.Reflector {
 	r := &jsonschema.Reflector{
 		FieldNameTag:               "yaml",
 		RequiredFromJSONSchemaTags: true,
 		ExpandedStruct:             true,
 		DoNotReference:             false,
 	}
+	// WithFullComment keeps the entire doc comment as the description (the
+	// default truncates type comments at the first sentence), so hover hints
+	// carry the full rationale — matching how treeman renders its schema.
+	if err := r.AddGoComments(modulePath, "./", jsonschema.WithFullComment()); err != nil {
+		fmt.Fprintf(os.Stderr, "gen-schema: warning: could not harvest doc comments for hints: %v\n", err)
+	}
+	return r
+}
+
+func emit(dir string, t target) error {
+	r := newReflector()
 	schema := r.Reflect(t.value)
 	schema.ID = jsonschema.ID(t.id)
 	schema.Title = t.title

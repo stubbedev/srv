@@ -37,7 +37,8 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "description": "Route attaches an extra Traefik router to a site, used for path-prefix splits\n(e.g. /app → WebSocket on :6001) or regex rewrites (e.g. /videos/...)."
     },
     "Upstream": {
       "properties": {
@@ -64,7 +65,8 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "description": "Upstream points a route at a backend. Exactly one of Port/Container/URL is\nset per Kind."
     },
     "VolumeMount": {
       "properties": {
@@ -82,7 +84,8 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "description": "VolumeMount is an extra bind-mount the user added to a site so its container\ncan reach host paths beyond the project root (TEMP dirs, nix-profile\nbinaries, demo asset trees, etc.). Source and Target are absolute paths;\nthe source must already exist on the host."
     }
   },
   "properties": {
@@ -185,5 +188,6 @@
   },
   "additionalProperties": false,
   "type": "object",
-  "title": "srv site metadata"
+  "title": "srv site metadata",
+  "description": "SiteMetadata holds all configuration for a site.\nThis is stored in ~/.config/srv/sites/{name}/metadata.yml"
 }
