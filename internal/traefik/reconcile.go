@@ -4,10 +4,13 @@
 //
 // srv generates this config once at `srv install` time; nothing regenerates it
 // afterwards. A package-manager upgrade (home-manager, brew) swaps the binary
-// but leaves the old config and old running containers in place, so new
-// behaviour — image bumps, added entrypoints, new bind mounts — does not take
-// effect until the user re-runs `srv install`. ReconcileVersion closes that gap
-// by re-applying on first use after an upgrade, keyed off a version marker.
+// but leaves the old config in place, so new behaviour does not take effect
+// until the user re-runs `srv install`. ReconcileVersion closes that gap on
+// first use after an upgrade, keyed off a version marker — as a seamless
+// in-place update: it rewrites the config files (Traefik and dnsmasq hot-reload
+// those, no container disruption) and only brings the stack up when the compose
+// definition itself changed, via plain `up -d` so unchanged containers keep
+// running untouched.
 package traefik
 
 import (
@@ -51,9 +54,10 @@ func IsInstalled(cfg *config.Config) bool {
 	return err == nil
 }
 
-// ReconcileVersion re-applies the edge config and recreates the Traefik + DNS
-// containers when the recorded marker differs from the running binary version.
-// It is a no-op when:
+// ReconcileVersion re-applies the edge config in place when the recorded marker
+// differs from the running binary version. Config files are always refreshed
+// (hot-reloaded by Traefik/dnsmasq); containers are only brought up — never
+// force-recreated — when the compose definition changed. It is a no-op when:
 //   - version is the "dev" placeholder (unversioned local build — the dev runs
 //     `srv install` manually);
 //   - srv is not installed yet (first install handles it);
@@ -72,6 +76,13 @@ func ReconcileVersion(version string) (reconciled bool, err error) {
 		return false, nil
 	}
 
+	// Snapshot the compose definition so we only touch containers if the new
+	// version actually changed it. Most upgrades only change the config files
+	// Traefik and dnsmasq hot-reload (dynamic config, dnsmasq.conf) — those
+	// apply with zero container disruption.
+	composePath := cfg.TraefikComposePath()
+	composeBefore, _ := os.ReadFile(composePath)
+
 	// Re-render config from the new binary's templates. EnsureConfig is
 	// idempotent and skips unchanged files. The persisted ACME email is reused
 	// ("" simply leaves production SSL disabled, which is the existing state).
@@ -80,13 +91,15 @@ func ReconcileVersion(version string) (reconciled bool, err error) {
 		return false, fmt.Errorf("reconcile edge config: %w", err)
 	}
 
-	// Recreate the edge containers so regenerated compose (new image tags,
-	// entrypoints, bind mounts) takes effect — only when Traefik is currently
-	// running, so a stopped stack is not started behind the user's back. The
-	// compose covers both the traefik and dns services.
-	if IsRunning() {
-		if err := docker.Compose(cfg.TraefikDir, "up", "-d", "--force-recreate"); err != nil {
-			return false, fmt.Errorf("recreate edge containers: %w", err)
+	// Bring the stack up in place ONLY when the compose definition changed
+	// (new image tag, entrypoint, or bind mount). Plain `up -d` — never
+	// --force-recreate — so docker recreates only the service(s) whose
+	// definition actually changed and leaves everything else running. When the
+	// compose is unchanged the containers are not touched at all.
+	composeAfter, _ := os.ReadFile(composePath)
+	if IsRunning() && string(composeBefore) != string(composeAfter) {
+		if err := docker.Compose(cfg.TraefikDir, "up", "-d"); err != nil {
+			return false, fmt.Errorf("apply edge container changes: %w", err)
 		}
 	}
 

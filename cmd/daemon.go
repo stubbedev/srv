@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/daemon"
+	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -63,6 +64,13 @@ func init() {
 
 func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if daemonStartFlags.foreground {
+		// The daemon is a service with no TTY, so it can never answer a sudo
+		// prompt. Force non-interactive sudo: the one privileged step reconcile
+		// might hit (rewriting the systemd-resolved drop-in when routing actually
+		// changed) fails fast and is logged, instead of hanging the service.
+		// The container recreate and all ~/.config/srv writes need no sudo.
+		shell.SetNonInteractive(true)
+
 		// Run in foreground (used by systemd/launchd). The service manager
 		// restarts this on a package upgrade, so reconcile the edge config to
 		// the new binary here — that's what makes an upgrade take effect
