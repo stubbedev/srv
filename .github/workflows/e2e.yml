@@ -1,0 +1,46 @@
+name: e2e
+
+# End-to-end tests boot a real Traefik via docker compose and route real
+# HTTP through it. They need docker + mkcert + free ports 80/443/88/8080, so
+# they run in their own workflow (not the main `test` job) on a clean
+# ubuntu-latest runner. Gated behind the `e2e` build tag.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # mkcert as a prebuilt binary. `srv proxy add` shells out to it to
+      # issue a local cert; cert generation auto-creates the local CA on
+      # first use, so no `mkcert -install` (system trust) is needed — the
+      # e2e HTTP client skips TLS verification.
+      - name: Install mkcert
+        run: |
+          set -euo pipefail
+          curl -fsSL -o mkcert \
+            "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
+          chmod +x mkcert
+          sudo mv mkcert /usr/local/bin/mkcert
+          mkcert -version
+
+      - name: Run e2e tests
+        run: go test -tags=e2e -v ./e2e/... -timeout 30m

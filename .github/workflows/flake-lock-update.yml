@@ -1,0 +1,43 @@
+name: flake-lock-update
+
+# Keeps flake.lock current with the configured inputs (nixpkgs,
+# flake-utils). Runs weekly and on demand. Commits the updated lock
+# straight to master with `[skip ci]` so it doesn't trigger another ci
+# run; the next push picks up the new revision and the nix flake-check
+# job re-validates against it.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v14
+      - name: nix flake update
+        run: |
+          set -euo pipefail
+          nix flake update
+          nix flake check --print-build-logs
+      - name: commit + push if changed
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain flake.lock)" ]; then
+            echo "flake.lock already current."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add flake.lock
+          git commit -m 'chore: weekly flake.lock update [skip ci]'
+          git push origin HEAD:master

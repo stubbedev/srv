@@ -37,34 +37,126 @@ build-release:
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     go build -ldflags "-X github.com/stubbedev/srv/cmd.Version=$VERSION -X github.com/stubbedev/srv/cmd.Commit=$COMMIT -X github.com/stubbedev/srv/cmd.BuildDate=$BUILD_DATE" -o {{BINARY}} .
 
-# Format Go code
+# Format Go code (golangci-lint v2 formatters — gofmt, per .golangci.yml)
 fmt:
-    go fmt ./...
+    golangci-lint fmt ./...
 
 # Run go vet
 vet:
     go vet ./...
 
-# Run golangci-lint on the codebase
-lint:
+# Format, vet, then run the linters. The mutating local-dev gate.
+lint: fmt
+    go vet ./...
+    golangci-lint run ./...
+
+# Auto-fix everything mechanically fixable (formatting + golangci --fix).
+lint-fix:
+    golangci-lint fmt ./...
+    golangci-lint run --fix ./...
+
+# Strict read-only check — same logic CI runs, exposed for local pre-push
+# verification. Fails if formatting would change or any linter fires.
+lint-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(golangci-lint fmt --diff ./...)
+    if [ -n "$out" ]; then
+        echo "code is not formatted; run 'just fmt':"
+        printf '%s\n' "$out"
+        exit 1
+    fi
+    go vet ./...
     golangci-lint run ./...
 
 # Regenerate JSON Schemas under schemas/ from Go structs
 schemas:
+    #!/usr/bin/env bash
+    set -euo pipefail
     go run ./cmd/gen-schema
+    if [ -n "$(git status --porcelain schemas/)" ]; then
+        echo "schemas: regenerated schemas/"
+    else
+        echo "schemas: already in sync"
+    fi
 
 # Regenerate docs/cli.md from the cobra command tree
 sync-docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
     go run ./cmd/gen-docs
+    if [ -n "$(git status --porcelain docs/cli.md)" ]; then
+        echo "sync-docs: regenerated docs/cli.md"
+    else
+        echo "sync-docs: already in sync"
+    fi
 
-# Run all checks (fmt, vet, lint, test) - useful for CI
-check: fmt vet lint test
+# Keep flake.nix's `vendorHash` aligned with the current go.sum.
+#
+# A sha256 of go.sum is embedded as a `# go-sum:` line in flake.nix. When
+# the cached digest matches go.sum on disk, sync-flake returns immediately
+# without running `nix build`. That makes it cheap enough to run on every
+# `just check`, so a dev `go get` flow can never push a master commit that
+# breaks the nix CI job. Pass `--force` to bypass the cache.
+#
+# srv's flake.nix derives `version` from the git rev, so (unlike treeman)
+# there is no version string to rewrite here — vendorHash only.
+sync-flake force="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GO_SUM_HASH=$(sha256sum go.sum | awk '{print $1}')
+    CACHED_HASH=$(awk -F': ' '/^[[:space:]]*#[[:space:]]*go-sum:/ {print $2; exit}' flake.nix | tr -d ' ')
+    if [ "{{force}}" != "--force" ] && [ "$GO_SUM_HASH" = "$CACHED_HASH" ]; then
+        echo "sync-flake: up-to-date (go.sum=$GO_SUM_HASH)"
+        exit 0
+    fi
+    echo "sync-flake: refreshing vendorHash"
+    SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$SENTINEL"'";|' flake.nix
+    set +e
+    OUT=$(nix build .#srv --no-link 2>&1)
+    BUILD_STATUS=$?
+    set -e
+    NEW_HASH=$(printf '%s\n' "$OUT" | awk '/got:[[:space:]]*sha256-/ {print $2; exit}')
+    if [ -z "$NEW_HASH" ]; then
+        if [ "$BUILD_STATUS" = "0" ]; then
+            echo "sync-flake: unexpected nix build success with sentinel hash" >&2
+            echo "$OUT" >&2
+            exit 1
+        fi
+        echo "$OUT" >&2
+        echo "sync-flake: nix build did not print 'got: sha256-…'" >&2
+        exit 1
+    fi
+    sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$NEW_HASH"'";|' flake.nix
+    if grep -q '^[[:space:]]*# go-sum:' flake.nix; then
+        sed -i -E 's|^(\s*# go-sum:).*|\1 '"$GO_SUM_HASH"'|' flake.nix
+    else
+        sed -i -E 's|^(\s*vendorHash = )|            # go-sum: '"$GO_SUM_HASH"'\n\1|' flake.nix
+    fi
+    echo "sync-flake: vendorHash=$NEW_HASH go-sum=$GO_SUM_HASH"
+    # Hard guard: never leave the sentinel behind — CI would fail on hash mismatch.
+    if grep -q '^\s*vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="' flake.nix; then
+        echo "sync-flake: refusing to leave sentinel vendorHash in flake.nix" >&2
+        exit 1
+    fi
+    nix build .#srv --no-link
+
+# Run all checks — useful for CI parity and pre-push. Mirrors treeman:
+# lint (fmt+vet+run), tests, and the generated-artifact sync recipes.
+check: lint test schemas sync-docs sync-flake
 
 # Run tests.
 # -timeout 60s caps every package so a hung test is visible in seconds
 # instead of go's 10-minute default.
 test:
     go test -timeout 60s ./...
+
+# Run end-to-end tests (build-tagged `e2e`). Boots a real Traefik via docker
+# compose and routes real HTTP through it. Needs docker + mkcert + free ports
+# 80/443/88/8080; tests self-skip when those aren't available.
+test-e2e:
+    go test -tags=e2e -v ./e2e/... -timeout 30m
 
 # Run tests with coverage
 test-cover:
@@ -122,12 +214,14 @@ _release-checks:
         echo "Error: Not on default branch '$DEFAULT_BRANCH' (currently on '$BRANCH')." >&2
         exit 1
     fi
+    # `just check` runs lint + tests + schema/docs regen + sync-flake, so any
+    # generated-artifact or vendorHash drift is fixed before we tag.
     just check
     if [ -n "$(git status --porcelain)" ]; then
-        echo "Changes detected from formatting. Staging and committing..."
+        echo "Changes detected (formatting / generated artifacts / vendorHash). Staging and committing..."
         git add -A
-        git commit -m "chore: format code for release"
-        echo "Committed formatting changes"
+        git commit -m "chore: sync generated artifacts for release"
+        echo "Committed"
     fi
     echo "Updating flake.lock..."
     nix flake update
@@ -136,32 +230,8 @@ _release-checks:
         git commit -m "chore: update flake.lock for release"
         echo "Committed flake.lock update"
     fi
-    echo "Verifying nix build (refreshing vendorHash if stale)..."
-    for attempt in 1 2 3; do
-        BUILD_LOG=$(mktemp)
-        if nix build --no-link .#srv 2>"$BUILD_LOG"; then
-            rm "$BUILD_LOG"
-            break
-        fi
-        if ! grep -q 'hash mismatch in fixed-output derivation' "$BUILD_LOG"; then
-            cat "$BUILD_LOG" >&2
-            rm "$BUILD_LOG"
-            exit 1
-        fi
-        OLD=$(grep 'specified:' "$BUILD_LOG" | head -1 | awk '{print $NF}')
-        NEW=$(grep -E '^[[:space:]]*got:' "$BUILD_LOG" | head -1 | awk '{print $NF}')
-        rm "$BUILD_LOG"
-        if [ -z "$OLD" ] || [ -z "$NEW" ]; then
-            echo "Error: could not parse hash mismatch from nix output" >&2
-            exit 1
-        fi
-        echo "Updating vendorHash: $OLD -> $NEW"
-        sed -i "s|$OLD|$NEW|" flake.nix
-        if [ "$attempt" = "3" ]; then
-            echo "Error: nix build still failing after vendorHash updates" >&2
-            exit 1
-        fi
-    done
+    echo "Re-validating nix build against the new lock (refreshing vendorHash if stale)..."
+    just sync-flake --force
     if [ -n "$(git status --porcelain flake.nix)" ]; then
         git add flake.nix
         git commit -m "chore: update vendorHash for release"

@@ -66,7 +66,15 @@ jobs:
   test:
     needs: autofix
     if: always() && (needs.autofix.result == 'success' || needs.autofix.result == 'skipped')
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Unit tests mock docker (SwapComposeExec / SwapNewClient), so they
+        # run daemon-free on macOS too — catching darwin build/behaviour
+        # breakage (host-networking branches, doctor_unix, platform.IsLinux).
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -96,6 +104,7 @@ jobs:
         run: go test -race ./...
 
       - name: Verify schemas are up to date
+        if: matrix.os == 'ubuntu-latest'
         run: |
           go run ./cmd/gen-schema
           if [ -n "$(git status --porcelain schemas/)" ]; then
@@ -105,6 +114,7 @@ jobs:
           fi
 
       - name: Verify CLI docs are up to date
+        if: matrix.os == 'ubuntu-latest'
         run: |
           go run ./cmd/gen-docs
           if [ -n "$(git status --porcelain docs/cli.md)" ]; then
@@ -131,3 +141,79 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+
+  nix:
+    needs: autofix
+    if: always() && (needs.autofix.result == 'success' || needs.autofix.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need a real ref + write token so the auto-bump step can push the
+          # refreshed vendorHash back to master.
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v14
+
+      # Inline `just sync-flake`. Rewrites flake.nix's vendorHash to match the
+      # current go.sum (and refreshes the `# go-sum:` cache line). On master
+      # pushes the result is auto-committed (next step); on PRs we fail if it
+      # would change anything, so reviewers see the drift instead of CI
+      # silently masking it.
+      - name: sync flake.nix vendorHash
+        run: |
+          set -euo pipefail
+          GO_SUM_HASH=$(sha256sum go.sum | awk '{print $1}')
+          SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$SENTINEL"'";|' flake.nix
+          set +e
+          OUT=$(nix build .#srv --no-link 2>&1)
+          BUILD_STATUS=$?
+          set -e
+          NEW_HASH=$(printf '%s\n' "$OUT" | awk '/got:[[:space:]]*sha256-/ {print $2; exit}')
+          if [ -z "$NEW_HASH" ]; then
+            if [ "$BUILD_STATUS" = "0" ]; then
+              echo "::error::sync-flake: nix build unexpectedly succeeded with sentinel hash"
+              echo "$OUT"
+              exit 1
+            fi
+            echo "$OUT"
+            echo "::error::sync-flake: nix build did not print 'got: sha256-…'"
+            exit 1
+          fi
+          sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$NEW_HASH"'";|' flake.nix
+          if grep -q '^[[:space:]]*# go-sum:' flake.nix; then
+            sed -i -E 's|^(\s*# go-sum:).*|\1 '"$GO_SUM_HASH"'|' flake.nix
+          else
+            sed -i -E 's|^(\s*vendorHash = )|            # go-sum: '"$GO_SUM_HASH"'\n\1|' flake.nix
+          fi
+          echo "sync-flake: vendorHash=$NEW_HASH go-sum=$GO_SUM_HASH"
+
+      - name: assert flake.nix in sync (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -n "$(git status --porcelain flake.nix)" ]; then
+            echo "::error::flake.nix vendorHash is out of sync with go.sum. Run 'just sync-flake' locally and commit the result."
+            git --no-pager diff flake.nix
+            exit 1
+          fi
+
+      - name: auto-commit flake.nix bump (master)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          if [ -z "$(git status --porcelain flake.nix)" ]; then
+            echo "flake.nix already in sync; nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add flake.nix
+          git commit -m 'chore: auto-bump flake.nix vendorHash [skip ci]'
+          git push origin HEAD:master
+
+      - run: nix flake check --print-build-logs
