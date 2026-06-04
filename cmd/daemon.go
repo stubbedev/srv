@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/daemon"
+	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -62,7 +63,15 @@ func init() {
 
 func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if daemonStartFlags.foreground {
-		// Run in foreground (used by systemd/launchd)
+		// Run in foreground (used by systemd/launchd). The service manager
+		// restarts this on a package upgrade, so reconcile the edge config to
+		// the new binary here — that's what makes an upgrade take effect
+		// without a manual `srv install`.
+		if reconciled, err := traefik.ReconcileVersion(Version); err != nil {
+			ui.Warn("Edge config reconcile failed: %v", err)
+		} else if reconciled {
+			ui.Info("Reconciled edge config to srv %s", Version)
+		}
 		ui.Info("Starting daemon in foreground...")
 		d, err := daemon.New()
 		if err != nil {

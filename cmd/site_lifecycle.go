@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
+	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -65,6 +66,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
 		return err
+	}
+
+	// Apply any pending edge-config changes from a binary upgrade before
+	// starting sites, so a freshly-upgraded srv works without `srv install`.
+	if reconciled, err := traefik.ReconcileVersion(Version); err != nil {
+		ui.Warn("Edge config reconcile failed: %v", err)
+	} else if reconciled {
+		ui.Info("Reconciled edge config to srv %s", Version)
 	}
 
 	if startFlags.all {

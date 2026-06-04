@@ -231,6 +231,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Stamp the version that generated this config so upgrades can detect drift
+	// and auto-reconcile (see traefik.ReconcileVersion).
+	if err := traefik.MarkInstalled(cfg, Version); err != nil {
+		ui.Warn("Failed to record installed version: %v", err)
+	}
+
 	ui.Blank()
 	ui.Success("srv installed successfully!")
 	ui.Info("Dashboard: %s", traefik.DashboardURL())
