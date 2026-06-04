@@ -30,6 +30,12 @@ func registerSiteWriteTools(srv *mcpsdk.Server) {
 	}, restartSiteTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
+		Name:        "remove_site",
+		Description: "Remove a site: stop its containers and delete its Traefik config, local cert, DNS registrations, and metadata directory. Destructive — pass dry_run to preview or ack to skip the confirmation prompt. (Adding a site is interactive and remains CLI-only via `srv add`.)",
+		Annotations: writeAnno("Remove site", true, true, true),
+	}, removeSiteTool)
+
+	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "add_alias",
 		Description: "Add an extra hostname (alias) to a site. Updates metadata, DNS, the local cert, and routing. Run restart_site afterward to apply. Idempotent — a no-op if the alias already exists.",
 		Annotations: writeAnno("Add site alias", false, true, true),
@@ -100,6 +106,31 @@ func restartSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in lifecycleI
 		return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 	}
 	return nil, okOut{OK: true}, nil
+}
+
+// ─── remove_site ─────────────────────────────────────────────────────
+
+type removeSiteIn struct {
+	Name   string `json:"name" jsonschema:"site name as listed by list_sites"`
+	DryRun bool   `json:"dry_run,omitempty" jsonschema:"preview without removing"`
+	Ack    bool   `json:"ack,omitempty" jsonschema:"skip the confirmation prompt"`
+}
+
+func removeSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in removeSiteIn) (*mcpsdk.CallToolResult, okOut, error) {
+	if in.Name == "" {
+		return nil, okOut{Error: "name is required"}, nil
+	}
+	if in.DryRun {
+		return nil, okOut{OK: true}, nil
+	}
+	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Remove site %q? This stops its containers and deletes its config, cert, DNS, and metadata.", in.Name)); !ok {
+		return nil, okOut{Error: reason}, nil
+	}
+	warnings, err := site.RemoveSite(in.Name)
+	if err != nil {
+		return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+	}
+	return nil, okOut{OK: true, Warnings: warnings}, nil
 }
 
 // ─── aliases ─────────────────────────────────────────────────────────

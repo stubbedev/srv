@@ -5,10 +5,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/stubbedev/srv/internal/config"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
-	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -45,63 +42,15 @@ func init() {
 func runRemove(cmd *cobra.Command, args []string) error {
 	siteName := args[0]
 
-	s, err := site.GetByName(siteName)
+	// Orchestration is shared with the MCP remove_site tool (internal/site).
+	ui.Info("Removing %s...", siteName)
+	warnings, err := site.RemoveSite(siteName)
 	if err != nil {
 		return err
 	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-
-	// Stop containers if not broken
-	if !s.IsBroken {
-		ui.Info("Stopping containers...")
-		// Use ComposeDir for docker operations
-		if err := docker.ComposeDown(s.ComposeDir); err != nil {
-			ui.Warn("Failed to stop containers: %v", err)
-		}
-
-		// Remove Traefik file provider config for compose sites
-		if s.Type == site.SiteTypeCompose {
-			if err := traefik.RemoveSiteRouteConfig(cfg, siteName); err != nil {
-				ui.Warn("Could not remove traefik config: %v", err)
-			} else {
-				ui.Dim("Removed traefik config for %s", siteName)
-			}
-		}
-
-		// Remove per-site extra-routes file if present.
-		if err := traefik.RemoveRoutesConfig(cfg, siteName); err != nil {
-			ui.Warn("Could not remove routes config: %v", err)
-		}
-
-	}
-
-	// Remove SSL certificate and DNS for local domains
-	if s.IsLocal && len(s.Domains) > 0 {
-		primary := s.Domains[0]
-		if err := traefik.RemoveLocalCerts(siteName, primary); err != nil {
-			ui.Warn("Failed to remove certificate: %v", err)
-		}
-		// Update Traefik dynamic config
-		if err := traefik.UpdateDynamicConfig(); err != nil {
-			ui.Warn("Failed to update Traefik config: %v", err)
-		}
-		// Unregister all domains from local DNS
-		for _, d := range s.Domains {
-			if err := traefik.UnregisterLocalDomain(d); err != nil {
-				ui.Warn("Failed to unregister DNS for %s: %v", d, err)
-			}
-		}
-	}
-
-	// Remove site metadata (includes docker-compose.yml and nginx.conf for static sites)
-	if err := site.RemoveSiteMetadata(siteName); err != nil {
-		return err
-	}
-
 	ui.Success("Site '%s' removed", siteName)
 	return nil
 }

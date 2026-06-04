@@ -86,6 +86,33 @@ func TestSetInternalListener(t *testing.T) {
 	}
 }
 
+func TestRemoveSite(t *testing.T) {
+	withSRVRoot(t)
+	// A site whose project dir does not exist is "broken", so RemoveSite skips
+	// the docker/traefik teardown and just drops metadata — hermetic.
+	if err := WriteSiteMetadata("blog", SiteMetadata{
+		Type:        SiteTypeStatic,
+		Domains:     []string{"blog.test"},
+		ProjectPath: "/no/such/project/dir",
+		Port:        80,
+		IsLocal:     false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RemoveSite("blog"); err != nil {
+		t.Fatalf("RemoveSite: %v", err)
+	}
+	if meta, _ := ReadSiteMetadata("blog"); meta != nil {
+		t.Error("metadata should be gone after RemoveSite")
+	}
+
+	// Negative: removing a missing site errors.
+	if _, err := RemoveSite("ghost"); err == nil {
+		t.Error("expected error for missing site")
+	}
+}
+
 func TestAddRemoveVolume(t *testing.T) {
 	withSRVRoot(t)
 	seedSite(t, "blog", []string{"blog.test"})

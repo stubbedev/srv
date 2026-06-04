@@ -17,8 +17,9 @@ import (
 // that need an uninstalled CA preflight-check and return an actionable error
 // rather than hanging.
 //
-// Still CLI-only (interactive or environment-level): install/uninstall,
-// import valet, the proxy `--fallback` sidecar, shell/open.
+// Still CLI-only: `srv add` (interactive project detection + prompts), route
+// and network mutators, install/uninstall, import valet, the proxy
+// `--fallback` sidecar, and shell/open (inherently interactive).
 func registerWriteTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "reload_site",

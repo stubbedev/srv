@@ -101,6 +101,58 @@ func RestartSite(name string, build bool) error {
 	return nil
 }
 
+// RemoveSite stops a site's containers and deletes all of its derived state:
+// Traefik route config, extra-routes config, local cert + DNS registrations,
+// and the metadata directory. Shared by `srv remove` and the MCP remove_site
+// tool. Per-step failures are returned as warnings; only a failed metadata
+// delete (the irreversible step) is returned as an error.
+func RemoveSite(name string) (warnings []string, err error) {
+	s, err := GetByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return nil, fmt.Errorf("site %q not found", name)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	if !s.IsBroken {
+		if err := docker.ComposeDown(s.ComposeDir); err != nil {
+			warnings = append(warnings, fmt.Sprintf("stop containers: %v", err))
+		}
+		if s.Type == SiteTypeCompose {
+			if err := traefik.RemoveSiteRouteConfig(cfg, name); err != nil {
+				warnings = append(warnings, fmt.Sprintf("remove traefik config: %v", err))
+			}
+		}
+		if err := traefik.RemoveRoutesConfig(cfg, name); err != nil {
+			warnings = append(warnings, fmt.Sprintf("remove routes config: %v", err))
+		}
+	}
+
+	if s.IsLocal && len(s.Domains) > 0 {
+		if err := traefik.RemoveLocalCerts(name, s.Domains[0]); err != nil {
+			warnings = append(warnings, fmt.Sprintf("remove certificate: %v", err))
+		}
+		if err := traefik.UpdateDynamicConfig(); err != nil {
+			warnings = append(warnings, fmt.Sprintf("update Traefik config: %v", err))
+		}
+		for _, d := range s.Domains {
+			if err := traefik.UnregisterLocalDomain(d); err != nil {
+				warnings = append(warnings, fmt.Sprintf("unregister DNS for %s: %v", d, err))
+			}
+		}
+	}
+
+	if err := RemoveSiteMetadata(name); err != nil {
+		return warnings, err
+	}
+	return warnings, nil
+}
+
 // requireSite loads a site by name and rejects missing or broken sites with a
 // clear error — the common preamble for every lifecycle op.
 func requireSite(name string) (*Site, error) {
