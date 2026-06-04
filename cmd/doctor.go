@@ -231,13 +231,7 @@ func checkDNS() int {
 				issues++
 			}
 
-			if traefik.CheckSystemDNS(testDomain) {
-				ui.IndentedSuccess(1, "System DNS configured")
-			} else {
-				ui.IndentedWarn(1, "System DNS not configured")
-				ui.IndentedDim(1, "Try removing and re-adding a local site to trigger DNS setup")
-				issues++
-			}
+			issues += checkSystemDNSResolution(localDomains)
 		} else {
 			ui.IndentedDim(1, "No local domains registered")
 		}
@@ -253,6 +247,49 @@ func checkDNS() int {
 	}
 
 	ui.Blank()
+	return issues
+}
+
+// checkSystemDNSResolution probes every registered local domain through the
+// system resolver (the path apps actually use) and reports accurately:
+//   - all resolve            → success
+//   - a non-.local fails     → real "System DNS not configured" issue
+//   - only .local names fail → the mDNS-interception case: .local is reserved
+//     for mDNS (RFC 6762) and on hosts running Avahi with nss-mdns ahead of
+//     systemd-resolved it never reaches srv's DNS. srv publishes .local names
+//     to Avahi (/etc/avahi/hosts); the guidance reflects that rather than the
+//     misleading "re-add the site".
+func checkSystemDNSResolution(domains []string) int {
+	var realFail, localFail []string
+	for _, d := range domains {
+		bare := traefik.BareDomain(d)
+		if traefik.CheckSystemDNS(bare) {
+			continue
+		}
+		if strings.HasSuffix(bare, ".local") {
+			localFail = append(localFail, bare)
+		} else {
+			realFail = append(realFail, bare)
+		}
+	}
+
+	if len(realFail) == 0 && len(localFail) == 0 {
+		ui.IndentedSuccess(1, "System DNS configured (%d domain(s) resolve)", len(domains))
+		return 0
+	}
+
+	issues := 0
+	if len(realFail) > 0 {
+		ui.IndentedWarn(1, "System DNS not configured for: %s", strings.Join(realFail, ", "))
+		ui.IndentedDim(1, "Re-run 'srv install', or remove and re-add the site to trigger DNS setup")
+		issues++
+	}
+	if len(localFail) > 0 {
+		ui.IndentedWarn(1, ".local not resolving via system resolver: %s", strings.Join(localFail, ", "))
+		ui.IndentedDim(1, ".local is reserved for mDNS; srv publishes it to Avahi (/etc/avahi/hosts).")
+		ui.IndentedDim(1, "Ensure avahi-daemon is running, or prefer a .test domain for local dev.")
+		issues++
+	}
 	return issues
 }
 

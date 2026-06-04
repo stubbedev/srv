@@ -131,6 +131,10 @@ const (
 	NetworkManagerConfigPath = "/etc/NetworkManager/dnsmasq.d/srv-local.conf"
 	// MacOSResolverDir is the macOS resolver directory.
 	MacOSResolverDir = "/etc/resolver"
+	// AvahiHostsPath is the Avahi static-hosts file. srv publishes its `.local`
+	// domains here so nss-mdns/Avahi answers them; `.local` is mDNS-reserved and
+	// is otherwise intercepted by Avahi before reaching dnsmasq/systemd-resolved.
+	AvahiHostsPath = "/etc/avahi/hosts"
 )
 
 // =============================================================================

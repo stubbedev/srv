@@ -337,6 +337,14 @@ func updateNetworkManagerConfig(domains []string) error {
 func RemoveDNS() error {
 	resolver := DetectResolver()
 
+	// Clear srv's managed block from /etc/avahi/hosts regardless of the primary
+	// resolver — Avahi publishing is orthogonal to systemd-resolved/NetworkManager.
+	if avahiAvailable() {
+		if err := updateAvahiHosts(nil); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to clear srv .local domains from Avahi: %v\n", err)
+		}
+	}
+
 	switch resolver {
 	case ResolverSystemdResolved:
 		if _, err := os.Stat(constants.SystemdResolvedConfigPath); os.IsNotExist(err) {
@@ -727,6 +735,15 @@ func UpdateDnsmasqConfig() error {
 			if err := updateMacOSResolverConfig(domains); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to update macOS resolver config: %v\n", err)
 			}
+		}
+	}
+
+	// Publish `.local` domains to Avahi when present: nss-mdns intercepts
+	// `.local` ahead of systemd-resolved, so without this srv's `*.local` sites
+	// resolve via dnsmasq directly but not through the system resolver apps use.
+	if avahiAvailable() {
+		if err := updateAvahiHosts(domains); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to publish .local domains to Avahi: %v\n", err)
 		}
 	}
 
