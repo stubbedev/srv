@@ -609,12 +609,74 @@ redirects, validation, paths, version); mutating tools beyond
 `reload_site` are still being extracted from CLI handlers and will land
 in follow-ups.
 
-Wire it into an MCP client by pointing at the binary:
+### Wiring it into a client
+
+The server is stdio-based: a client launches `srv mcp` and talks to it over
+stdin/stdout. There is nothing to host or keep running — the client starts and
+stops the process. The only requirement is that the `srv` binary is reachable.
+If your client doesn't inherit your shell `PATH`, replace `"srv"` below with the
+absolute path from `which srv` (e.g. `/usr/local/bin/srv`).
+
+Most clients share the same `mcpServers` schema:
 
 ```json
 {
   "mcpServers": {
     "srv": {
+      "command": "srv",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Claude Code** — one command, no file editing:
+
+```sh
+claude mcp add srv -- srv mcp          # current project
+claude mcp add -s user srv -- srv mcp  # all projects (user scope)
+```
+
+**Claude Desktop** — paste the `mcpServers` block into the config file, then
+restart the app:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+**Cursor** — paste the `mcpServers` block into `~/.cursor/mcp.json` (global) or
+`.cursor/mcp.json` (per-project).
+
+**Windsurf** — paste the `mcpServers` block into
+`~/.codeium/windsurf/mcp_config.json` (or via Cascade → Plugins → View raw
+config).
+
+**Cline / Roo Code** (VS Code extensions) — open the MCP Servers panel →
+"Configure MCP Servers" and add the `srv` entry under `mcpServers`.
+
+**VS Code** (GitHub Copilot agent mode) — uses a `servers` key, not
+`mcpServers`. Put this in `.vscode/mcp.json` (workspace) or your user
+`mcp.json`:
+
+```json
+{
+  "servers": {
+    "srv": {
+      "command": "srv",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or from the CLI: `code --add-mcp '{"name":"srv","command":"srv","args":["mcp"]}'`.
+
+**Zed** — uses `context_servers` in `settings.json`:
+
+```json
+{
+  "context_servers": {
+    "srv": {
+      "source": "custom",
       "command": "srv",
       "args": ["mcp"]
     }
