@@ -30,6 +30,12 @@ func registerSiteWriteTools(srv *mcpsdk.Server) {
 	}, restartSiteTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
+		Name:        "add_site",
+		Description: "Register a new site from a project directory and start it. Auto-detects type (docker-compose.yml → compose, Dockerfile → dockerfile, else static); override with `type`. `domain` is required. Set `local` for mkcert TLS (otherwise Let's Encrypt). For a multi-service compose project pass `service`. Local sites need the mkcert CA (run `srv install` once in a terminal if missing). Set start=false to register without starting.",
+		Annotations: writeAnno("Add site", false, false, true),
+	}, addSiteTool)
+
+	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "remove_site",
 		Description: "Remove a site: stop its containers and delete its Traefik config, local cert, DNS registrations, and metadata directory. Destructive — pass dry_run to preview or ack to skip the confirmation prompt. (Adding a site is interactive and remains CLI-only via `srv add`.)",
 		Annotations: writeAnno("Remove site", true, true, true),
@@ -106,6 +112,87 @@ func restartSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in lifecycleI
 		return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 	}
 	return nil, okOut{OK: true}, nil
+}
+
+// ─── add_site ────────────────────────────────────────────────────────
+
+type addSiteVolume struct {
+	Source   string `json:"source" jsonschema:"host path"`
+	Target   string `json:"target" jsonschema:"container path (must not overlap /app)"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+}
+
+type addSiteIn struct {
+	Path         string          `json:"path" jsonschema:"project directory to register"`
+	Domain       string          `json:"domain" jsonschema:"canonical hostname (required)"`
+	Type         string          `json:"type,omitempty" jsonschema:"force site type: compose, dockerfile, or static (default: auto-detect)"`
+	Name         string          `json:"name,omitempty" jsonschema:"site name; derived from domain when omitted"`
+	Aliases      []string        `json:"aliases,omitempty" jsonschema:"extra hostnames mapped to the same site"`
+	Port         int             `json:"port,omitempty" jsonschema:"container port (default 80)"`
+	Local        bool            `json:"local,omitempty" jsonschema:"use local mkcert TLS instead of Let's Encrypt"`
+	Wildcard     bool            `json:"wildcard,omitempty" jsonschema:"match one-level subdomains (local only)"`
+	InternalHTTP bool            `json:"internal_http,omitempty" jsonschema:"also expose on the internal plain-HTTP entrypoint"`
+	Service      string          `json:"service,omitempty" jsonschema:"compose service to route to (multi-service projects)"`
+	Profile      string          `json:"profile,omitempty" jsonschema:"compose profile to select"`
+	SPA          bool            `json:"spa,omitempty" jsonschema:"static sites: SPA fallback to index.html"`
+	Cache        bool            `json:"cache,omitempty" jsonschema:"static sites: asset caching headers"`
+	CORS         bool            `json:"cors,omitempty" jsonschema:"static sites: permissive CORS headers"`
+	Volumes      []addSiteVolume `json:"volumes,omitempty" jsonschema:"extra host bind-mounts"`
+	Force        bool            `json:"force,omitempty" jsonschema:"overwrite an existing site"`
+	Start        *bool           `json:"start,omitempty" jsonschema:"start the containers after adding (default true)"`
+}
+type addSiteOut struct {
+	OK       bool     `json:"ok"`
+	Name     string   `json:"name,omitempty"`
+	Domain   string   `json:"domain,omitempty"`
+	Type     string   `json:"type,omitempty"`
+	IsLocal  bool     `json:"is_local,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	Error    string   `json:"error,omitempty"`
+}
+
+func addSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addSiteIn) (*mcpsdk.CallToolResult, addSiteOut, error) {
+	if in.Path == "" || in.Domain == "" {
+		return nil, addSiteOut{Error: "path and domain are required"}, nil
+	}
+	// Local sites issue a mkcert cert; guard the CA install behind the same
+	// non-interactive-sudo preflight the proxy/redirect add tools use.
+	if in.Local {
+		if err := requireCAForLocalCert(); err != nil {
+			return nil, addSiteOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+	}
+	start := true
+	if in.Start != nil {
+		start = *in.Start
+	}
+	mounts := make([]site.VolumeMount, 0, len(in.Volumes))
+	for _, v := range in.Volumes {
+		mounts = append(mounts, site.VolumeMount{Source: v.Source, Target: v.Target, ReadOnly: v.ReadOnly})
+	}
+	res, err := site.Add(site.AddOptions{
+		Path:         in.Path,
+		TypeOverride: in.Type,
+		Name:         in.Name,
+		Domain:       in.Domain,
+		Aliases:      in.Aliases,
+		Port:         in.Port,
+		Local:        in.Local,
+		Wildcard:     in.Wildcard,
+		InternalHTTP: in.InternalHTTP,
+		Service:      in.Service,
+		Profile:      in.Profile,
+		SPA:          in.SPA,
+		Cache:        in.Cache,
+		CORS:         in.CORS,
+		Volumes:      mounts,
+		Force:        in.Force,
+		Start:        start,
+	})
+	if err != nil {
+		return nil, addSiteOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+	}
+	return nil, addSiteOut{OK: true, Name: res.Name, Domain: res.Domain, Type: res.Type, IsLocal: res.IsLocal, Warnings: res.Warnings}, nil
 }
 
 // ─── remove_site ─────────────────────────────────────────────────────

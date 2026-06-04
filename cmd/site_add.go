@@ -5,13 +5,11 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -118,91 +116,51 @@ func init() {
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
-	if err := docker.EnsureRunning(); err != nil {
-		return err
+	// Parse the bind-mount flags here (CLI spec format); the rest of the add
+	// pipeline lives in internal/site so the CLI and the MCP add_site tool
+	// share one implementation.
+	var mounts []site.VolumeMount
+	for _, spec := range addFlags.volumes {
+		m, err := ParseVolumeSpec(spec)
+		if err != nil {
+			return fmt.Errorf("invalid --volume %q: %w", spec, err)
+		}
+		mounts = append(mounts, m)
 	}
 
-	cfg, err := config.Load()
+	res, err := site.Add(site.AddOptions{
+		Path:         args[0],
+		TypeOverride: addFlags.typeOverride,
+		Name:         addFlags.name,
+		Domain:       addFlags.domain,
+		Aliases:      addFlags.aliases,
+		Port:         addFlags.port,
+		Local:        addFlags.local,
+		Wildcard:     addFlags.wildcard,
+		InternalHTTP: addFlags.internalHTTP,
+		Service:      addFlags.service,
+		Profile:      addFlags.profile,
+		SPA:          addFlags.spa,
+		Cache:        addFlags.cache,
+		CORS:         addFlags.cors,
+		Volumes:      mounts,
+		Force:        addFlags.force,
+		Start:        true,
+	})
 	if err != nil {
 		return err
 	}
-
-	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
-		return err
+	for _, w := range res.Warnings {
+		ui.Warn("%s", w)
 	}
 
-	// Validate and resolve site setup
-	setup, err := validateSiteSetup(args[0])
-	if err != nil {
-		return err
+	ui.Success("Site '%s' added successfully!", res.Name)
+	ui.Dim("Domain: %s (%s, %s)", res.Domain, res.Type, ui.Highlight(TypeLabel(res.IsLocal)))
+	if cfg, err := config.Load(); err == nil {
+		ui.Dim("Config: %s/sites/%s/ (no project files modified)", cfg.Root, res.Name)
 	}
-
-	// Print detection summary before prompting
-	ui.Dim("Detected: %s", detectionSummary(setup))
-
-	// Prompt for any missing configuration
-	if err := promptForMissingConfig(setup); err != nil {
-		return err
+	if res.IsLocal {
+		ui.Success("Site is running at https://%s", res.Domain)
 	}
-
-	// Validate inputs
-	if err := validateSiteInputs(setup); err != nil {
-		return err
-	}
-
-	if addFlags.force && site.Exists(setup.siteName) {
-		// Back up old metadata so it can be restored if the new write fails.
-		oldDir := site.SiteConfigDir(cfg, setup.siteName)
-		backupDir := oldDir + ".bak"
-		_ = os.RemoveAll(backupDir)
-		if renameErr := os.Rename(oldDir, backupDir); renameErr != nil && !os.IsNotExist(renameErr) {
-			return fmt.Errorf("failed to back up existing site metadata: %w", renameErr)
-		}
-		if err := setupSiteFiles(cfg, setup); err != nil {
-			_ = os.RemoveAll(oldDir)
-			_ = os.Rename(backupDir, oldDir)
-			return err
-		}
-		_ = os.RemoveAll(backupDir)
-	} else {
-		if err := setupSiteFiles(cfg, setup); err != nil {
-			return err
-		}
-	}
-
-	// Finalize setup (SSL, registration, start)
-	return finalizeSiteSetup(cfg, setup)
-}
-
-// siteSetup holds all configuration needed for adding a site
-type siteSetup struct {
-	sitePath           string
-	composePath        string
-	serviceName        string // Container name for Traefik routing
-	composeServiceName string // Docker Compose service name for compose commands
-	profile            string // Docker Compose profile (if service uses profiles)
-	siteName           string
-	domain             string   // canonical/primary domain
-	aliases            []string // extra hostnames mapped to the same site
-	listeners          []string // extra Traefik entrypoints (e.g. "internal")
-	port               int
-	isLocal            bool
-	wildcard           bool // true if wildcard subdomain matching is enabled
-	isStatic           bool // true if serving static files (no docker-compose.yml)
-	isDockerfile       bool // true if building from a bare Dockerfile
-	dockerfileInfo     *site.DockerfileSiteInfo
-	// Static site options
-	spa   bool
-	cache bool
-	cors  bool
-}
-
-// allDomains returns the canonical domain followed by any aliases.
-func (s *siteSetup) allDomains() []string {
-	out := make([]string, 0, 1+len(s.aliases))
-	if s.domain != "" {
-		out = append(out, s.domain)
-	}
-	out = append(out, s.aliases...)
-	return out
+	return nil
 }
