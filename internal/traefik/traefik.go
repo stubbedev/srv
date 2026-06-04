@@ -83,14 +83,6 @@ certificatesResolvers:
         entryPoint: web
 `
 
-// TraefikDynamicYML is the dynamic Traefik configuration template.
-// This is the base template; domain-specific certs are added dynamically.
-const TraefikDynamicYML = `# Dynamic Traefik configuration
-# Domain-specific TLS certificates are added below by srv
-tls:
-  certificates: []
-`
-
 // Typed model for traefik/docker-compose.yml. Building the document from these
 // structs and marshalling once means every interpolated value (network name,
 // sites dir, dnsmasq credentials) is YAML-encoded as a scalar — none of them
@@ -347,7 +339,7 @@ func EnsureConfig(email string) error {
 
 	// Write traefik-dynamic.yml atomically (Traefik watches the conf dir).
 	dynamicPath := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
-	if err := fsutil.AtomicWriteFile(dynamicPath, []byte(TraefikDynamicYML), constants.FilePermDefault); err != nil {
+	if err := fsutil.AtomicWriteFile(dynamicPath, []byte(renderDynamicConfig(nil)), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write traefik-dynamic.yml: %w", err)
 	}
 

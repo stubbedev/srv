@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	sd "github.com/sergeymakinen/go-systemdconf/v2"
+
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
@@ -148,6 +150,31 @@ func setupSystemdResolved() error {
 	return updateSystemdResolvedConfig(domains)
 }
 
+// resolvedConf models the resolved.conf.d drop-in, which is systemd
+// configuration syntax. Marshalling via go-systemdconf keeps the output
+// byte-identical to the previous hand-built form, so the change-detection that
+// avoids a disruptive systemd-resolved restart still fires on an unchanged
+// config. Field names map directly to systemd key names.
+type resolvedConf struct {
+	sd.File
+	Resolve struct {
+		sd.Section
+		DNS     sd.Value
+		Domains sd.Value
+	}
+}
+
+// renderResolvedConf builds the resolved.conf drop-in that routes the given
+// (already ~-prefixed) domains through dnsmasq on the loopback. The marshal
+// error is ignored: the struct is fixed-shape and cannot fail to encode.
+func renderResolvedConf(routingDomains []string) string {
+	var c resolvedConf
+	c.Resolve.DNS = sd.Value{constants.LocalhostIP}
+	c.Resolve.Domains = sd.Value{strings.Join(routingDomains, " ")}
+	data, _ := sd.Marshal(&c) //nolint:errcheck // static struct never fails to marshal
+	return string(data)
+}
+
 // updateSystemdResolvedConfig writes /etc/systemd/resolved.conf.d/srv-local.conf
 // so that systemd-resolved routes queries for each registered local domain
 // (and the standard local TLDs) through dnsmasq on 127.0.0.1:53.
@@ -179,10 +206,7 @@ func updateSystemdResolvedConfig(domains []string) error {
 		routingDomains = append(routingDomains, "~"+bare)
 	}
 
-	content := fmt.Sprintf("[Resolve]\nDNS=%s\nDomains=%s\n",
-		constants.LocalhostIP,
-		strings.Join(routingDomains, " "),
-	)
+	content := renderResolvedConf(routingDomains)
 
 	// Nothing to do — and crucially, no system-wide DNS restart — when the
 	// routing config has not actually changed.

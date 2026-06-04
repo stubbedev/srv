@@ -225,6 +225,18 @@ func ComposeUpBuild(dir string) error {
 	return ComposeUpBuildWithProfile(dir, "")
 }
 
+// ComposeUpForceRecreate runs docker compose up -d --force-recreate.
+//
+// Plain `up -d` only recreates a container when the compose spec changes. A
+// stack whose config lives in a bind-mounted file (e.g. the fallback sidecar's
+// nginx.conf) therefore keeps running its old config after the file is
+// regenerated — the container must be recreated to reload it. --force-recreate
+// is scoped to this dir's compose file, so it is safe under the shared "srv"
+// project (unlike --remove-orphans; see ComposeUp).
+func ComposeUpForceRecreate(dir string) error {
+	return Compose(dir, "up", "-d", "--force-recreate")
+}
+
 // ComposeUpWithProfile runs docker compose up -d with a specific profile.
 // See ComposeUp for why --remove-orphans is deliberately omitted.
 func ComposeUpWithProfile(dir, profile string) error {

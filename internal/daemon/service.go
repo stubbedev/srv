@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	sd "github.com/sergeymakinen/go-systemdconf/v2"
+	"howett.net/plist"
+
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/platform"
@@ -93,6 +96,57 @@ func stopService() error {
 // Systemd (Linux)
 // =============================================================================
 
+// systemdUnitFile models srv-daemon.service. It is marshalled to systemd unit
+// syntax by go-systemdconf rather than built as a string, so section/key
+// structure and the repeated Environment= entries (which a struct-per-section
+// model with unique fields could not express) are handled by the library.
+// Field names map directly to systemd key names.
+type systemdUnitFile struct {
+	sd.File
+	Unit struct {
+		sd.Section
+		Description   sd.Value
+		Documentation sd.Value
+		After         sd.Value
+		Wants         sd.Value
+	}
+	Service struct {
+		sd.Section
+		Type        sd.Value
+		ExecStart   sd.Value
+		Restart     sd.Value
+		RestartSec  sd.Value
+		Environment sd.Value
+	}
+	Install struct {
+		sd.Section
+		WantedBy sd.Value
+	}
+}
+
+// renderSystemdUnit builds the srv-daemon.service unit. HOME and
+// XDG_CONFIG_HOME are pinned because a systemd service context may start with
+// an empty environment.
+func renderSystemdUnit(executable, homeDir string) (string, error) {
+	var u systemdUnitFile
+	u.Unit.Description = sd.Value{"srv daemon - Docker container network connector"}
+	u.Unit.Documentation = sd.Value{"https://github.com/stubbedev/srv"}
+	u.Unit.After = sd.Value{"docker.service"}
+	u.Unit.Wants = sd.Value{"docker.service"}
+	u.Service.Type = sd.Value{"simple"}
+	u.Service.ExecStart = sd.Value{executable + " daemon start --foreground"}
+	u.Service.Restart = sd.Value{"on-failure"}
+	u.Service.RestartSec = sd.Value{"5"}
+	u.Service.Environment = sd.Value{"HOME=" + homeDir, "XDG_CONFIG_HOME=" + homeDir + "/.config"}
+	u.Install.WantedBy = sd.Value{"default.target"}
+
+	data, err := sd.Marshal(&u)
+	if err != nil {
+		return "", fmt.Errorf("marshal systemd unit: %w", err)
+	}
+	return string(data), nil
+}
+
 func systemdServicePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -141,24 +195,10 @@ func installSystemd() error {
 		return fmt.Errorf("failed to determine home directory: %w", err)
 	}
 
-	// Generate service file
-	serviceContent := fmt.Sprintf(`[Unit]
-Description=srv daemon - Docker container network connector
-Documentation=https://github.com/stubbedev/srv
-After=docker.service
-Wants=docker.service
-
-[Service]
-Type=simple
-ExecStart=%s daemon start --foreground
-Restart=on-failure
-RestartSec=5
-Environment=HOME=%s
-Environment=XDG_CONFIG_HOME=%s/.config
-
-[Install]
-WantedBy=default.target
-`, executable, homeDir, homeDir)
+	serviceContent, err := renderSystemdUnit(executable, homeDir)
+	if err != nil {
+		return err
+	}
 
 	if err := os.WriteFile(servicePath, []byte(serviceContent), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
@@ -229,6 +269,43 @@ func GetSystemdStatus() (string, error) {
 // Launchd (macOS)
 // =============================================================================
 
+// launchdPlist models the LaunchAgent property list. It is marshalled to XML
+// by howett.net/plist rather than built as a string, so the document structure
+// and escaping are handled by the library. Struct field order is preserved in
+// the output; the two nested dicts have a single key each, so map ordering is
+// deterministic.
+type launchdPlist struct {
+	Label                string            `plist:"Label"`
+	ProgramArguments     []string          `plist:"ProgramArguments"`
+	RunAtLoad            bool              `plist:"RunAtLoad"`
+	KeepAlive            map[string]bool   `plist:"KeepAlive"`
+	StandardOutPath      string            `plist:"StandardOutPath"`
+	StandardErrorPath    string            `plist:"StandardErrorPath"`
+	EnvironmentVariables map[string]string `plist:"EnvironmentVariables"`
+}
+
+// renderLaunchdPlist builds the LaunchAgent plist XML. The daemon is kept alive
+// across non-zero exits (KeepAlive/SuccessfulExit=false) and runs with a PATH
+// that includes the binary's own dir plus the usual Homebrew/system locations.
+func renderLaunchdPlist(executable, logPath string) (string, error) {
+	doc := launchdPlist{
+		Label:             "dev.stubbe.srv-daemon",
+		ProgramArguments:  []string{executable, "daemon", "start", "--foreground"},
+		RunAtLoad:         true,
+		KeepAlive:         map[string]bool{"SuccessfulExit": false},
+		StandardOutPath:   logPath,
+		StandardErrorPath: logPath,
+		EnvironmentVariables: map[string]string{
+			"PATH": filepath.Dir(executable) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+		},
+	}
+	data, err := plist.MarshalIndent(doc, plist.XMLFormat, "    ")
+	if err != nil {
+		return "", fmt.Errorf("marshal launchd plist: %w", err)
+	}
+	return string(data) + "\n", nil
+}
+
 func launchdPlistPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -277,39 +354,10 @@ func installLaunchd() error {
 
 	logPath := LogPath(cfg)
 
-	// Generate plist file
-	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>dev.stubbe.srv-daemon</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>%s</string>
-        <string>daemon</string>
-        <string>start</string>
-        <string>--foreground</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>%s</string>
-    <key>StandardErrorPath</key>
-    <string>%s</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>%s:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    </dict>
-</dict>
-</plist>
-`, executable, logPath, logPath, filepath.Dir(executable))
+	plistContent, err := renderLaunchdPlist(executable, logPath)
+	if err != nil {
+		return err
+	}
 
 	// Write plist before unloading so a write failure leaves the old service intact.
 	if err := os.WriteFile(plistPath, []byte(plistContent), constants.FilePermACME); err != nil {

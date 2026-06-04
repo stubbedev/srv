@@ -160,7 +160,7 @@ func TestRenderFallbackNginx(t *testing.T) {
 		"proxy_pass http://host.docker.internal:3001;",
 		"error_page 502 503 504 = @fallback;",
 		"location @fallback {",
-		"proxy_pass https://kontainer.com;",
+		"proxy_pass https://$fb_host:443$request_uri;",
 		`set $fb_host "kontainer.com";`,
 		"proxy_connect_timeout 3s;",
 		"proxy_ssl_server_name on;",
