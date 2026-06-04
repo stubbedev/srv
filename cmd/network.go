@@ -6,13 +6,10 @@ package cmd
 
 import (
 	"fmt"
-	"slices"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -77,40 +74,18 @@ func init() {
 
 func runNetworkAttach(cmd *cobra.Command, args []string) error {
 	siteName, network := args[0], strings.TrimSpace(args[1])
-	if network == "" {
-		return fmt.Errorf("network name is required")
-	}
-
-	meta, err := site.ReadSiteMetadata(siteName)
+	// Orchestration shared with the MCP attach_network tool (internal/site).
+	changed, warnings, err := site.AttachNetwork(siteName, network)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-
-	if !docker.NetworkExists(network) {
-		return fmt.Errorf("docker network %q does not exist — create it first (or check the name)", network)
-	}
-
-	if slices.Contains(meta.ExtraNetworks, network) {
+	if !changed {
 		ui.Dim("%s is already attached to %s", network, siteName)
 		return nil
 	}
-	if network == meta.NetworkName {
-		return fmt.Errorf("%q is the site's primary traefik network — already attached", network)
-	}
-
-	meta.ExtraNetworks = append(meta.ExtraNetworks, network)
-	sort.Strings(meta.ExtraNetworks)
-
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := site.Reload(siteName); err != nil {
-		ui.Warn("Failed to refresh site config: %v", err)
-	}
-
 	ui.Success("Attached %s to %s", network, siteName)
 	ui.Dim("Run 'srv restart %s' for the container to pick up the new network.", siteName)
 	return nil
@@ -118,28 +93,13 @@ func runNetworkAttach(cmd *cobra.Command, args []string) error {
 
 func runNetworkDetach(cmd *cobra.Command, args []string) error {
 	siteName, network := args[0], strings.TrimSpace(args[1])
-
-	meta, err := site.ReadSiteMetadata(siteName)
+	warnings, err := site.DetachNetwork(siteName, network)
 	if err != nil {
 		return err
 	}
-	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+	for _, w := range warnings {
+		ui.Warn("%s", w)
 	}
-
-	idx := slices.Index(meta.ExtraNetworks, network)
-	if idx < 0 {
-		return fmt.Errorf("network %q not attached to %s", network, siteName)
-	}
-	meta.ExtraNetworks = slices.Delete(meta.ExtraNetworks, idx, idx+1)
-
-	if err := site.WriteSiteMetadata(siteName, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := site.Reload(siteName); err != nil {
-		ui.Warn("Failed to refresh site config: %v", err)
-	}
-
 	ui.Success("Detached %s from %s", network, siteName)
 	ui.Dim("Run 'srv restart %s' for the change to take effect.", siteName)
 	return nil

@@ -6,24 +6,8 @@ import (
 	"github.com/stubbedev/srv/internal/site"
 )
 
-func TestAutoRouteID(t *testing.T) {
-	cases := []struct {
-		path, regex, want string
-	}{
-		{"/app", "", "app"},
-		{"/api/v1", "", "api-v1"},
-		{"/api//v1", "", "api-v1"},
-		{"", "^/v1/(.+)$", "v1"},
-		{"/", "", ""},
-		{"/api-foo_bar", "", "api-foo-bar"},
-	}
-	for _, c := range cases {
-		got := autoRouteID(c.path, c.regex)
-		if got != c.want {
-			t.Errorf("autoRouteID(%q, %q) = %q, want %q", c.path, c.regex, got, c.want)
-		}
-	}
-}
+// autoRouteID and splitContainerPort moved to internal/site (BuildRoute);
+// their unit coverage lives in internal/site/route_test.go.
 
 func TestDescribeUpstream(t *testing.T) {
 	cases := []struct {
@@ -40,37 +24,6 @@ func TestDescribeUpstream(t *testing.T) {
 		got := describeUpstream(c.kind, c.container, c.url, c.port)
 		if got != c.want {
 			t.Errorf("describeUpstream(%+v) = %q, want %q", c, got, c.want)
-		}
-	}
-}
-
-func TestSplitContainerPort(t *testing.T) {
-	cases := []struct {
-		in      string
-		name    string
-		port    int
-		wantErr bool
-	}{
-		{"redis:6379", "redis", 6379, false},
-		{"app:3000", "app", 3000, false},
-		{"missing", "", 0, true},
-		{"x:notnum", "", 0, true},
-		{"x:0", "", 0, true},
-	}
-	for _, c := range cases {
-		name, port, err := splitContainerPort(c.in)
-		if c.wantErr {
-			if err == nil {
-				t.Errorf("splitContainerPort(%q) expected err", c.in)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("splitContainerPort(%q) err: %v", c.in, err)
-			continue
-		}
-		if name != c.name || port != c.port {
-			t.Errorf("splitContainerPort(%q) = (%q, %d), want (%q, %d)", c.in, name, port, c.name, c.port)
 		}
 	}
 }

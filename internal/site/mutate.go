@@ -6,10 +6,12 @@ package site
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/validate"
 )
@@ -186,6 +188,68 @@ func AddVolume(siteName string, mount VolumeMount) (warnings []string, err error
 		return nil, fmt.Errorf("target %q overlaps the project bind at /app — pick a different container path", mount.Target)
 	}
 	meta.Volumes = append(meta.Volumes, mount)
+	if err := WriteSiteMetadata(siteName, *meta); err != nil {
+		return nil, fmt.Errorf("write metadata: %w", err)
+	}
+	if _, err := Reload(siteName); err != nil {
+		warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+	}
+	return warnings, nil
+}
+
+// AttachNetwork adds an extra Docker network to a site so its container can
+// reach services on that network. Returns changed=false (no error) when already
+// attached. Errors if the network does not exist or is the site's primary
+// traefik network.
+func AttachNetwork(siteName, network string) (changed bool, warnings []string, err error) {
+	network = strings.TrimSpace(network)
+	if network == "" {
+		return false, nil, fmt.Errorf("network name is required")
+	}
+	meta, err := requireMeta(siteName)
+	if err != nil {
+		return false, nil, err
+	}
+	if !docker.NetworkExists(network) {
+		return false, nil, fmt.Errorf("docker network %q does not exist — create it first (or check the name)", network)
+	}
+	if network == meta.NetworkName {
+		return false, nil, fmt.Errorf("%q is the site's primary traefik network — already attached", network)
+	}
+	for _, n := range meta.ExtraNetworks {
+		if n == network {
+			return false, nil, nil
+		}
+	}
+	meta.ExtraNetworks = append(meta.ExtraNetworks, network)
+	sort.Strings(meta.ExtraNetworks)
+	if err := WriteSiteMetadata(siteName, *meta); err != nil {
+		return false, nil, fmt.Errorf("write metadata: %w", err)
+	}
+	if _, err := Reload(siteName); err != nil {
+		warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+	}
+	return true, warnings, nil
+}
+
+// DetachNetwork removes an extra Docker network from a site.
+func DetachNetwork(siteName, network string) (warnings []string, err error) {
+	network = strings.TrimSpace(network)
+	meta, err := requireMeta(siteName)
+	if err != nil {
+		return nil, err
+	}
+	idx := -1
+	for i, n := range meta.ExtraNetworks {
+		if n == network {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, fmt.Errorf("network %q not attached to %s", network, siteName)
+	}
+	meta.ExtraNetworks = append(meta.ExtraNetworks[:idx], meta.ExtraNetworks[idx+1:]...)
 	if err := WriteSiteMetadata(siteName, *meta); err != nil {
 		return nil, fmt.Errorf("write metadata: %w", err)
 	}

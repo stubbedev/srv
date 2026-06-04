@@ -26,6 +26,8 @@ var wantTools = []string{
 	"add_site", "start_site", "stop_site", "restart_site", "remove_site",
 	"add_alias", "remove_alias", "set_internal_listener",
 	"add_volume", "remove_volume",
+	// routes + networks
+	"add_route", "remove_route", "attach_network", "detach_network",
 }
 
 // TestNewServerRegistersTools spins up the server over an in-memory transport,
