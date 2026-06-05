@@ -145,35 +145,13 @@ type composeBuild struct {
 // composeService represents one service in a generated docker-compose.yml.
 // Image XOR Build is set depending on whether the site has a Dockerfile.
 type composeService struct {
-	ContainerName string              `yaml:"container_name"`
-	Image         string              `yaml:"image,omitempty"`
-	Build         *composeBuild       `yaml:"build,omitempty"`
-	Volumes       []composeVolume     `yaml:"volumes,omitempty"`
-	Labels        map[string]string   `yaml:"labels"`
-	Networks      []string            `yaml:"networks"`
-	Restart       string              `yaml:"restart"`
-	HealthCheck   *composeHealthCheck `yaml:"healthcheck,omitempty"`
-}
-
-// composeHealthCheck mirrors the compose healthcheck shape.
-type composeHealthCheck struct {
-	Test        []string `yaml:"test"`
-	Interval    string   `yaml:"interval,omitempty"`
-	Timeout     string   `yaml:"timeout,omitempty"`
-	StartPeriod string   `yaml:"start_period,omitempty"`
-	Retries     int      `yaml:"retries,omitempty"`
-}
-
-// makeComposeHealthCheck builds a TCP-probe healthcheck for the given port.
-// busybox `nc` ships in every alpine image srv currently uses.
-func makeComposeHealthCheck(port int) *composeHealthCheck {
-	return &composeHealthCheck{
-		Test:        []string{"CMD-SHELL", fmt.Sprintf("nc -z 127.0.0.1 %d || exit 1", port)},
-		Interval:    "30s",
-		Timeout:     "3s",
-		StartPeriod: "5s",
-		Retries:     3,
-	}
+	ContainerName string            `yaml:"container_name"`
+	Image         string            `yaml:"image,omitempty"`
+	Build         *composeBuild     `yaml:"build,omitempty"`
+	Volumes       []composeVolume   `yaml:"volumes,omitempty"`
+	Labels        map[string]string `yaml:"labels"`
+	Networks      []string          `yaml:"networks"`
+	Restart       string            `yaml:"restart"`
 }
 
 // composeNetwork represents one network entry in the top-level networks: map.
@@ -258,10 +236,9 @@ func buildStaticComposeConfig(project, containerName, projectPath, nginxConfPath
 						ReadOnly: true,
 					},
 				},
-				Labels:      labels,
-				Networks:    []string{constants.TraefikSubdir},
-				Restart:     constants.RestartUnlessStopped,
-				HealthCheck: makeComposeHealthCheck(80),
+				Labels:   labels,
+				Networks: []string{constants.TraefikSubdir},
+				Restart:  constants.RestartUnlessStopped,
 			},
 		},
 		Networks: map[string]composeNetwork{
