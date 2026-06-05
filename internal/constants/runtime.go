@@ -13,6 +13,10 @@ package constants
 const (
 	// ImageNginxAlpine is the nginx alpine Docker image.
 	ImageNginxAlpine = "nginx:alpine"
+	// ImageNginxAlpineSlim is the slimmed nginx alpine image (~12MB vs ~50MB):
+	// it drops the perl/njs/geoip/image-filter/xslt modules but keeps the core
+	// proxy, http_ssl, and resolver directives the fallback sidecar needs.
+	ImageNginxAlpineSlim = "nginx:alpine-slim"
 	// NginxPort is the default nginx listen port.
 	NginxPort = 80
 	// NginxHTMLPath is the nginx static files path.

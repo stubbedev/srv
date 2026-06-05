@@ -240,7 +240,7 @@ type fbComposeFile struct {
 // container primary by name, and is reached by Traefik by its own name.
 func renderFallbackCompose(spec fallbackSpec, nginxConfDir, networkName string) string {
 	svc := &fbComposeService{
-		Image:         constants.ImageNginxAlpine,
+		Image:         constants.ImageNginxAlpineSlim,
 		ContainerName: fallbackContainerName(spec.Name),
 		Restart:       "unless-stopped",
 		Volumes:       []string{nginxConfDir + "/nginx.conf:/etc/nginx/conf.d/default.conf:ro"},
