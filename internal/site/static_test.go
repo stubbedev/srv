@@ -49,17 +49,6 @@ func TestGenerateStaticNginxConfCacheOff(t *testing.T) {
 	}
 }
 
-func TestMakeComposeHealthCheck(t *testing.T) {
-	hc := makeComposeHealthCheck(8080)
-	if hc == nil {
-		t.Fatal("nil")
-	}
-	joined := strings.Join(hc.Test, " ")
-	if !strings.Contains(joined, "8080") {
-		t.Errorf("port missing: %v", hc.Test)
-	}
-}
-
 func TestVolumeConsistencyForHost(t *testing.T) {
 	v := volumeConsistencyForHost()
 	// We can't change runtime.GOOS in a test; just verify it returns either

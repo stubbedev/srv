@@ -93,10 +93,9 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 					Context:    meta.ProjectPath,
 					Dockerfile: constants.DockerfileFile,
 				},
-				Labels:      labels,
-				Networks:    []string{constants.TraefikSubdir},
-				Restart:     constants.RestartUnlessStopped,
-				HealthCheck: makeComposeHealthCheck(info.Port),
+				Labels:   labels,
+				Networks: []string{constants.TraefikSubdir},
+				Restart:  constants.RestartUnlessStopped,
 			},
 		},
 		Networks: map[string]composeNetwork{
