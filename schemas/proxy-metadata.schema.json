@@ -71,28 +71,34 @@
   },
   "properties": {
     "schema_version": {
-      "type": "integer"
+      "type": "integer",
+      "description": "metadata.yml schema version (1 = current)."
     },
     "name": {
-      "type": "string"
+      "type": "string",
+      "description": "Proxy name; also the basename of the generated proxy-\u003cname\u003e.yml."
     },
     "domains": {
       "items": {
         "type": "string"
       },
-      "type": "array"
+      "type": "array",
+      "description": "All hostnames routed to this proxy; the first entry is canonical."
     },
     "wildcard": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Match apex + one-level subdomains (*.example.com); local proxies only."
     },
     "is_local": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt."
     },
     "routes": {
       "items": {
         "$ref": "#/$defs/Route"
       },
-      "type": "array"
+      "type": "array",
+      "description": "Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`."
     }
   },
   "additionalProperties": false,

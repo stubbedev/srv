@@ -373,27 +373,27 @@ func TestHasListener(t *testing.T) {
 }
 
 func TestAddInternalListenerLabels(t *testing.T) {
-	labels := buildTraefikLabels("kontainer", []string{"a.test", "b.test"}, true, true, 80)
-	addInternalListenerLabels(labels, "kontainer", []string{"a.test", "b.test"}, true)
+	labels := buildTraefikLabels("myapp", []string{"a.test", "b.test"}, true, true, 80)
+	addInternalListenerLabels(labels, "myapp", []string{"a.test", "b.test"}, true)
 
 	wantKeys := []string{
-		"traefik.http.routers.kontainer-internal.rule",
-		"traefik.http.routers.kontainer-internal.entrypoints",
-		"traefik.http.routers.kontainer-internal.service",
+		"traefik.http.routers.myapp-internal.rule",
+		"traefik.http.routers.myapp-internal.entrypoints",
+		"traefik.http.routers.myapp-internal.service",
 	}
 	for _, k := range wantKeys {
 		if _, ok := labels[k]; !ok {
 			t.Errorf("missing label %q", k)
 		}
 	}
-	if labels["traefik.http.routers.kontainer-internal.entrypoints"] != "internal" {
-		t.Errorf("expected entrypoints=internal, got %q", labels["traefik.http.routers.kontainer-internal.entrypoints"])
+	if labels["traefik.http.routers.myapp-internal.entrypoints"] != "internal" {
+		t.Errorf("expected entrypoints=internal, got %q", labels["traefik.http.routers.myapp-internal.entrypoints"])
 	}
-	if labels["traefik.http.routers.kontainer-internal.service"] != "kontainer" {
-		t.Errorf("expected service=kontainer (shared with HTTPS router), got %q", labels["traefik.http.routers.kontainer-internal.service"])
+	if labels["traefik.http.routers.myapp-internal.service"] != "myapp" {
+		t.Errorf("expected service=myapp (shared with HTTPS router), got %q", labels["traefik.http.routers.myapp-internal.service"])
 	}
 	// The internal router must reuse the same multi-host rule as the HTTPS one.
-	if labels["traefik.http.routers.kontainer-internal.rule"] != labels["traefik.http.routers.kontainer.rule"] {
+	if labels["traefik.http.routers.myapp-internal.rule"] != labels["traefik.http.routers.myapp.rule"] {
 		t.Errorf("internal router rule diverged from HTTPS rule")
 	}
 }

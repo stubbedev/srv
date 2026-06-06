@@ -23,7 +23,7 @@ func TestScheduleReload_Debounces(t *testing.T) {
 
 	delay := 50 * time.Millisecond
 	for i := 0; i < 5; i++ {
-		s.scheduleReload("kontainer", delay, fire)
+		s.scheduleReload("myapp", delay, fire)
 		time.Sleep(5 * time.Millisecond) // well inside debounce window
 	}
 

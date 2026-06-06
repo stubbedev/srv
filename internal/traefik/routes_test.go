@@ -19,7 +19,7 @@ func TestResolveUpstreamURL(t *testing.T) {
 		{name: "localhost requires port", kind: "localhost", wantErr: "requires a port"},
 		{name: "container ok", kind: "container", container: "redis", port: 6379, want: "http://redis:6379"},
 		{name: "container missing both", kind: "container", wantErr: "requires container and port"},
-		{name: "url ok", kind: "url", urlStr: "https://kontainer.com", want: "https://kontainer.com"},
+		{name: "url ok", kind: "url", urlStr: "https://myapp.com", want: "https://myapp.com"},
 		{name: "url missing", kind: "url", wantErr: "requires url"},
 		{name: "url bad scheme", kind: "url", urlStr: "ftp://x", wantErr: "must start with http"},
 		{name: "unknown", kind: "bogus", wantErr: "unknown upstream kind"},

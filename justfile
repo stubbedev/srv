@@ -91,6 +91,17 @@ sync-docs:
         echo "sync-docs: already in sync"
     fi
 
+# Regenerate the marker-delimited README sections (CLI, MCP, config) from source
+sync-readme:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    go run ./cmd/gen-readme
+    if [ -n "$(git status --porcelain README.md)" ]; then
+        echo "sync-readme: regenerated README.md"
+    else
+        echo "sync-readme: already in sync"
+    fi
+
 # Keep flake.nix's `vendorHash` aligned with the current go.sum.
 #
 # A sha256 of go.sum is embedded as a `# go-sum:` line in flake.nix. When
@@ -144,7 +155,7 @@ sync-flake force="":
 
 # Run all checks — useful for CI parity and pre-push. Mirrors treeman:
 # lint (fmt+vet+run), tests, and the generated-artifact sync recipes.
-check: lint test schemas sync-docs sync-flake
+check: lint test schemas sync-docs sync-readme sync-flake
 
 # Run tests.
 # -timeout 60s caps every package so a hung test is visible in seconds

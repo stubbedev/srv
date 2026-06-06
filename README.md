@@ -109,54 +109,53 @@ srv add /var/www/myapp --domain example.com
 > The summary tables below cover the most common operations; everything below
 > exists for muscle memory and quick scanning.
 
-### Sites
+<!-- BEGIN:cli -->
+### Site Commands
 
 | Command | Description |
 |---------|-------------|
-| `srv add PATH` | Add a site (static, compose, or Dockerfile — auto-detected) |
-| `srv remove SITE` | Remove a site and stop its containers |
-| `srv start SITE` | Start a site's containers |
-| `srv stop SITE` | Stop a site's containers |
-| `srv restart SITE` | Restart a site's containers |
-| `srv reload SITE` | Re-apply metadata.yml without restarting (`--restart` to also restart) |
-| `srv validate SITE` | Validate a site's metadata.yml without applying |
-| `srv list` | List all registered sites |
-| `srv info SITE` | Show detailed site information |
-| `srv logs SITE` | View site container logs (`--all` to multiplex every site) |
-| `srv shell SITE` | Open an interactive shell in the site's container |
-| `srv alias add\|remove\|list SITE` | Manage extra hostnames mapped to the same site |
-| `srv internal enable\|disable\|list SITE` | Toggle the plain-HTTP `:88` listener for a site |
-| `srv route add\|remove\|list SITE` | Attach path-prefix / regex-rewrite routers to a site |
-| `srv network attach\|detach\|list SITE` | Attach the site's container to extra Docker networks |
-| `srv volume add\|remove\|list SITE` | Mount extra host directories into the site's container |
+| `srv add PATH` | Add a site |
+| `srv alias <add\|list\|remove>` | Manage extra hostnames for a site |
+| `srv info SITE` | Show site info |
+| `srv internal <disable\|enable\|list>` | Manage the plain-HTTP internal listener (port 88) for a site |
+| `srv list` | List all sites |
+| `srv logs [SITE]` | Show site logs |
+| `srv network <attach\|detach\|list>` | Manage extra Docker networks attached to a site |
+| `srv open SITE` | Open a site in the default browser |
+| `srv reload [SITE]` | Re-apply a site's metadata.yml without restarting (unless --restart) |
+| `srv remove SITE` | Remove a site |
+| `srv restart SITE` | Restart a site |
+| `srv route <add\|list\|remove>` | Manage extra Traefik routers attached to a site |
+| `srv shell SITE` | Open an interactive shell in a site's container |
+| `srv start SITE` | Start a site |
+| `srv stop SITE` | Stop a site |
+| `srv validate [SITE]` | Validate a site's metadata.yml without applying changes |
+| `srv volume <add\|list\|remove>` | Manage extra host bind-mounts attached to a site |
 
-### Proxies & redirects
-
-| Command | Description |
-|---------|-------------|
-| `srv proxy add` | Create a proxy to a localhost port or container (`--fallback` for 5xx remote failover) |
-| `srv proxy remove NAME` | Remove a proxy |
-| `srv proxy list` | List all proxies |
-| `srv redirect add` | 301/302 redirect a domain to another URL (path + query preserved). `--dns-only` for a DNS-layer A-record swap with no TLS or Traefik |
-| `srv redirect remove NAME` | Remove a redirect |
-| `srv redirect list` | List all redirects |
-| `srv redirect reload` | Re-apply every `redirect-*.yml` (re-resolves DNS-only targets, refreshes certs) |
-
-### System
+### Proxy Commands
 
 | Command | Description |
 |---------|-------------|
-| `srv install` | Install srv environment (Docker network, Traefik, DNS) |
+| `srv proxy <add\|list\|remove>` | Manage proxy routes |
+| `srv redirect <add\|list\|reload\|remove>` | Manage HTTP redirects |
+
+### System Commands
+
+| Command | Description |
+|---------|-------------|
+| `srv daemon <install\|logs\|restart\|start\|status\|stop\|uninstall>` | Manage the srv daemon |
 | `srv doctor` | Run diagnostic checks |
-| `srv update` | Update Traefik and DNS images |
-| `srv paths` | Show configuration paths |
-| `srv version` | Show version information |
+| `srv import <valet>` | Import site configurations from other tools |
+| `srv install` | Install srv environment |
+| `srv mcp` | Start the srv MCP server (stdio) |
+| `srv metrics <disable\|enable\|status>` | Manage the optional metrics stack (prometheus + grafana) |
+| `srv paths` | Show config paths |
 | `srv uninstall` | Completely remove srv from the system |
-| `srv completion` | Generate shell autocompletion script |
-| `srv import valet` | Translate `~/.config/valet/Nginx/*` (or `~/.valet/Nginx/*`) into srv commands |
-| `srv metrics enable\|disable\|status` | Opt-in Prometheus + Grafana stack scraping Traefik |
-| `srv daemon start\|stop\|restart\|status\|logs\|install\|uninstall` | Manage the watch daemon |
-| `srv mcp` | Start the [Model Context Protocol](#mcp-server) server on stdio so AI agents can drive srv |
+| `srv update` | Update Traefik and DNS images |
+<!-- END:cli -->
+
+> This table is generated from the command tree by `go run ./cmd/gen-readme`.
+> Run `just sync-readme` after touching a subcommand to refresh it.
 
 ## `srv add`
 
@@ -328,16 +327,16 @@ local DNS server.
 
 301 (permanent, default) or 302 (temporary) redirects. The request path
 and query string are appended to the target, so
-`https://jira.konform.com/browse/X?y=1` lands on
-`https://jira.kontainer.com/browse/X?y=1`.
+`https://jira.example.com/browse/X?y=1` lands on
+`https://jira.myapp.com/browse/X?y=1`.
 
 ```bash
-srv redirect add --domain jira.konform.com --to https://jira.kontainer.com
+srv redirect add --domain jira.example.com --to https://jira.myapp.com
 srv redirect add -d old.test --to https://new.test --temporary
 srv redirect add -d legacy.test --to https://new.test --wildcard
 
 srv redirect list
-srv redirect remove jira-konform-com
+srv redirect remove jira-example-com
 ```
 
 A mkcert-signed certificate is provisioned for the source domain so
@@ -349,11 +348,11 @@ Skip mkcert and Traefik entirely. The source hostname is pinned to the
 target's resolved IP via a dnsmasq `address=` record:
 
 ```bash
-srv redirect add --domain jira.konform.com.test --to jira.kontainer.com --dns-only
+srv redirect add --domain jira.example.com.test --to jira.myapp.com --dns-only
 ```
 
 The client never sees an HTTP 301 — it sends a request directly to the
-target's IP with `Host: jira.konform.com.test`. Whether the user-visible
+target's IP with `Host: jira.example.com.test`. Whether the user-visible
 URL changes depends on what the backend does with that `Host:` header.
 
 | | `--dns-only` | default (HTTP 301/302) |
@@ -373,15 +372,15 @@ Run one container under many hostnames — handy for multi-tenant apps where
 every tenant maps to the same project:
 
 ```bash
-srv add ~/git/work/kontainer \
-  --domain kontainer.test \
-  --alias  cms-kontainer.test \
-  --alias  jira.konform.com.test \
+srv add ~/git/work/myapp \
+  --domain myapp.test \
+  --alias  cms-myapp.test \
+  --alias  jira.example.com.test \
   --local --wildcard
 
-srv alias add kontainer jira-staging.test
-srv alias remove kontainer jira-staging.test
-srv alias list kontainer
+srv alias add myapp jira-staging.test
+srv alias remove myapp jira-staging.test
+srv alias list myapp
 ```
 
 A single mkcert certificate covers every alias; all hostnames register
@@ -389,7 +388,7 @@ with dnsmasq; the Traefik router OR-joins every Host rule.
 
 ## Internal plain-HTTP listener
 
-Container-to-host calls often want to reach `https://kontainer.test` from
+Container-to-host calls often want to reach `https://myapp.test` from
 another container, but the in-container client doesn't trust the mkcert
 CA. srv exposes a second Traefik entrypoint on `:88` that serves the same
 routers without TLS:
@@ -414,10 +413,10 @@ upstreams:
 
 ```bash
 # Path-prefix split (e.g. WebSocket on /app)
-srv route add kontainer.test --path /app --port 6001
+srv route add myapp.test --path /app --port 6001
 
 # Regex rewrite
-srv route add kontainer.test \
+srv route add myapp.test \
   --path-regex '^/videos/([^/]+)/(.+)$' \
   --rewrite     '/abs/videos/$1/$2' \
   --port 9080 --preserve-host
@@ -426,8 +425,8 @@ srv route add kontainer.test \
 srv route add api.test --path /v2 --container backend-v2:3000
 srv route add docs.test --path /sdk --url https://sdk.example.com
 
-srv route list kontainer.test
-srv route remove kontainer.test app
+srv route list myapp.test
+srv route remove myapp.test app
 ```
 
 Routes are persisted in the site's `metadata.yml` under `routes:` and
@@ -697,30 +696,45 @@ Or from the CLI: `code --add-mcp '{"name":"srv","command":"srv","args":["mcp"]}'
 }
 ```
 
+<!-- BEGIN:mcp -->
 Available tools, by tier:
 
 | Tier | Tool | Description |
 |---|---|---|
-| core | `version` | srv binary version + commit + build date |
-| core | `srv_activate` | Unlock the `read` or `write` tool tier (see above) |
-| read | `paths` | Config paths (`~/.config/srv`, traefik conf dir, etc.) |
-| read | `list_sites` | All registered sites with name, domain, type, status |
-| read | `get_site` | Full metadata for one site |
-| read | `validate_site` | Parse + validate a site's metadata.yml |
-| read | `list_proxies` / `get_proxy` | Proxy inventory + per-proxy metadata |
-| read | `list_redirects` | Redirect inventory |
-| read | `daemon_status` / `daemon_log` | Watch-daemon status + log tail |
-| read | `metrics_status` | Prometheus + Grafana stack status |
-| write | `add_site` / `remove_site` | Register / delete a site |
-| write | `start_site` / `stop_site` / `restart_site` | Container lifecycle |
-| write | `reload_site` | Re-apply a site's metadata.yml without restart |
-| write | `add_alias` / `remove_alias` | Site hostname aliases |
-| write | `add_volume` / `remove_volume` | Site bind-mounts |
-| write | `set_internal_listener` | Toggle the plain-HTTP entrypoint |
-| write | `add_proxy` / `remove_proxy` | Create / delete a proxy |
-| write | `add_redirect` / `remove_redirect` | Create / delete a redirect |
-| write | `add_route` / `remove_route` | Traefik path/regex routes |
-| write | `attach_network` / `detach_network` | Docker network attachments |
+| core | `srv_activate` | Unlock a tier of srv tools. |
+| core | `version` | Return the srv version, commit, and build date. |
+| read | `daemon_log` | Return the tail of the daemon log (default 50 lines, override with `lines`). |
+| read | `daemon_status` | Report whether the srv watch daemon is installed and running, plus its raw service-manager status (systemd/launchd). |
+| read | `get_proxy` | Return full metadata for one proxy: domains, aliases, wildcard flag, is_local flag, attached routes. |
+| read | `get_site` | Return full metadata for one site: domains, aliases, routes, mounts, internal-http flag, network attachments, container status, type, project dir. |
+| read | `list_proxies` | List every srv-managed proxy by name. |
+| read | `list_redirects` | List every srv-managed redirect by name. |
+| read | `list_sites` | List every registered site with name, canonical domain, type (static/dockerfile/compose), is_local flag, and container status. |
+| read | `metrics_status` | Report whether the metrics stack (Prometheus + Grafana) containers are running, with their dashboard domains. |
+| read | `paths` | Return the on-disk paths srv writes to (config root, sites dir, traefik conf dir, proxies dir). |
+| read | `validate_site` | Parse a site's metadata.yml and report whether it's valid. |
+| write | `add_alias` | Add an extra hostname (alias) to a site. |
+| write | `add_proxy` | Create a proxy routing a domain to a localhost port or a Docker container (container="name:port"). |
+| write | `add_redirect` | Create a redirect. |
+| write | `add_route` | Attach an extra Traefik route (path-prefix or regex) to a site or proxy `target`. |
+| write | `add_site` | Register a new site from a project directory and start it. |
+| write | `add_volume` | Attach an extra host bind-mount to a site's container. |
+| write | `attach_network` | Attach an existing Docker network to a site so its container can reach services on that network. |
+| write | `detach_network` | Detach an extra Docker network from a site. |
+| write | `reload_site` | Re-apply a site's metadata.yml without restarting the container. |
+| write | `remove_alias` | Remove an alias hostname from a site (the canonical first domain cannot be removed this way). |
+| write | `remove_proxy` | Remove a proxy: deletes its Traefik config, local cert, DNS registration, and metadata. |
+| write | `remove_redirect` | Remove a redirect (HTTP or DNS-only): deletes its yaml and any derived cert/DNS state. |
+| write | `remove_route` | Remove an extra route by id from a site or proxy `target`. |
+| write | `remove_site` | Remove a site: stop its containers and delete its Traefik config, local cert, DNS registrations, and metadata directory. |
+| write | `remove_volume` | Detach a bind-mount from a site by its container target path. |
+| write | `restart_site` | Restart a site's containers, regenerating artifacts first. |
+| write | `set_internal_listener` | Enable or disable the plain-HTTP `internal` entrypoint for a site (enable=true/false). |
+| write | `start_site` | Start a site's containers (docker compose up). |
+| write | `stop_site` | Stop a site's containers (docker compose stop). |
+<!-- END:mcp -->
+
+> This table is generated from the live MCP server by `go run ./cmd/gen-readme`.
 
 ## Declarative config files
 
@@ -728,28 +742,100 @@ Every site, proxy, and redirect lives in a single yaml file under
 `~/.config/srv/`. The daemon watches them and re-applies changes within
 ~300ms.
 
+The field reference below is generated from the Go structs (the same source as
+the published [JSON Schemas](schemas/)), so it always matches the binary.
+
+<!-- BEGIN:config -->
+#### Site — `metadata.yml`
+
+_Path: `~/.config/srv/sites/<name>/metadata.yml`_
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schema_version` | integer | no | metadata.yml schema version (1 = current). |
+| `type` | string | no | Site runtime type. |
+| `domains` | array<string> | no | All hostnames; the first entry is canonical. |
+| `project_path` | string | no | Absolute path to the project on disk. |
+| `service_name` | string | no | Container name used for Traefik routing. |
+| `compose_service_name` | string | no | docker-compose service name (for compose commands). |
+| `profile` | string | no | docker-compose profile (if the service uses profiles). |
+| `port` | integer | no | Port the service listens on inside the container. |
+| `is_local` | boolean | no | Whether to use a locally-issued (mkcert) SSL certificate. |
+| `wildcard` | boolean | no | Match apex + one-level subdomains (*.example.com). |
+| `network_name` | string | no | Docker network the site joins. |
+| `extra_networks` | array<string> | no | Extra external Docker networks the site joins (for reaching user-managed containers like mysql01). |
+| `volumes` | array<object> | no | Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile |
+| `listeners` | array<string> | no | Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88). |
+| `routes` | array<object> | no | Extra Traefik routers (path-prefix / regex-rewrite splits). |
+| `spa` | boolean | no | Single-page-app mode (fall back to /index.html). |
+| `cache` | boolean | no | Emit aggressive caching headers for static assets. |
+| `cors` | boolean | no | Emit permissive CORS headers. |
+| `dockerfile_port` | integer | no | Port discovered from the Dockerfile EXPOSE directive. |
+
+#### Proxy — `proxy-<name>.yml`
+
+_Path: `~/.config/srv/proxies/proxy-<name>.yml`_
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schema_version` | integer | no | metadata.yml schema version (1 = current). |
+| `name` | string | no | Proxy name; also the basename of the generated proxy-<name>.yml. |
+| `domains` | array<string> | no | All hostnames routed to this proxy; the first entry is canonical. |
+| `wildcard` | boolean | no | Match apex + one-level subdomains (*.example.com); local proxies only. |
+| `is_local` | boolean | no | Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt. |
+| `routes` | array<object> | no | Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`. |
+
+#### DNS-only redirect
+
+_Path: `~/.config/srv/traefik/conf.d/redirect-<name>.yml`_
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `dns` | object | no | source → target hostname pair for the DNS-layer redirect. |
+
+#### User config — `config.yml`
+
+_Path: `~/.config/srv/config.yml`_
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `parked_paths` | array<string> | no | Directories that 'srv park' watches for new sites. |
+| `upstream_dns` | array<string> | no | Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty. |
+<!-- END:config -->
+
+> The field tables above are generated by `go run ./cmd/gen-readme`.
+
+Examples:
+
 ```yaml
-# DNS-only redirect — two-key schema
-dns:
-  source: jira.konform.com.test
-  target: jira.kontainer.com
+# sites/app/metadata.yml — a compose site on a local domain
+type: compose
+domains: [app.example.test]
+is_local: true
 ```
 
 ```yaml
-# HTTP redirect — full Traefik dynamic config (file provider hot-reloads on save)
+# traefik/conf.d/redirect-old.yml — DNS-only redirect (A-record swap, no TLS)
+dns:
+  source: old.example.test
+  target: new.example.com
+```
+
+```yaml
+# traefik/conf.d/redirect-jira.yml — HTTP 301 redirect (file provider hot-reloads on save)
 http:
   routers:
-    redirect-jira-konform-com-test:
-      rule: Host(`jira.konform.com.test`)
+    redirect-jira-example-test:
+      rule: Host(`jira.example.test`)
       entryPoints: [websecure]
-      service: redirect-jira-konform-com-test-noop
-      middlewares: [redirect-jira-konform-com-test-mw]
+      service: redirect-jira-example-test-noop
+      middlewares: [redirect-jira-example-test-mw]
       tls: {}
   middlewares:
-    redirect-jira-konform-com-test-mw:
+    redirect-jira-example-test-mw:
       redirectRegex:
         regex: ^https?://[^/]+/?(.*)$
-        replacement: https://jira.kontainer.com/$1
+        replacement: https://jira.example.com/$1
         permanent: true
 ```
 

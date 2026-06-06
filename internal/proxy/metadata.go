@@ -24,12 +24,18 @@ import (
 // the canonical domain (+ aliases), local-CA flag, wildcard flag, and any
 // attached routes. Stored at ~/.config/srv/proxies/<name>/metadata.yml.
 type Metadata struct {
-	SchemaVersion int          `yaml:"schema_version,omitempty"`
-	Name          string       `yaml:"name"`
-	Domains       []string     `yaml:"domains"`
-	Wildcard      bool         `yaml:"wildcard,omitempty"`
-	IsLocal       bool         `yaml:"is_local,omitempty"`
-	Routes        []site.Route `yaml:"routes,omitempty"`
+	// metadata.yml schema version (1 = current).
+	SchemaVersion int `yaml:"schema_version,omitempty"`
+	// Proxy name; also the basename of the generated proxy-<name>.yml.
+	Name string `yaml:"name"`
+	// All hostnames routed to this proxy; the first entry is canonical.
+	Domains []string `yaml:"domains"`
+	// Match apex + one-level subdomains (*.example.com); local proxies only.
+	Wildcard bool `yaml:"wildcard,omitempty"`
+	// Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt.
+	IsLocal bool `yaml:"is_local,omitempty"`
+	// Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`.
+	Routes []site.Route `yaml:"routes,omitempty"`
 }
 
 const currentSchemaVersion = 1
