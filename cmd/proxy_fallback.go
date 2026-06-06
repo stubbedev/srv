@@ -24,7 +24,7 @@ type fallbackSpec struct {
 	Name            string // proxy name (used in container + dir names)
 	PrimaryHost     string // host the sidecar dials for the primary upstream
 	PrimaryPort     string
-	FallbackURL     string // e.g. https://kontainer.com
+	FallbackURL     string // e.g. https://myapp.com
 	FallbackTimeout string // e.g. 2s
 	// HostNetwork runs the sidecar in the host network namespace so it can
 	// reach a primary upstream bound to 127.0.0.1. Required on Linux for a

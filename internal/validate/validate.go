@@ -113,7 +113,7 @@ func ContainerName(name string) error {
 }
 
 // ProxyName validates a proxy name. Proxy names may contain periods because
-// they are often derived from domain names (e.g. "kontainer.com").
+// they are often derived from domain names (e.g. "myapp.com").
 func ProxyName(name string) error {
 	if name == "" {
 		return fmt.Errorf("proxy name cannot be empty")

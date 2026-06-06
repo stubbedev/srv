@@ -347,14 +347,14 @@ type importGroup struct {
 
 func buildImportPlan(sites []*valet.Site) []importStep {
 	var plan []importStep
-	// Group by project path so multi-host kontainer-style sites collapse into
+	// Group by project path so multi-host myapp-style sites collapse into
 	// one srv add with --alias entries. Proxies are not grouped (their target
 	// upstream is what makes them unique).
 	//
 	// Stale park stubs (sites whose project path was only found by stripping
 	// hyphen-segments off the domain) are NOT folded as aliases — the user's
-	// stack typically has `kontainer-8080.test`, `kontainer-canva.test`, etc.
-	// that all resolve to the same `kontainer` project by coincidence. They
+	// stack typically has `myapp-8080.test`, `myapp-canva.test`, etc.
+	// that all resolve to the same `myapp` project by coincidence. They
 	// should be skipped, not silently aliased.
 	groups := map[string]*importGroup{}
 	var order []string

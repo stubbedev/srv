@@ -121,8 +121,8 @@ func TestValidateProxyNameBranches(t *testing.T) {
 	if err := ValidateProxyName("bad name"); err == nil {
 		t.Error("expected err for spaces")
 	}
-	if err := ValidateProxyName("kontainer.com"); err != nil {
-		t.Errorf("kontainer.com should be valid, got %v", err)
+	if err := ValidateProxyName("myapp.com"); err != nil {
+		t.Errorf("myapp.com should be valid, got %v", err)
 	}
 	long := strings.Repeat("a", 254)
 	if err := ValidateProxyName(long); err == nil {

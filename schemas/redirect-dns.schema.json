@@ -5,10 +5,12 @@
     "DNSBlock": {
       "properties": {
         "source": {
-          "type": "string"
+          "type": "string",
+          "description": "Hostname dnsmasq pins (the user-visible source domain)."
         },
         "target": {
-          "type": "string"
+          "type": "string",
+          "description": "Bare hostname the source resolves to; re-resolved on `srv redirect reload`."
         }
       },
       "additionalProperties": false,
@@ -18,7 +20,8 @@
   },
   "properties": {
     "dns": {
-      "$ref": "#/$defs/DNSBlock"
+      "$ref": "#/$defs/DNSBlock",
+      "description": "source → target hostname pair for the DNS-layer redirect."
     }
   },
   "additionalProperties": false,

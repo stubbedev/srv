@@ -818,8 +818,8 @@ The incoming request path and query string are preserved and appended to the
 target URL. Both http:// and https:// requests are redirected.
 
 Examples:
-  # Redirect jira.konform.com to jira.kontainer.com (301 permanent)
-  srv redirect add --domain jira.konform.com --to https://jira.kontainer.com
+  # Redirect jira.example.com to jira.myapp.com (301 permanent)
+  srv redirect add --domain jira.example.com --to https://jira.myapp.com
 
   # Temporary (302) redirect
   srv redirect add -d old.test --to https://new.test --temporary

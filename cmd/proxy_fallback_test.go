@@ -147,10 +147,10 @@ func TestRenderFallbackNginxDefaultTimeout(t *testing.T) {
 
 func TestRenderFallbackNginx(t *testing.T) {
 	conf, err := renderFallbackNginx(fallbackSpec{
-		Name:            "kontainer",
+		Name:            "myapp",
 		PrimaryHost:     "host.docker.internal",
 		PrimaryPort:     "3001",
-		FallbackURL:     "https://kontainer.com",
+		FallbackURL:     "https://myapp.com",
 		FallbackTimeout: "3s",
 	})
 	if err != nil {
@@ -161,7 +161,7 @@ func TestRenderFallbackNginx(t *testing.T) {
 		"error_page 502 503 504 = @fallback;",
 		"location @fallback {",
 		"proxy_pass https://$fb_host:443$request_uri;",
-		`set $fb_host "kontainer.com";`,
+		`set $fb_host "myapp.com";`,
 		"proxy_connect_timeout 3s;",
 		"proxy_ssl_server_name on;",
 	}

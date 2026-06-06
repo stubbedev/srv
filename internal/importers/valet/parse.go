@@ -52,7 +52,7 @@ type Site struct {
 	UnknownNotes []string // Anything the parser saw but couldn't translate
 	// Stale is set when this is a Valet "park stub" the resolver could only
 	// match by stripping hyphen-segments off the domain (e.g. the project
-	// `kontainer` happened to be reachable as `kontainer-8080.test` via prefix
+	// `myapp` happened to be reachable as `myapp-8080.test` via prefix
 	// stripping). Such stubs are typically vestigial and should not be folded
 	// into the canonical site as aliases.
 	Stale bool
@@ -137,7 +137,7 @@ func ParseFile(path, sitesDir string, parkedPaths []string) (*Site, error) {
 	}
 
 	// Expand `include` snippets inline before parsing the block so location
-	// definitions that live in a sibling file (e.g. _kontainer-video-bypass.conf)
+	// definitions that live in a sibling file (e.g. _myapp-video-bypass.conf)
 	// surface as routes on this site.
 	primary = expandIncludes(primary, filepath.Dir(path))
 
@@ -300,7 +300,7 @@ func parsePrimaryBlock(block string, site *Site) {
 	}
 }
 
-// resolveValetProjectPath turns a domain like "cms-kontainer.test" into the
+// resolveValetProjectPath turns a domain like "cms-myapp.test" into the
 // project directory. Valet maps hosts onto projects two ways:
 //
 //  1. Linked sites: ~/.valet/Sites/<name> is a symlink to the project dir.
@@ -321,8 +321,8 @@ func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) (str
 	}
 
 	// Generate all candidates: full label, then each hyphen-delimited
-	// suffix (cms-kontainer → kontainer) and prefix (kontainer-8080 →
-	// kontainer), then each single segment.
+	// suffix (cms-myapp → myapp) and prefix (myapp-8080 →
+	// myapp), then each single segment.
 	seen := map[string]bool{}
 	var candidates []string
 	add := func(s string) {

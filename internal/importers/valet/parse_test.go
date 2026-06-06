@@ -9,15 +9,15 @@ import (
 
 func TestParseFile_PHP(t *testing.T) {
 	dir := t.TempDir()
-	nginxPath := filepath.Join(dir, "cms-kontainer.test")
+	nginxPath := filepath.Join(dir, "cms-myapp.test")
 	conf := `server {
     listen 80;
-    server_name cms-kontainer.test www.cms-kontainer.test *.cms-kontainer.test;
+    server_name cms-myapp.test www.cms-myapp.test *.cms-myapp.test;
     return 301 https://$host$request_uri;
 }
 server {
     listen 443 ssl http2;
-    server_name cms-kontainer.test www.cms-kontainer.test *.cms-kontainer.test;
+    server_name cms-myapp.test www.cms-myapp.test *.cms-myapp.test;
     client_max_body_size 2G;
 
     location / {
@@ -32,7 +32,7 @@ server {
 }
 server {
     listen 88;
-    server_name cms-kontainer.test;
+    server_name cms-myapp.test;
     location ~ \.php$ {
         fastcgi_pass unix:/tmp/valet.sock;
     }
@@ -42,7 +42,7 @@ server {
 		t.Fatal(err)
 	}
 
-	// Fake sites dir with a "kontainer" symlink pointing to a real path.
+	// Fake sites dir with a "myapp" symlink pointing to a real path.
 	sitesDir := filepath.Join(dir, "Sites")
 	if err := os.MkdirAll(sitesDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(projectDir, filepath.Join(sitesDir, "kontainer")); err != nil {
+	if err := os.Symlink(projectDir, filepath.Join(sitesDir, "myapp")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,8 +65,8 @@ server {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if site.Domain != "cms-kontainer.test" {
-		t.Errorf("Domain = %q, want cms-kontainer.test", site.Domain)
+	if site.Domain != "cms-myapp.test" {
+		t.Errorf("Domain = %q, want cms-myapp.test", site.Domain)
 	}
 	if !site.Wildcard {
 		t.Error("expected wildcard=true")
@@ -96,17 +96,17 @@ server {
 
 func TestParseFile_ProxyWithFallback(t *testing.T) {
 	dir := t.TempDir()
-	nginxPath := filepath.Join(dir, "kontainer.com")
+	nginxPath := filepath.Join(dir, "myapp.com")
 	conf := `server {
     listen 443 ssl http2;
-    server_name kontainer.com www.kontainer.com *.kontainer.com;
+    server_name myapp.com www.myapp.com *.myapp.com;
     location / {
         proxy_pass http://localhost:3001;
         proxy_intercept_errors on;
         error_page 502 503 504 = @prod_fallback;
     }
     location @prod_fallback {
-        set $prod_upstream "kontainer.com";
+        set $prod_upstream "myapp.com";
         proxy_pass https://$prod_upstream;
     }
 }
@@ -124,17 +124,17 @@ func TestParseFile_ProxyWithFallback(t *testing.T) {
 	if site.ProxyTarget != "localhost:3001" {
 		t.Errorf("ProxyTarget = %q, want localhost:3001", site.ProxyTarget)
 	}
-	if site.FallbackURL != "https://kontainer.com" {
-		t.Errorf("FallbackURL = %q, want https://kontainer.com", site.FallbackURL)
+	if site.FallbackURL != "https://myapp.com" {
+		t.Errorf("FallbackURL = %q, want https://myapp.com", site.FallbackURL)
 	}
 }
 
 func TestParseFile_RouteSplits(t *testing.T) {
 	dir := t.TempDir()
-	nginxPath := filepath.Join(dir, "kontainer.test")
+	nginxPath := filepath.Join(dir, "myapp.test")
 	conf := `server {
     listen 443 ssl;
-    server_name kontainer.test;
+    server_name myapp.test;
     location /app {
         proxy_pass http://127.0.0.1:6001;
     }
@@ -189,11 +189,11 @@ func TestResolveValetProjectPath(t *testing.T) {
 	if err := os.MkdirAll(sitesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	project := filepath.Join(dir, "kontainer-project")
+	project := filepath.Join(dir, "myapp-project")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(project, filepath.Join(sitesDir, "kontainer")); err != nil {
+	if err := os.Symlink(project, filepath.Join(sitesDir, "myapp")); err != nil {
 		t.Fatal(err)
 	}
 	// macOS resolves /var/folders symlinks; resolveValetProjectPath returns the
@@ -207,11 +207,11 @@ func TestResolveValetProjectPath(t *testing.T) {
 		domain string
 		want   string
 	}{
-		{"kontainer.test", project},            // exact label
-		{"cms-kontainer.test", project},        // suffix peel
-		{"kontainer-8080.test", project},       // prefix peel
-		{"jira.konform.com", ""},               // no symlink
-		{"site-kontainer-extra.test", project}, // multi-segment, kontainer is in the middle
+		{"myapp.test", project},            // exact label
+		{"cms-myapp.test", project},        // suffix peel
+		{"myapp-8080.test", project},       // prefix peel
+		{"jira.example.com", ""},           // no symlink
+		{"site-myapp-extra.test", project}, // multi-segment, myapp is in the middle
 	}
 	for _, tc := range tests {
 		got, _ := resolveValetProjectPath(tc.domain, sitesDir, nil)
@@ -223,7 +223,7 @@ func TestResolveValetProjectPath(t *testing.T) {
 
 func TestResolveValetProjectPath_ExactFlag(t *testing.T) {
 	dir := t.TempDir()
-	project := filepath.Join(dir, "kontainer")
+	project := filepath.Join(dir, "myapp")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -231,17 +231,17 @@ func TestResolveValetProjectPath_ExactFlag(t *testing.T) {
 	if err := os.MkdirAll(sitesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(project, filepath.Join(sitesDir, "kontainer")); err != nil {
+	if err := os.Symlink(project, filepath.Join(sitesDir, "myapp")); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, exact := resolveValetProjectPath("kontainer.test", sitesDir, nil); !exact {
+	if _, exact := resolveValetProjectPath("myapp.test", sitesDir, nil); !exact {
 		t.Errorf("exact label should report exact=true")
 	}
-	if _, exact := resolveValetProjectPath("cms-kontainer.test", sitesDir, nil); exact {
+	if _, exact := resolveValetProjectPath("cms-myapp.test", sitesDir, nil); exact {
 		t.Errorf("suffix-peel match should report exact=false")
 	}
-	if _, exact := resolveValetProjectPath("kontainer-8080.test", sitesDir, nil); exact {
+	if _, exact := resolveValetProjectPath("myapp-8080.test", sitesDir, nil); exact {
 		t.Errorf("prefix-peel match should report exact=false")
 	}
 }
