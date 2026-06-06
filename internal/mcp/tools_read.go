@@ -33,16 +33,25 @@ func toJSONMap(v any) map[string]any {
 	return out
 }
 
-// registerReadTools binds every read-only tool to the server.
-// Reads never mutate state (no file modifications, no docker calls that
-// change container state) so they're always safe to call.
-func registerReadTools(srv *mcpsdk.Server) {
+// registerVersionTool binds the always-on `version` tool. It lives in the
+// core (tier-0) surface alongside srv_activate — advertised before any
+// activation — so an agent can identify the running build without unlocking a
+// tier. The read tier (registerReadTools) deliberately omits it to avoid a
+// duplicate registration.
+func registerVersionTool(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "version",
 		Description: "Return the srv version, commit, and build date. Call first when investigating a bug so the report includes the running build.",
 		Annotations: readOnlyAnno("srv version", false),
 	}, versionTool)
+}
 
+// registerReadTools binds every read-only inspection tool to the server (the
+// "read" tier, registered on demand by srv_activate). Reads never mutate state
+// (no file modifications, no docker calls that change container state) so
+// they're always safe to call. `version` is registered separately as a core
+// tool, so it is not included here.
+func registerReadTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "paths",
 		Description: "Return the on-disk paths srv writes to (config root, sites dir, traefik conf dir, proxies dir). Use this to locate a generated yaml file before reading it.",

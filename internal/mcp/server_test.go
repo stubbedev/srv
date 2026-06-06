@@ -8,31 +8,10 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// wantTools is the authoritative, exact set of MCP tools srv advertises.
-// TestNewServerRegistersTools asserts the advertised set matches this exactly —
-// adding, removing, renaming, or duplicating a tool without updating this list
-// fails the test, keeping the surface honest (mirrors treeman's guard test).
-var wantTools = []string{
-	// read
-	"version", "paths", "list_sites", "get_site", "validate_site",
-	"list_proxies", "get_proxy", "list_redirects",
-	// diagnostics
-	"daemon_status", "daemon_log", "metrics_status",
-	// write
-	"reload_site",
-	"add_proxy", "remove_proxy",
-	"add_redirect", "remove_redirect",
-	// site lifecycle + mutators
-	"add_site", "start_site", "stop_site", "restart_site", "remove_site",
-	"add_alias", "remove_alias", "set_internal_listener",
-	"add_volume", "remove_volume",
-	// routes + networks
-	"add_route", "remove_route", "attach_network", "detach_network",
-}
-
-// TestNewServerRegistersTools spins up the server over an in-memory transport,
-// lists the advertised tools, and asserts the set equals wantTools exactly.
-func TestNewServerRegistersTools(t *testing.T) {
+// connectClient spins up newServer() over an in-memory transport and returns a
+// connected client session for introspecting the live tool surface.
+func connectClient(t *testing.T) (*mcpsdk.ClientSession, context.Context) {
+	t.Helper()
 	srv := newServer()
 	if srv == nil {
 		t.Fatal("newServer returned nil")
@@ -56,33 +35,106 @@ func TestNewServerRegistersTools(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
 
-	res, err := clientSession.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	return clientSession, ctx
+}
+
+// advertisedTools lists the tool names the server currently advertises,
+// failing on any duplicate (which would mean a double registration).
+func advertisedTools(t *testing.T, cs *mcpsdk.ClientSession, ctx context.Context) map[string]bool {
+	t.Helper()
+	res, err := cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-
-	want := make(map[string]bool, len(wantTools))
-	for _, n := range wantTools {
-		want[n] = true
-	}
-
-	got := make(map[string]int, len(res.Tools))
+	got := make(map[string]bool, len(res.Tools))
 	for _, tool := range res.Tools {
-		got[tool.Name]++
-	}
-	for name, count := range got {
-		if count > 1 {
-			t.Errorf("tool %q registered %d times (duplicate)", name, count)
+		if got[tool.Name] {
+			t.Errorf("tool %q registered more than once (duplicate)", tool.Name)
 		}
-		if !want[name] {
-			t.Errorf("unexpected tool %q advertised — add it to wantTools or remove the registration", name)
+		got[tool.Name] = true
+	}
+	return got
+}
+
+// assertExactly fails unless got holds exactly the named tools.
+func assertExactly(t *testing.T, got map[string]bool, want []string) {
+	t.Helper()
+	wantSet := make(map[string]bool, len(want))
+	for _, n := range want {
+		wantSet[n] = true
+		if !got[n] {
+			t.Errorf("missing tool %q in advertised set", n)
 		}
 	}
-	for name := range want {
-		if got[name] == 0 {
-			t.Errorf("missing tool %q in advertised set", name)
+	for n := range got {
+		if !wantSet[n] {
+			t.Errorf("unexpected tool %q advertised", n)
 		}
 	}
+}
+
+// concat flattens name lists into one slice.
+func concat(lists ...[]string) []string {
+	var out []string
+	for _, l := range lists {
+		out = append(out, l...)
+	}
+	return out
+}
+
+// TestInitialSurfaceIsCoreOnly asserts that before any activation the server
+// advertises only the two core tools — the whole point of lazy-loading is that
+// the read/write tiers cost no context until requested.
+func TestInitialSurfaceIsCoreOnly(t *testing.T) {
+	cs, ctx := connectClient(t)
+	assertExactly(t, advertisedTools(t, cs, ctx), coreToolNames)
+}
+
+// TestActivateRegistersTiers drives srv_activate and asserts each tier appears
+// exactly once, cumulatively, with "write" implying "read".
+func TestActivateRegistersTiers(t *testing.T) {
+	cs, ctx := connectClient(t)
+
+	// read tier: core + read.
+	if _, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "srv_activate",
+		Arguments: map[string]any{"group": "read"},
+	}); err != nil {
+		t.Fatalf("activate read: %v", err)
+	}
+	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames))
+
+	// write tier: core + read + write (write implies read; read tools must not
+	// be re-registered as duplicates).
+	if _, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "srv_activate",
+		Arguments: map[string]any{"group": "write"},
+	}); err != nil {
+		t.Fatalf("activate write: %v", err)
+	}
+	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames, writeToolNames))
+
+	// Idempotent: re-activating write changes nothing.
+	if _, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "srv_activate",
+		Arguments: map[string]any{"group": "write"},
+	}); err != nil {
+		t.Fatalf("activate write again: %v", err)
+	}
+	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames, writeToolNames))
+}
+
+// TestActivateWriteImpliesRead asserts a bare write activation (no prior read)
+// registers the read tier too.
+func TestActivateWriteImpliesRead(t *testing.T) {
+	cs, ctx := connectClient(t)
+	if _, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "srv_activate",
+		Arguments: map[string]any{"group": "write"},
+	}); err != nil {
+		t.Fatalf("activate write: %v", err)
+	}
+	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames, writeToolNames))
 }
 
 func TestSetVersionUpdatesAdvertisedString(t *testing.T) {
