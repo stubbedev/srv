@@ -604,10 +604,23 @@ datasource. Import dashboard ID 17347 for a per-router Traefik overview.
 
 `srv mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
 server on stdio so AI agents can drive srv the same way a human does
-from the CLI. The read-only surface is complete today (sites, proxies,
-redirects, validation, paths, version); mutating tools beyond
-`reload_site` are still being extracted from CLI handlers and will land
-in follow-ups.
+from the CLI — inspecting sites, proxies, and redirects and mutating them
+(add/remove, lifecycle, routes, networks, aliases, volumes).
+
+**The tool surface is lazy-loaded.** srv is a dev tool most sessions never
+touch, so advertising ~28 tool schemas up front would waste context in every
+session. At startup the server advertises only two tools — `version` and
+`srv_activate`. When the agent actually needs srv, it calls `srv_activate`,
+which registers a tier of tools on demand and notifies the client to refresh
+its tool list:
+
+- `srv_activate(group="read")` — read-only inspection + diagnostics
+  (`list_sites`, `get_site`, `daemon_status`, …).
+- `srv_activate(group="write")` — the default; registers the read tier **and**
+  every mutating tool (`add_site`, `start_site`, `remove_proxy`, …).
+
+Activation is one-way and lasts for the session. Destructive tools still gate
+on `dry_run`/`ack` confirmation regardless of tier.
 
 ### Wiring it into a client
 
@@ -684,18 +697,30 @@ Or from the CLI: `code --add-mcp '{"name":"srv","command":"srv","args":["mcp"]}'
 }
 ```
 
-Available tools:
+Available tools, by tier:
 
-| Tool | Description |
-|---|---|
-| `version` | srv binary version + commit + build date |
-| `paths` | Config paths (`~/.config/srv`, traefik conf dir, etc.) |
-| `list_sites` | All registered sites with name, domain, type, status |
-| `get_site` | Full metadata for one site |
-| `validate_site` | Parse + validate a site's metadata.yml |
-| `list_proxies` / `get_proxy` | Proxy inventory + per-proxy metadata |
-| `list_redirects` | Redirect inventory |
-| `reload_site` | Re-apply a site's metadata.yml without restart |
+| Tier | Tool | Description |
+|---|---|---|
+| core | `version` | srv binary version + commit + build date |
+| core | `srv_activate` | Unlock the `read` or `write` tool tier (see above) |
+| read | `paths` | Config paths (`~/.config/srv`, traefik conf dir, etc.) |
+| read | `list_sites` | All registered sites with name, domain, type, status |
+| read | `get_site` | Full metadata for one site |
+| read | `validate_site` | Parse + validate a site's metadata.yml |
+| read | `list_proxies` / `get_proxy` | Proxy inventory + per-proxy metadata |
+| read | `list_redirects` | Redirect inventory |
+| read | `daemon_status` / `daemon_log` | Watch-daemon status + log tail |
+| read | `metrics_status` | Prometheus + Grafana stack status |
+| write | `add_site` / `remove_site` | Register / delete a site |
+| write | `start_site` / `stop_site` / `restart_site` | Container lifecycle |
+| write | `reload_site` | Re-apply a site's metadata.yml without restart |
+| write | `add_alias` / `remove_alias` | Site hostname aliases |
+| write | `add_volume` / `remove_volume` | Site bind-mounts |
+| write | `set_internal_listener` | Toggle the plain-HTTP entrypoint |
+| write | `add_proxy` / `remove_proxy` | Create / delete a proxy |
+| write | `add_redirect` / `remove_redirect` | Create / delete a redirect |
+| write | `add_route` / `remove_route` | Traefik path/regex routes |
+| write | `attach_network` / `detach_network` | Docker network attachments |
 
 ## Declarative config files
 
