@@ -40,7 +40,7 @@ func connectClient(t *testing.T) (*mcpsdk.ClientSession, context.Context) {
 
 // advertisedTools lists the tool names the server currently advertises,
 // failing on any duplicate (which would mean a double registration).
-func advertisedTools(t *testing.T, cs *mcpsdk.ClientSession, ctx context.Context) map[string]bool {
+func advertisedTools(ctx context.Context, t *testing.T, cs *mcpsdk.ClientSession) map[string]bool {
 	t.Helper()
 	res, err := cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
 	if err != nil {
@@ -87,7 +87,7 @@ func concat(lists ...[]string) []string {
 // the read/write tiers cost no context until requested.
 func TestInitialSurfaceIsCoreOnly(t *testing.T) {
 	cs, ctx := connectClient(t)
-	assertExactly(t, advertisedTools(t, cs, ctx), coreToolNames)
+	assertExactly(t, advertisedTools(ctx, t, cs), coreToolNames)
 }
 
 // TestActivateRegistersTiers drives srv_activate and asserts each tier appears
@@ -102,7 +102,7 @@ func TestActivateRegistersTiers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("activate read: %v", err)
 	}
-	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames))
+	assertExactly(t, advertisedTools(ctx, t, cs), concat(coreToolNames, readToolNames))
 
 	// write tier: core + read + write (write implies read; read tools must not
 	// be re-registered as duplicates).
@@ -112,7 +112,7 @@ func TestActivateRegistersTiers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("activate write: %v", err)
 	}
-	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames, writeToolNames))
+	assertExactly(t, advertisedTools(ctx, t, cs), concat(coreToolNames, readToolNames, writeToolNames))
 
 	// Idempotent: re-activating write changes nothing.
 	if _, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -121,7 +121,7 @@ func TestActivateRegistersTiers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("activate write again: %v", err)
 	}
-	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames, writeToolNames))
+	assertExactly(t, advertisedTools(ctx, t, cs), concat(coreToolNames, readToolNames, writeToolNames))
 }
 
 // TestActivateWriteImpliesRead asserts a bare write activation (no prior read)
@@ -134,7 +134,7 @@ func TestActivateWriteImpliesRead(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("activate write: %v", err)
 	}
-	assertExactly(t, advertisedTools(t, cs, ctx), concat(coreToolNames, readToolNames, writeToolNames))
+	assertExactly(t, advertisedTools(ctx, t, cs), concat(coreToolNames, readToolNames, writeToolNames))
 }
 
 func TestSetVersionUpdatesAdvertisedString(t *testing.T) {
