@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: ["**"]
 
+# Collapse the duplicate push + pull_request runs for the same commit into one,
+# and cancel a superseded run when a branch is force-pushed. Keyed on the head
+# SHA so the push-event and pull_request-event runs share a group.
+concurrency:
+  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   autofix:
     # Attempt to auto-correct mechanically-fixable issues (gofmt + golangci-lint --fix).
@@ -81,7 +88,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          # Check out the immutable SHA (autofix's pushed commit if any, else the
+          # triggering commit) rather than the branch name, so this read-only job
+          # can't fail at checkout when auto-merge deletes the branch mid-run.
+          ref: ${{ needs.autofix.outputs.pushed_sha || github.sha }}
 
       - uses: actions/setup-go@v6
         with:
@@ -143,7 +153,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          # Immutable SHA, not the branch name — survives a mid-run branch delete.
+          ref: ${{ needs.autofix.outputs.pushed_sha || github.sha }}
 
       - uses: actions/setup-go@v6
         with:
@@ -164,9 +175,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # Need a real ref + write token so the auto-bump step can push the
-          # refreshed vendorHash back to master.
-          ref: ${{ github.head_ref || github.ref_name }}
+          # Immutable SHA so the job survives a mid-run branch delete. The master
+          # auto-bump step pushes `HEAD:master` explicitly, so it works fine from
+          # this (possibly detached) checkout; the write token is still required.
+          ref: ${{ needs.autofix.outputs.pushed_sha || github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
