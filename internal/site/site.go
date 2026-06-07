@@ -51,11 +51,6 @@ func (s *Site) Domain() string {
 	return s.Domains[0]
 }
 
-type siteStatusResult struct {
-	index  int
-	status string
-}
-
 // loadSiteFromDir loads site information from a site config directory.
 // Returns the site and whether it needs a status check.
 func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
@@ -128,6 +123,12 @@ func siteContainerStatus(s Site) string {
 }
 
 // fetchSiteStatuses fetches container statuses for sites in parallel.
+//
+// It uses a fixed pool of at most MaxStatusWorkers goroutines draining a jobs
+// channel, rather than one goroutine per site, so a large site list does not
+// spawn an unbounded number of goroutines. Each job writes its result into a
+// distinct sites[i] element, so direct writes are race-free without a result
+// channel.
 func fetchSiteStatuses(sites []Site, indices []int) {
 	if len(indices) == 0 {
 		return
@@ -135,41 +136,36 @@ func fetchSiteStatuses(sites []Site, indices []int) {
 
 	workers := min(constants.MaxStatusWorkers, len(indices))
 
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	statusChan := make(chan siteStatusResult, len(indices))
 
-	// Semaphore for limiting concurrency
-	sem := make(chan struct{}, workers)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				sites[i].Status = statusForIndex(sites, i)
+			}
+		}()
+	}
 
 	for _, idx := range indices {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			// Recover from any panic so wg.Done() is always called and
-			// the collector goroutine is never left blocking forever.
-			defer func() {
-				if r := recover(); r != nil {
-					statusChan <- siteStatusResult{i, "unknown"}
-				}
-			}()
-			sem <- struct{}{}        // Acquire
-			defer func() { <-sem }() // Release
-
-			status := siteContainerStatus(sites[i])
-			statusChan <- siteStatusResult{i, status}
-		}(idx)
+		jobs <- idx
 	}
+	close(jobs)
+	wg.Wait()
+}
 
-	// Wait for all goroutines to complete
-	go func() {
-		wg.Wait()
-		close(statusChan)
+// statusForIndex returns the container status for sites[i], recovering from a
+// panic in the status probe by reporting "unknown" so one misbehaving site
+// cannot take down a pool worker.
+func statusForIndex(sites []Site, i int) (status string) {
+	defer func() {
+		if r := recover(); r != nil {
+			status = "unknown"
+		}
 	}()
-
-	// Collect results
-	for result := range statusChan {
-		sites[result.index].Status = result.status
-	}
+	return siteContainerStatus(sites[i])
 }
 
 // List returns all registered sites.

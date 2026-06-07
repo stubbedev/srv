@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -255,7 +256,7 @@ func runDaemonLogs(cmd *cobra.Command, args []string) error {
 		if len(line) > 0 {
 			fmt.Print(line)
 		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// No new data yet; wait a short interval and try again.
 			time.Sleep(200 * time.Millisecond)
 			continue

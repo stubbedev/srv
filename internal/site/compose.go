@@ -117,7 +117,6 @@ func (s *ComposeStringList) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// siteStatusResult holds the result of a container status check.
 // composeNotFoundError is returned by FindComposeFile when no compose file exists.
 type composeNotFoundError struct {
 	dir string
