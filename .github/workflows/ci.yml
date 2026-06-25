@@ -242,3 +242,31 @@ jobs:
           git push origin HEAD:master
 
       - run: nix flake check --print-build-logs
+
+      # Push the master build's closure to the self-hosted attic cache so nix
+      # consumers tracking HEAD/master pull a prebuilt binary instead of
+      # recompiling. Release tags are cached separately by release.yml. Only
+      # runs on direct master pushes — PRs and feature branches don't populate
+      # the cache.
+      - name: Build package for cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
+
+      - name: Push to attic
+        # Best-effort: a cache-push failure (e.g. a transient 504 from the
+        # single-vCPU cache box on a large closure) must not redden master CI.
+        # Retry with backoff, then give up softly.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+        run: |
+          nix run nixpkgs#attic-client -- login stubbe https://nix.stubbe.dev "$ATTIC_TOKEN"
+          for attempt in 1 2 3; do
+            if nix run nixpkgs#attic-client -- push srv $(cat /tmp/srv-outpaths); then
+              exit 0
+            fi
+            echo "::warning::attic push attempt $attempt failed; retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::warning::attic push failed after 3 attempts; cache push is best-effort, continuing"
