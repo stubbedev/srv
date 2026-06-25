@@ -151,10 +151,14 @@ type addSiteOut struct {
 	Error    string   `json:"error,omitempty"`
 }
 
-func addSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addSiteIn) (*mcpsdk.CallToolResult, addSiteOut, error) {
+func addSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in addSiteIn) (*mcpsdk.CallToolResult, addSiteOut, error) {
 	if in.Path == "" || in.Domain == "" {
 		return nil, addSiteOut{Error: "path and domain are required"}, nil
 	}
+	// A shared HTTP daemon's cwd is not the caller's, so anchor a relative
+	// project path (and any relative bind-mount source) to the client's
+	// workspace root. Absolute paths and stdio callers are unaffected.
+	in.Path = anchorPath(ctx, req, in.Path)
 	// Local sites issue a mkcert cert; guard the CA install behind the same
 	// non-interactive-sudo preflight the proxy/redirect add tools use.
 	if in.Local {
@@ -168,7 +172,7 @@ func addSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addSiteIn) (*m
 	}
 	mounts := make([]site.VolumeMount, 0, len(in.Volumes))
 	for _, v := range in.Volumes {
-		mounts = append(mounts, site.VolumeMount{Source: v.Source, Target: v.Target, ReadOnly: v.ReadOnly})
+		mounts = append(mounts, site.VolumeMount{Source: anchorPath(ctx, req, v.Source), Target: v.Target, ReadOnly: v.ReadOnly})
 	}
 	res, err := site.Add(site.AddOptions{
 		Path:         in.Path,
@@ -284,10 +288,13 @@ type addVolumeIn struct {
 	ReadOnly bool   `json:"read_only,omitempty" jsonschema:"mount read-only"`
 }
 
-func addVolumeTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addVolumeIn) (*mcpsdk.CallToolResult, okOut, error) {
+func addVolumeTool(ctx context.Context, req *mcpsdk.CallToolRequest, in addVolumeIn) (*mcpsdk.CallToolResult, okOut, error) {
 	if in.Name == "" || in.Source == "" || in.Target == "" {
 		return nil, okOut{Error: "name, source, and target are required"}, nil
 	}
+	// Anchor a relative host source to the caller's workspace (shared HTTP
+	// daemon); absolute paths and stdio callers pass through unchanged.
+	in.Source = anchorPath(ctx, req, in.Source)
 	warnings, err := site.AddVolume(in.Name, site.VolumeMount{Source: in.Source, Target: in.Target, ReadOnly: in.ReadOnly})
 	if err != nil {
 		return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload

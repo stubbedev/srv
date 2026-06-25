@@ -107,6 +107,23 @@ const (
 	EnvDNSHTTPUser = "DNS_HTTP_USER"
 	// EnvDNSHTTPPass is the environment variable for the dnsmasq HTTP password.
 	EnvDNSHTTPPass = "DNS_HTTP_PASS"
+	// EnvMCPHTTPAddr overrides the listen address for `srv mcp --http`.
+	EnvMCPHTTPAddr = "SRV_MCP_HTTP_ADDR"
+	// EnvMCPHTTPPath overrides the endpoint path for `srv mcp --http`.
+	EnvMCPHTTPPath = "SRV_MCP_HTTP_PATH"
+)
+
+// =============================================================================
+// MCP HTTP Transport
+// =============================================================================
+
+const (
+	// DefaultMCPHTTPAddr is the default listen address for the MCP HTTP
+	// transport. Loopback only: the endpoint mutates a privileged Traefik edge,
+	// so it trusts local processes and is not exposed off-host by default.
+	DefaultMCPHTTPAddr = "127.0.0.1:8765"
+	// DefaultMCPHTTPPath is the default endpoint path for the MCP HTTP transport.
+	DefaultMCPHTTPPath = "/mcp"
 )
 
 // =============================================================================
