@@ -41,7 +41,7 @@ Available on every command:
   - [`srv internal list`](#srv-internal-list) — List sites with the internal listener enabled
 - [`srv list`](#srv-list) — List all sites
 - [`srv logs`](#srv-logs) — Show site logs
-- [`srv mcp`](#srv-mcp) — Start the srv MCP server (stdio)
+- [`srv mcp`](#srv-mcp) — Start the srv MCP server (stdio, or --http for a shared daemon)
 - [`srv metrics`](#srv-metrics) — Manage the optional metrics stack (prometheus + grafana)
   - [`srv metrics disable`](#srv-metrics-disable) — Stop and remove the metrics stack containers
   - [`srv metrics enable`](#srv-metrics-enable) — Render the metrics compose stack and start containers
@@ -524,12 +524,12 @@ srv logs [SITE] [flags]
 
 ## `srv mcp`
 
-Start the srv MCP server (stdio)
+Start the srv MCP server (stdio, or --http for a shared daemon)
 
 ```
-Run the Model Context Protocol server on stdio so AI agents can drive
-srv the same way a human does from the CLI — inspecting and mutating sites,
-proxies, redirects, routes, and networks.
+Run the Model Context Protocol server so AI agents can drive srv the
+same way a human does from the CLI — inspecting and mutating sites, proxies,
+redirects, routes, and networks.
 
 The tool surface is lazy-loaded: at startup only 'version' and 'srv_activate'
 are advertised, so srv costs no context in sessions that never use it. The
@@ -537,23 +537,40 @@ agent calls srv_activate(group="read") to unlock inspection + diagnostics, or
 srv_activate(group="write") to also unlock mutations; the client refreshes its
 tool list automatically.
 
-Intended to be launched by an MCP client config such as:
+Transports:
 
-  {
-    "mcpServers": {
-      "srv": {
-        "command": "srv",
-        "args": ["mcp"]
-      }
-    }
-  }
+  stdio (default)   One server per client, launched on demand:
+
+      { "mcpServers": { "srv": { "command": "srv", "args": ["mcp"] } } }
+
+  --http            One long-running daemon shared by every MCP client on the
+                    host (each Claude Code instance, etc.). Per-request
+                    workspace context is taken from the client's MCP roots or an
+                    X-Repo-Root header, so a single instance serves all clients:
+
+      srv mcp --http                  # listens on 127.0.0.1:8765/mcp
+      srv mcp --http=0.0.0.0:9000     # bind elsewhere (loopback only by default)
+
+                    Then point clients at the URL:
+
+      { "mcpServers": { "srv": { "url": "http://127.0.0.1:8765/mcp" } } }
+
+The HTTP endpoint trusts local processes (loopback, no auth) — it mutates a
+privileged Traefik edge, so keep it behind a reverse proxy if bound off-host.
 ```
 
 Usage:
 
 ```
-srv mcp
+srv mcp [flags]
 ```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--http` | — | serve over HTTP at this address instead of stdio (default 127.0.0.1:8765 when given without a value; env SRV_MCP_HTTP_ADDR) |
+| `--http-path` | — | HTTP endpoint path (default /mcp; env SRV_MCP_HTTP_PATH) |
+| `--tool-timeout` | `10m0s` | max duration for a single tool call before it is cancelled (0 disables; a hung mutation otherwise blocks the shared write lock) |
+| `--trusted-origin` | `[]` | browser Origin allowed through cross-origin protection (repeatable; only for browser MCP clients on an off-host bind) |
 
 ## `srv metrics`
 
