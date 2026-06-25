@@ -65,6 +65,7 @@ func newServer() *mcpsdk.Server {
 		Instructions: serverInstructions,
 	})
 
+	srv.AddReceivingMiddleware(newToolMiddleware())
 	registerVersionTool(srv)
 	registerGateway(srv)
 	registerResources(srv)

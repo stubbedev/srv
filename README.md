@@ -147,7 +147,7 @@ srv add /var/www/myapp --domain example.com
 | `srv doctor` | Run diagnostic checks |
 | `srv import <valet>` | Import site configurations from other tools |
 | `srv install` | Install srv environment |
-| `srv mcp` | Start the srv MCP server (stdio) |
+| `srv mcp` | Start the srv MCP server (stdio, or --http for a shared daemon) |
 | `srv metrics <disable\|enable\|status>` | Manage the optional metrics stack (prometheus + grafana) |
 | `srv paths` | Show config paths |
 | `srv uninstall` | Completely remove srv from the system |
@@ -621,13 +621,57 @@ its tool list:
 Activation is one-way and lasts for the session. Destructive tools still gate
 on `dry_run`/`ack` confirmation regardless of tier.
 
+### Transports: stdio or shared HTTP
+
+`srv mcp` speaks two transports:
+
+- **stdio (default)** — the client launches one `srv mcp` process and talks to
+  it over stdin/stdout. One server per client, started and stopped by the client.
+- **Streamable HTTP (`--http`)** — one long-running daemon that every MCP client
+  on the host shares (each Claude Code instance, Cursor window, etc.). Run it
+  once:
+
+  ```sh
+  srv mcp --http                 # listens on 127.0.0.1:8765/mcp
+  srv mcp --http=0.0.0.0:9000    # bind elsewhere; --http-path=/foo to remap
+  ```
+
+  Then point clients at the URL instead of a command:
+
+  ```json
+  { "mcpServers": { "srv": { "url": "http://127.0.0.1:8765/mcp" } } }
+  ```
+
+  Each HTTP session keeps its own lazy-activation state, so one client's
+  `srv_activate` does not leak tools into another's surface. Per-request
+  workspace context — used to anchor relative paths in `add_site`/`add_volume` to
+  the calling project rather than the daemon's working directory — is taken from
+  the client's MCP **roots**, or from an `X-Repo-Root` (or `X-Mcp-Root`) request
+  header set by a proxy/harness. A `GET /healthz` endpoint returns
+  `{"status":"ok"}` for liveness checks.
+
+  **Concurrency & safety.** Mutating tool calls are serialized across all
+  clients (srv drives one shared edge); read-only calls run concurrently. Each
+  call is bounded by `--tool-timeout` (default 10m, `0` disables) so a wedged
+  docker/traefik operation can't block the shared write lock forever. A panic in
+  one client's call is recovered into an error rather than crashing the daemon
+  and dropping every other client.
+
+  **Exposure.** The endpoint binds **loopback with no auth** by default — it
+  mutates a privileged Traefik edge, so it trusts local processes only. The
+  SDK's localhost/DNS-rebind protection and stdlib cross-origin (CSRF)
+  protection are both active. Put it behind a reverse proxy that adds TLS and
+  authentication before binding off-host; browser-based clients on another
+  origin need `--trusted-origin https://your.app`. The listen address and path
+  also read from `SRV_MCP_HTTP_ADDR` / `SRV_MCP_HTTP_PATH`.
+
 ### Wiring it into a client
 
-The server is stdio-based: a client launches `srv mcp` and talks to it over
-stdin/stdout. There is nothing to host or keep running — the client starts and
-stops the process. The only requirement is that the `srv` binary is reachable.
+The stdio examples below launch `srv mcp` per client — there is nothing to host
+or keep running. The only requirement is that the `srv` binary is reachable.
 If your client doesn't inherit your shell `PATH`, replace `"srv"` below with the
-absolute path from `which srv` (e.g. `/usr/local/bin/srv`).
+absolute path from `which srv` (e.g. `/usr/local/bin/srv`). To share one daemon
+instead, run `srv mcp --http` and use the `url` form shown above.
 
 Most clients share the same `mcpServers` schema:
 
