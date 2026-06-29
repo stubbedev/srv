@@ -27,6 +27,8 @@ type RouteInput struct {
 	PreserveHost     *bool  // nil → true
 	PassRangeHeaders bool
 	Priority         int
+	// InsecureSkipVerify skips TLS verification on an https url upstream.
+	InsecureSkipVerify bool
 }
 
 // BuildRoute validates the input and returns a site.Route, deriving the id from
@@ -96,6 +98,9 @@ func buildUpstream(in RouteInput) (Upstream, error) {
 	if forms > 1 {
 		return Upstream{}, fmt.Errorf("port, container, url are mutually exclusive")
 	}
+	if in.InsecureSkipVerify && in.URL == "" {
+		return Upstream{}, fmt.Errorf("insecure_skip_verify only applies to a url upstream")
+	}
 	switch {
 	case in.Port != 0:
 		return Upstream{Kind: "localhost", Port: in.Port}, nil
@@ -106,7 +111,7 @@ func buildUpstream(in RouteInput) (Upstream, error) {
 		}
 		return Upstream{Kind: "container", Container: name, Port: port}, nil
 	default:
-		return Upstream{Kind: "url", URL: in.URL}, nil
+		return Upstream{Kind: "url", URL: in.URL, InsecureSkipVerify: in.InsecureSkipVerify}, nil
 	}
 }
 

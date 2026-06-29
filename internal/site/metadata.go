@@ -37,6 +37,10 @@ type Upstream struct {
 	Port      int    `yaml:"port,omitempty" jsonschema:"description=Port when kind=localhost or kind=container."`
 	Container string `yaml:"container,omitempty" jsonschema:"description=Container name when kind=container."`
 	URL       string `yaml:"url,omitempty" jsonschema:"description=Full URL when kind=url (e.g. https://api.example.com)."`
+	// InsecureSkipVerify disables TLS cert verification for an https url upstream
+	// whose certificate can't be verified (self-signed, or a SAN that doesn't
+	// match the dialed host/IP). No effect on http upstreams.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify,omitempty" jsonschema:"description=Skip TLS verification for an https url upstream (self-signed / mismatched cert)."`
 }
 
 // Route attaches an extra Traefik router to a site, used for path-prefix splits

@@ -27,6 +27,9 @@ type RouteSpec struct {
 	UpstreamURL  string // pre-resolved upstream (e.g. http://host.docker.internal:6001)
 	PreserveHost bool
 	Priority     int
+	// InsecureSkipVerify skips TLS cert verification when dialing an HTTPS
+	// upstream. Emits a per-service serversTransport in the generated file.
+	InsecureSkipVerify bool
 }
 
 // SiteRouteSet is the set of routes belonging to one site, used to render a
@@ -50,6 +53,7 @@ func WriteRoutesConfig(cfg *config.Config, set SiteRouteSet) error {
 	routers := make(map[string]dynRouter, len(set.Routes))
 	services := make(map[string]dynService, len(set.Routes))
 	middlewares := make(map[string]dynMiddleware)
+	transports := make(map[string]dynServersTransport)
 	hostRule := BuildHostRule(set.Domains, set.Wildcard)
 	seen := make(map[string]bool, len(set.Routes))
 
@@ -110,19 +114,27 @@ func WriteRoutesConfig(cfg *config.Config, set SiteRouteSet) error {
 			f := false
 			preservePtr = &f
 		}
-		services[serviceName] = dynService{
-			LoadBalancer: dynLoadBalancer{
-				Servers:        []dynServer{{URL: r.UpstreamURL}},
-				PassHostHeader: preservePtr,
-			},
+		lb := dynLoadBalancer{
+			Servers:        []dynServer{{URL: r.UpstreamURL}},
+			PassHostHeader: preservePtr,
 		}
+		if r.InsecureSkipVerify {
+			transportName := serviceName + "-insecure"
+			transports[transportName] = dynServersTransport{InsecureSkipVerify: true}
+			lb.ServersTransport = transportName
+		}
+		services[serviceName] = dynService{LoadBalancer: lb}
 	}
 
-	out := DynConfig{HTTP: dynHTTP{
+	http := dynHTTP{
 		Routers:     routers,
 		Services:    services,
 		Middlewares: middlewares,
-	}}
+	}
+	if len(transports) > 0 {
+		http.ServersTransports = transports
+	}
+	out := DynConfig{HTTP: http}
 	data, err := MarshalDynConfig(out)
 	if err != nil {
 		return fmt.Errorf("marshal routes config: %w", err)

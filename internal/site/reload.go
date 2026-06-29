@@ -263,13 +263,14 @@ func buildRouteSet(siteName string, meta *SiteMetadata) traefik.SiteRouteSet {
 			continue
 		}
 		set.Routes = append(set.Routes, traefik.RouteSpec{
-			ID:           r.ID,
-			Path:         r.Path,
-			PathRegex:    r.PathRegex,
-			Rewrite:      r.Rewrite,
-			UpstreamURL:  upstreamURL,
-			PreserveHost: preserve,
-			Priority:     r.Priority,
+			ID:                 r.ID,
+			Path:               r.Path,
+			PathRegex:          r.PathRegex,
+			Rewrite:            r.Rewrite,
+			UpstreamURL:        upstreamURL,
+			PreserveHost:       preserve,
+			Priority:           r.Priority,
+			InsecureSkipVerify: r.Upstream.InsecureSkipVerify,
 		})
 	}
 	return set

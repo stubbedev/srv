@@ -16,8 +16,17 @@ type dynServer struct {
 
 // dynLoadBalancer is a service's set of upstream servers.
 type dynLoadBalancer struct {
-	Servers        []dynServer `yaml:"servers"`
-	PassHostHeader *bool       `yaml:"passHostHeader,omitempty"`
+	Servers          []dynServer `yaml:"servers"`
+	PassHostHeader   *bool       `yaml:"passHostHeader,omitempty"`
+	ServersTransport string      `yaml:"serversTransport,omitempty"` // name of a serversTransports entry
+}
+
+// dynServersTransport configures how Traefik dials an HTTPS upstream. Only the
+// insecureSkipVerify knob is modelled — it lets an upstream whose certificate
+// can't be verified (self-signed, or a cert whose SAN doesn't match its IP) be
+// reached. Referenced by name from dynLoadBalancer.ServersTransport.
+type dynServersTransport struct {
+	InsecureSkipVerify bool `yaml:"insecureSkipVerify"`
 }
 
 // dynService wraps a load balancer under the Traefik `services` map.
@@ -63,9 +72,10 @@ type dynMiddleware struct {
 
 // dynHTTP is the `http` block: routers, services, and optional middlewares.
 type dynHTTP struct {
-	Routers     map[string]dynRouter     `yaml:"routers"`
-	Services    map[string]dynService    `yaml:"services"`
-	Middlewares map[string]dynMiddleware `yaml:"middlewares,omitempty"`
+	Routers           map[string]dynRouter           `yaml:"routers"`
+	Services          map[string]dynService          `yaml:"services"`
+	Middlewares       map[string]dynMiddleware       `yaml:"middlewares,omitempty"`
+	ServersTransports map[string]dynServersTransport `yaml:"serversTransports,omitempty"`
 }
 
 // DynConfig is a complete Traefik file-provider dynamic config document.

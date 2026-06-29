@@ -147,6 +147,37 @@ func TestWriteRoutesConfigRewrite(t *testing.T) {
 	}
 }
 
+func TestWriteRoutesConfigInsecureSkipVerify(t *testing.T) {
+	cfg := newTraefikCfg(t)
+	set := SiteRouteSet{
+		SiteName: "site",
+		Domains:  []string{"site.local"},
+		IsLocal:  true,
+		Routes: []RouteSpec{
+			{ID: "api", Path: "/", UpstreamURL: "https://192.168.0.1:8443", InsecureSkipVerify: true},
+			{ID: "plain", Path: "/plain", UpstreamURL: "http://upstream:80"},
+		},
+	}
+	if err := WriteRoutesConfig(cfg, set); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(routesConfigPath(cfg, "site"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(body)
+	if !strings.Contains(s, "serversTransport: site-api-insecure") {
+		t.Error("service should reference its serversTransport")
+	}
+	if !strings.Contains(s, "insecureSkipVerify: true") {
+		t.Error("serversTransports block missing")
+	}
+	// The route without the flag must not get a transport reference.
+	if strings.Contains(s, "site-plain-insecure") {
+		t.Error("plain route should not have a serversTransport")
+	}
+}
+
 func TestWriteRoutesConfigMissingID(t *testing.T) {
 	cfg := newTraefikCfg(t)
 	set := SiteRouteSet{

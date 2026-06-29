@@ -176,13 +176,14 @@ func Reload(name string) error {
 			preserve = *r.PreserveHost
 		}
 		set.Routes = append(set.Routes, traefik.RouteSpec{
-			ID:           r.ID,
-			Path:         r.Path,
-			PathRegex:    r.PathRegex,
-			Rewrite:      r.Rewrite,
-			UpstreamURL:  upstream,
-			PreserveHost: preserve,
-			Priority:     r.Priority,
+			ID:                 r.ID,
+			Path:               r.Path,
+			PathRegex:          r.PathRegex,
+			Rewrite:            r.Rewrite,
+			UpstreamURL:        upstream,
+			PreserveHost:       preserve,
+			Priority:           r.Priority,
+			InsecureSkipVerify: r.Upstream.InsecureSkipVerify,
 		})
 	}
 	if err := traefik.WriteRoutesConfig(cfg, set); err != nil {

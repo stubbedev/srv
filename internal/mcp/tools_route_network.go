@@ -40,17 +40,18 @@ func registerRouteNetworkTools(srv *mcpsdk.Server) {
 // ─── add_route / remove_route ────────────────────────────────────────
 
 type addRouteIn struct {
-	Target           string `json:"target" jsonschema:"site or proxy name to attach the route to"`
-	ID               string `json:"id,omitempty" jsonschema:"route id; derived from the path when omitted"`
-	Path             string `json:"path,omitempty" jsonschema:"PathPrefix to match (e.g. /api); mutually exclusive with path_regex"`
-	PathRegex        string `json:"path_regex,omitempty" jsonschema:"Traefik PathRegexp; mutually exclusive with path"`
-	Rewrite          string `json:"rewrite,omitempty" jsonschema:"replacement for a path_regex rewrite (requires path_regex)"`
-	Port             int    `json:"port,omitempty" jsonschema:"localhost upstream port"`
-	Container        string `json:"container,omitempty" jsonschema:"container upstream as name:port"`
-	URL              string `json:"url,omitempty" jsonschema:"raw upstream URL"`
-	PreserveHost     *bool  `json:"preserve_host,omitempty" jsonschema:"forward the Host header unchanged (default true)"`
-	PassRangeHeaders bool   `json:"pass_range_headers,omitempty"`
-	Priority         int    `json:"priority,omitempty" jsonschema:"override the auto-computed Traefik router priority"`
+	Target             string `json:"target" jsonschema:"site or proxy name to attach the route to"`
+	ID                 string `json:"id,omitempty" jsonschema:"route id; derived from the path when omitted"`
+	Path               string `json:"path,omitempty" jsonschema:"PathPrefix to match (e.g. /api); mutually exclusive with path_regex"`
+	PathRegex          string `json:"path_regex,omitempty" jsonschema:"Traefik PathRegexp; mutually exclusive with path"`
+	Rewrite            string `json:"rewrite,omitempty" jsonschema:"replacement for a path_regex rewrite (requires path_regex)"`
+	Port               int    `json:"port,omitempty" jsonschema:"localhost upstream port"`
+	Container          string `json:"container,omitempty" jsonschema:"container upstream as name:port"`
+	URL                string `json:"url,omitempty" jsonschema:"raw upstream URL"`
+	PreserveHost       *bool  `json:"preserve_host,omitempty" jsonschema:"forward the Host header unchanged (default true)"`
+	PassRangeHeaders   bool   `json:"pass_range_headers,omitempty"`
+	Priority           int    `json:"priority,omitempty" jsonschema:"override the auto-computed Traefik router priority"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty" jsonschema:"skip TLS verification for an https url upstream (self-signed / mismatched cert)"`
 }
 type routeOut struct {
 	OK     bool   `json:"ok"`
@@ -66,16 +67,17 @@ func addRouteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRouteIn) (
 		return nil, routeOut{Error: "target is required"}, nil
 	}
 	route, err := site.BuildRoute(site.RouteInput{
-		ID:               in.ID,
-		Path:             in.Path,
-		PathRegex:        in.PathRegex,
-		Rewrite:          in.Rewrite,
-		Port:             in.Port,
-		Container:        in.Container,
-		URL:              in.URL,
-		PreserveHost:     in.PreserveHost,
-		PassRangeHeaders: in.PassRangeHeaders,
-		Priority:         in.Priority,
+		ID:                 in.ID,
+		Path:               in.Path,
+		PathRegex:          in.PathRegex,
+		Rewrite:            in.Rewrite,
+		Port:               in.Port,
+		Container:          in.Container,
+		URL:                in.URL,
+		PreserveHost:       in.PreserveHost,
+		PassRangeHeaders:   in.PassRangeHeaders,
+		Priority:           in.Priority,
+		InsecureSkipVerify: in.InsecureSkipVerify,
 	})
 	if err != nil {
 		return nil, routeOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload

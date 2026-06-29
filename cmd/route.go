@@ -13,16 +13,17 @@ import (
 )
 
 var routeAddFlags struct {
-	id           string
-	path         string
-	pathRegex    string
-	rewrite      string
-	port         int
-	container    string
-	url          string
-	preserveHost bool
-	rangeHeaders bool
-	priority     int
+	id                 string
+	path               string
+	pathRegex          string
+	rewrite            string
+	port               int
+	container          string
+	url                string
+	preserveHost       bool
+	rangeHeaders       bool
+	priority           int
+	insecureSkipVerify bool
 }
 
 var routeCmd = &cobra.Command{
@@ -88,6 +89,7 @@ func init() {
 	routeAddCmd.Flags().BoolVar(&routeAddFlags.preserveHost, "preserve-host", true, "Forward the Host header unchanged to the upstream")
 	routeAddCmd.Flags().BoolVar(&routeAddFlags.rangeHeaders, "pass-range-headers", false, "Documentation-only; Traefik forwards Range headers by default")
 	routeAddCmd.Flags().IntVar(&routeAddFlags.priority, "priority", 0, "Override the auto-computed Traefik router priority")
+	routeAddCmd.Flags().BoolVar(&routeAddFlags.insecureSkipVerify, "insecure-skip-verify", false, "Skip TLS cert verification for an https --url upstream (self-signed / mismatched cert)")
 
 	routeCmd.GroupID = GroupSites
 	routeCmd.AddCommand(routeAddCmd, routeListCmd, routeRemoveCmd)
@@ -183,16 +185,17 @@ func runRouteRemove(cmd *cobra.Command, args []string) error {
 func buildRouteFromFlags() (site.Route, error) {
 	preserve := routeAddFlags.preserveHost
 	return site.BuildRoute(site.RouteInput{
-		ID:               routeAddFlags.id,
-		Path:             routeAddFlags.path,
-		PathRegex:        routeAddFlags.pathRegex,
-		Rewrite:          routeAddFlags.rewrite,
-		Port:             routeAddFlags.port,
-		Container:        routeAddFlags.container,
-		URL:              routeAddFlags.url,
-		PreserveHost:     &preserve,
-		PassRangeHeaders: routeAddFlags.rangeHeaders,
-		Priority:         routeAddFlags.priority,
+		ID:                 routeAddFlags.id,
+		Path:               routeAddFlags.path,
+		PathRegex:          routeAddFlags.pathRegex,
+		Rewrite:            routeAddFlags.rewrite,
+		Port:               routeAddFlags.port,
+		Container:          routeAddFlags.container,
+		URL:                routeAddFlags.url,
+		PreserveHost:       &preserve,
+		PassRangeHeaders:   routeAddFlags.rangeHeaders,
+		Priority:           routeAddFlags.priority,
+		InsecureSkipVerify: routeAddFlags.insecureSkipVerify,
 	})
 }
 
