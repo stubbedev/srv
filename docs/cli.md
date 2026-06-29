@@ -1001,6 +1001,7 @@ srv route add SITE [flags]
 |---|---|---|
 | `--container` | — | Upstream container (container[:port]) |
 | `--id` | — | Stable identifier for this route (auto-derived from --path if omitted) |
+| `--insecure-skip-verify` | `false` | Skip TLS cert verification for an https --url upstream (self-signed / mismatched cert) |
 | `--pass-range-headers` | `false` | Documentation-only; Traefik forwards Range headers by default |
 | `--path` | — | Path prefix to match (e.g. /app); mutually exclusive with --path-regex |
 | `--path-regex` | — | Regex matcher for the request path; mutually exclusive with --path |
