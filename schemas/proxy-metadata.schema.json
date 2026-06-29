@@ -62,6 +62,10 @@
         "url": {
           "type": "string",
           "description": "Full URL when kind=url (e.g. https://api.example.com)."
+        },
+        "insecure_skip_verify": {
+          "type": "boolean",
+          "description": "Skip TLS verification for an https url upstream (self-signed / mismatched cert)."
         }
       },
       "additionalProperties": false,
