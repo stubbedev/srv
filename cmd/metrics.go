@@ -87,6 +87,17 @@ func runMetricsEnable(cmd *cobra.Command, args []string) error {
 	if err := metrics.WriteTraefikConfig(cfg); err != nil {
 		return fmt.Errorf("write metrics Traefik config: %w", err)
 	}
+	// The prometheus exporter lives in the static traefik.yml and is opt-in:
+	// added here, removed on disable. Static config needs a Traefik restart.
+	changed, err := traefik.SetMetricsExporter(true)
+	if err != nil {
+		return fmt.Errorf("enable Traefik metrics exporter: %w", err)
+	}
+	if changed {
+		if err := traefik.RestartTraefik(); err != nil {
+			return fmt.Errorf("restart Traefik: %w", err)
+		}
+	}
 	if err := traefik.UpdateDynamicConfig(); err != nil {
 		ui.Warn("Failed to refresh Traefik dynamic config: %v", err)
 	}
@@ -113,6 +124,14 @@ func runMetricsDisable(cmd *cobra.Command, args []string) error {
 	}
 	if err := metrics.RemoveTraefikConfig(cfg); err != nil {
 		ui.Warn("Failed to remove metrics Traefik config: %v", err)
+	}
+	changed, err := traefik.SetMetricsExporter(false)
+	if err != nil {
+		ui.Warn("Failed to remove Traefik metrics exporter: %v", err)
+	} else if changed {
+		if err := traefik.RestartTraefik(); err != nil {
+			ui.Warn("Failed to restart Traefik: %v", err)
+		}
 	}
 	for _, d := range []string{metrics.GrafanaDomain, metrics.PrometheusDomain} {
 		if err := traefik.UnregisterLocalDomain(d); err != nil {

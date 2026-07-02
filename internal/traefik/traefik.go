@@ -39,17 +39,6 @@ accessLog:
       - "200-299"
       - "400-599"
 
-metrics:
-  prometheus:
-    addEntryPointsLabels: true
-    addServicesLabels: true
-    addRoutersLabels: true
-    buckets:
-      - 0.1
-      - 0.3
-      - 1.2
-      - 5.0
-
 tracing:
   serviceName: traefik
 
@@ -444,6 +433,76 @@ func writeOrMergeTraefikYML(path, networkName, email string) error {
 	}
 
 	return fsutil.AtomicWriteFile(path, output, constants.FilePermDefault)
+}
+
+// traefikMetricsBlock is the prometheus exporter section that `srv metrics
+// enable` adds to the static traefik.yml and `srv metrics disable` removes.
+// It is not part of the base template so Traefik does not accumulate metrics
+// state when the stack is off.
+var traefikMetricsBlock = map[string]any{
+	"prometheus": map[string]any{
+		"addEntryPointsLabels": true,
+		"addServicesLabels":    true,
+		"addRoutersLabels":     true,
+		"buckets":              []any{0.1, 0.3, 1.2, 5.0},
+	},
+}
+
+// SetMetricsExporter adds or removes the prometheus metrics block in the
+// static traefik.yml. Returns true when the file changed; the caller must
+// then restart Traefik, since static config is only read at startup.
+// When enabling, an existing user-customised metrics section is left alone.
+func SetMetricsExporter(enabled bool) (changed bool, err error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return false, err
+	}
+	path := filepath.Join(cfg.TraefikConfDir(), "traefik.yml")
+	doc := map[string]any{}
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return false, fmt.Errorf("existing traefik.yml at %s is not valid YAML: %w", path, err)
+		}
+		if doc == nil {
+			doc = map[string]any{}
+		}
+	case os.IsNotExist(err):
+		// Not initialized yet — write just the metrics key; the next
+		// EnsureConfig merge fills in the rest of the template around it.
+	default:
+		return false, fmt.Errorf("read traefik.yml: %w", err)
+	}
+	if setMetricsKey(doc, enabled) {
+		out, err := yaml.Marshal(doc)
+		if err != nil {
+			return false, err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), constants.DirPermDefault); err != nil {
+			return false, err
+		}
+		if err := fsutil.AtomicWriteFile(path, out, constants.FilePermDefault); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// setMetricsKey toggles the metrics key on a parsed traefik.yml document.
+// Returns true if the document was modified.
+func setMetricsKey(doc map[string]any, enabled bool) bool {
+	_, has := doc["metrics"]
+	if has == enabled {
+		return false
+	}
+	if enabled {
+		doc["metrics"] = traefikMetricsBlock
+	} else {
+		delete(doc, "metrics")
+	}
+	return true
 }
 
 // renderTraefikTemplate parses the static-config template and sets the
