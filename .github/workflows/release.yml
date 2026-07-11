@@ -86,18 +86,21 @@ jobs:
       - name: Build package
         run: nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
 
+      - name: setup xilo
+        uses: stubbedev/xilo@v0
+        with:
+          url: https://nix.stubbe.dev
+          cache: srv
+          token: ${{ secrets.XILO_TOKEN }}
+
       - name: Push to xilo
         # Best-effort: a cache-push failure (e.g. a transient 504 from the
         # single-vCPU cache box on a large closure) must not redden a release.
         # Retry with backoff, then give up softly.
         continue-on-error: true
-        env:
-          XILO_URL: https://nix.stubbe.dev
-          XILO_TOKEN: ${{ secrets.XILO_TOKEN }}
         run: |
-          curl -fsSL https://github.com/stubbedev/xilo/releases/latest/download/xilo-linux-amd64.tar.gz | tar -xz
           for attempt in 1 2 3; do
-            if ./xilo push srv $(cat /tmp/srv-outpaths); then
+            if xilo push srv $(cat /tmp/srv-outpaths); then
               exit 0
             fi
             echo "::warning::xilo push attempt $attempt failed; retrying in $((attempt * 30))s"
