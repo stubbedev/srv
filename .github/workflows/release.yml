@@ -72,9 +72,9 @@ jobs:
           retention-days: 7
 
   cache:
-    name: push nix build to attic
+    name: push nix build to xilo
     # Build the nix package for this tag and push its closure to the
-    # self-hosted attic cache (nix.stubbe.dev/srv) so `nix run`/flake
+    # self-hosted xilo cache (nix.stubbe.dev/srv) so `nix run`/flake
     # consumers and the dotfiles substituter pull a prebuilt binary instead
     # of recompiling. Independent of the Go release artifacts above.
     runs-on: ubuntu-latest
@@ -86,23 +86,24 @@ jobs:
       - name: Build package
         run: nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
 
-      - name: Push to attic
+      - name: Push to xilo
         # Best-effort: a cache-push failure (e.g. a transient 504 from the
         # single-vCPU cache box on a large closure) must not redden a release.
         # Retry with backoff, then give up softly.
         continue-on-error: true
         env:
-          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          XILO_URL: https://nix.stubbe.dev
+          XILO_TOKEN: ${{ secrets.XILO_TOKEN }}
         run: |
-          nix run nixpkgs#attic-client -- login stubbe https://nix.stubbe.dev "$ATTIC_TOKEN"
+          curl -fsSL https://github.com/stubbedev/xilo/releases/latest/download/xilo-linux-amd64.tar.gz | tar -xz
           for attempt in 1 2 3; do
-            if nix run nixpkgs#attic-client -- push srv $(cat /tmp/srv-outpaths); then
+            if ./xilo push srv $(cat /tmp/srv-outpaths); then
               exit 0
             fi
-            echo "::warning::attic push attempt $attempt failed; retrying in $((attempt * 30))s"
+            echo "::warning::xilo push attempt $attempt failed; retrying in $((attempt * 30))s"
             sleep $((attempt * 30))
           done
-          echo "::warning::attic push failed after 3 attempts; cache push is best-effort, continuing"
+          echo "::warning::xilo push failed after 3 attempts; cache push is best-effort, continuing"
 
   release:
     name: publish github release
