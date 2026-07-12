@@ -96,17 +96,9 @@ jobs:
       - name: Push to xilo
         # Best-effort: a cache-push failure (e.g. a transient 504 from the
         # single-vCPU cache box on a large closure) must not redden a release.
-        # Retry with backoff, then give up softly.
         continue-on-error: true
         run: |
-          for attempt in 1 2 3; do
-            if xilo push default $(cat /tmp/srv-outpaths); then
-              exit 0
-            fi
-            echo "::warning::xilo push attempt $attempt failed; retrying in $((attempt * 30))s"
-            sleep $((attempt * 30))
-          done
-          echo "::warning::xilo push failed after 3 attempts; cache push is best-effort, continuing"
+          xilo push default $(cat /tmp/srv-outpaths)
 
   release:
     name: publish github release
