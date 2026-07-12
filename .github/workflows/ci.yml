@@ -26,7 +26,7 @@ jobs:
     outputs:
       pushed_sha: ${{ steps.commit.outputs.sha }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Use ref/ref_name so we check out the actual branch (not detached HEAD)
           # so `git push` has somewhere to go.
@@ -86,7 +86,7 @@ jobs:
         # breakage (host-networking branches, doctor_unix, platform.IsLinux).
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Check out the immutable SHA (autofix's pushed commit if any, else the
           # triggering commit) rather than the branch name, so this read-only job
@@ -151,7 +151,7 @@ jobs:
     if: always() && (needs.autofix.result == 'success' || needs.autofix.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Immutable SHA, not the branch name — survives a mid-run branch delete.
           ref: ${{ needs.autofix.outputs.pushed_sha || github.sha }}
@@ -173,7 +173,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Immutable SHA so the job survives a mid-run branch delete. The master
           # auto-bump step pushes `HEAD:master` explicitly, so it works fine from
