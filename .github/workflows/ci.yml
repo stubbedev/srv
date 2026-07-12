@@ -243,7 +243,7 @@ jobs:
 
       - run: nix flake check --print-build-logs
 
-      # Push the master build's closure to the self-hosted attic cache so nix
+      # Push the master build's closure to the self-hosted xilo cache so nix
       # consumers tracking HEAD/master pull a prebuilt binary instead of
       # recompiling. Release tags are cached separately by release.yml. Only
       # runs on direct master pushes — PRs and feature branches don't populate
@@ -252,21 +252,26 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
 
-      - name: Push to attic
+      - name: setup xilo
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: stubbedev/xilo@v1
+        with:
+          url: https://nix.stubbe.dev
+          cache: default
+          token: ${{ secrets.XILO_TOKEN }}
+
+      - name: Push to xilo
         # Best-effort: a cache-push failure (e.g. a transient 504 from the
         # single-vCPU cache box on a large closure) must not redden master CI.
         # Retry with backoff, then give up softly.
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         continue-on-error: true
-        env:
-          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
         run: |
-          nix run nixpkgs#attic-client -- login stubbe https://nix.stubbe.dev "$ATTIC_TOKEN"
           for attempt in 1 2 3; do
-            if nix run nixpkgs#attic-client -- push srv $(cat /tmp/srv-outpaths); then
+            if xilo push default $(cat /tmp/srv-outpaths); then
               exit 0
             fi
-            echo "::warning::attic push attempt $attempt failed; retrying in $((attempt * 30))s"
+            echo "::warning::xilo push attempt $attempt failed; retrying in $((attempt * 30))s"
             sleep $((attempt * 30))
           done
-          echo "::warning::attic push failed after 3 attempts; cache push is best-effort, continuing"
+          echo "::warning::xilo push failed after 3 attempts; cache push is best-effort, continuing"
