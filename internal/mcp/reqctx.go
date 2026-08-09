@@ -54,7 +54,7 @@ func (sw *sessionWorkspace) resolve(ctx context.Context, header http.Header, ses
 	if r := headerRoot(header); r != "" {
 		return r
 	}
-	if sess == nil {
+	if !rootsUsable(sess) {
 		return ""
 	}
 	sw.once.Do(func() {
@@ -139,4 +139,29 @@ func anchorPath(ctx context.Context, req *mcpsdk.CallToolRequest, path string) s
 		return filepath.Join(root, path)
 	}
 	return path
+}
+
+// rootsRemovedFrom is the first protocol revision that forbids server-initiated
+// JSON-RPC requests (SEP-2322 / SEP-2575): from there on a server cannot ask
+// for roots at all. Clients on that revision pin the workspace with one of the
+// rootHeaders instead. ISO dates compare correctly as strings.
+const rootsRemovedFrom = "2026-07-28"
+
+// rootsUsable reports whether this session may still be asked for its roots:
+// the client advertised the capability, on a protocol version that still allows
+// the question.
+func rootsUsable(sess *mcpsdk.ServerSession) bool {
+	if sess == nil {
+		return false
+	}
+	return rootsAllowed(sess.InitializeParams())
+}
+
+// rootsAllowed is rootsUsable's decision, split out so it can be tested without
+// a live session.
+func rootsAllowed(ip *mcpsdk.InitializeParams) bool {
+	if ip == nil || ip.Capabilities == nil || ip.ProtocolVersion >= rootsRemovedFrom {
+		return false
+	}
+	return ip.Capabilities.RootsV2 != nil
 }

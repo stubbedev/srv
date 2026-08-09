@@ -69,6 +69,14 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # SEP-2577 deprecates MCP roots, sampling and logging as of protocol
+      # 2026-07-28, but they stay functional for at least twelve months and are
+      # still how current clients hand this server its workspace. Scoped to that
+      # SEP's URL so every other deprecation still fails the gate. Delete this
+      # rule, and the paths it covers, once the window closes.
+      - linters:
+          - staticcheck
+        text: "SA1019.*seps/2577-deprecate-roots-sampling-and-logging"
       - path: _test\.go
         linters:
           - errcheck
