@@ -129,3 +129,40 @@ func TestWriteTraefikCompose(t *testing.T) {
 		t.Error("compose missing network")
 	}
 }
+
+// A version-upgrade reconcile calls EnsureConfig on an existing install. It
+// must not wipe the live TLS cert list, or Traefik falls back to its default
+// self-signed cert and every site fails with a cert error until the next
+// `srv install`.
+func TestEnsureConfigPreservesDynamicCerts(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SRV_ROOT", root)
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+
+	if err := EnsureConfig("a@b.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	certDir := filepath.Join(root, "sites/start-local/certs")
+	if err := os.MkdirAll(certDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range []string{".crt", ".key"} {
+		if err := os.WriteFile(filepath.Join(certDir, "start.local"+ext), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := EnsureConfig("a@b.com"); err != nil {
+		t.Fatalf("second EnsureConfig err: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "traefik/conf/traefik-dynamic.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "start.local.crt") {
+		t.Errorf("EnsureConfig dropped the TLS cert list, got:\n%s", data)
+	}
+}

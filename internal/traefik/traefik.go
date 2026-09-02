@@ -326,10 +326,20 @@ func EnsureConfig(email string) error {
 		return err
 	}
 
-	// Write traefik-dynamic.yml atomically (Traefik watches the conf dir).
+	// Write traefik-dynamic.yml atomically (Traefik watches the conf dir) —
+	// preserving the TLS cert list on re-init, same as dnsmasq.conf below. On
+	// first run write the blank template; afterwards regenerate from the
+	// on-disk site certs. Writing the blank form on re-init wiped every site's
+	// mkcert certificate, so the ReconcileVersion an upgrade triggers left
+	// Traefik serving its default self-signed cert — a cert error on every
+	// site — until the next `srv install` ran ForceReload per site.
 	dynamicPath := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
-	if err := fsutil.AtomicWriteFile(dynamicPath, []byte(renderDynamicConfig(nil)), constants.FilePermDefault); err != nil {
-		return fmt.Errorf("failed to write traefik-dynamic.yml: %w", err)
+	if _, statErr := os.Stat(dynamicPath); os.IsNotExist(statErr) {
+		if err := fsutil.AtomicWriteFile(dynamicPath, []byte(renderDynamicConfig(nil)), constants.FilePermDefault); err != nil {
+			return fmt.Errorf("failed to write traefik-dynamic.yml: %w", err)
+		}
+	} else if err := UpdateDynamicConfig(); err != nil {
+		return fmt.Errorf("failed to refresh traefik-dynamic.yml: %w", err)
 	}
 
 	// Load or generate DNS credentials once; they are persisted to env.traefik so
