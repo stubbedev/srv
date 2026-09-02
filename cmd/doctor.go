@@ -106,20 +106,23 @@ func checkFirewall() int {
 		ui.IndentedDim(1, "No active firewall detected")
 	} else {
 		ui.IndentedDim(1, "Firewall: %s", fwStatus.Firewall)
+		// Blocked 80/443 does not break srv: every local domain resolves to
+		// 127.0.0.1 and loopback traffic never traverses the firewall. It only
+		// stops *other* devices on the LAN from reaching a site, so report it
+		// without counting it as an issue -- and name the command that
+		// actually opens the ports, since plain `srv install` skips the step.
 		if fwStatus.HTTPOpen {
 			ui.IndentedSuccess(1, "Port 80 (HTTP) - open")
 		} else {
-			ui.IndentedWarn(1, "Port 80 (HTTP) - blocked")
-			issues++
+			ui.IndentedDim(1, "Port 80 (HTTP) - blocked")
 		}
 		if fwStatus.HTTPSOpen {
 			ui.IndentedSuccess(1, "Port 443 (HTTPS) - open")
 		} else {
-			ui.IndentedWarn(1, "Port 443 (HTTPS) - blocked")
-			issues++
+			ui.IndentedDim(1, "Port 443 (HTTPS) - blocked")
 		}
 		if !fwStatus.HTTPOpen || !fwStatus.HTTPSOpen {
-			ui.IndentedDim(1, "Run 'srv install' to configure firewall")
+			ui.IndentedDim(1, "Local sites are unaffected; run 'srv install --yes' to open 80/443 for other devices on the LAN")
 		}
 	}
 

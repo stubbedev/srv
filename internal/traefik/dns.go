@@ -92,7 +92,14 @@ func DetectResolver() DNSResolverType {
 // CheckDNS tests if the local DNS server resolves the given domain to localhost.
 // It queries 127.0.0.1:53 directly using a custom resolver so the result is
 // independent of the system-wide DNS configuration.
+//
+// The argument may be a raw registry entry, so strip any wildcard prefix
+// first: Go's resolver rejects the literal `*` label as an invalid hostname
+// and fails before sending a query, which reads as "DNS not responding" even
+// though dnsmasq's address=/apex/ covers the apex and every subdomain.
 func CheckDNS(domain string) bool {
+	domain = BareDomain(domain)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

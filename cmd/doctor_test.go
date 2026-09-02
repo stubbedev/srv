@@ -109,13 +109,16 @@ func TestCheckFirewallActive(t *testing.T) {
 	}
 }
 
+// Blocked 80/443 is reported but not counted: srv serves every local domain
+// over loopback, which the firewall never filters. Counting it made `srv
+// doctor` report a permanent issue that `srv install` could not clear.
 func TestCheckFirewallBlocked(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(shelltest.New(map[string]shelltest.Response{
 		"ufw":      {Exists: true},
 		"sudo:ufw": {Out: []byte("Status: active\n")},
 	})))
-	if checkFirewall() != 2 {
-		t.Error("expected 2 issues (HTTP+HTTPS blocked)")
+	if issues := checkFirewall(); issues != 0 {
+		t.Errorf("blocked 80/443 -> %d issues, want 0 (loopback unaffected)", issues)
 	}
 }
 

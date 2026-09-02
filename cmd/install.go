@@ -106,7 +106,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 		if !installFlags.yes {
 			steps.Skip("Firewall configuration skipped (pass --yes to open ports 80/443 via sudo)")
-			ui.Warn("Note: Traefik may not be accessible without opening ports 80/443")
+			ui.Dim("Local sites still work over loopback; only other devices on the LAN need 80/443 open")
 		} else if err := firewall.OpenPorts(); err != nil {
 			ui.Warn("Failed to configure firewall: %v", err)
 			ui.Dim("You may need to manually open ports 80 and 443")
