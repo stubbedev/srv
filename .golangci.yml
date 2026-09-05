@@ -1,5 +1,21 @@
 version: "2"
 
+# Two jobs, one file.
+#
+#  1. Correctness gate — errcheck/govet/staticcheck/nilerr/… catch bugs.
+#  2. Modernization gate — every linter that knows a newer/faster way to write
+#     something Go already does: modernize, intrange, perfsprint, exptostd,
+#     mirror, usestdlibvars. These all auto-fix, so a finding is applied by
+#     `just lint-fix`, never argued about.
+#
+# Deliberately absent, with the count that decided it: goconst (269 — repeated
+# strings in table tests), godoclint (49), exhaustive (17 — srv's "enums" are
+# plain string consts, so every switch reads as non-exhaustive), nilnil (9),
+# embeddedstructfieldcheck (10), contextcheck (8 — it wants the leaf helpers
+# that deliberately carry no deadline to inherit one), and wsl/nlreturn/lll/
+# mnd/varnamelen/exhaustruct, which fire in the thousands. Style opinions that
+# bury the gates above are worse than no linter.
+
 run:
   timeout: 5m
   tests: true
@@ -7,17 +23,65 @@ run:
 linters:
   default: none
   enable:
+    # ── correctness ──────────────────────────────────────────────────────
+    - bodyclose
+    - durationcheck
     - errcheck
-    - errorlint
-    - gocritic
-    - govet
+    - errorlint # auto-fix
+    - errname
+    - gocheckcompilerdirectives
+    - gocritic # auto-fix
+    - govet # auto-fix
     - ineffassign
-    - misspell
+    - makezero
     - nilerr
-    - revive
-    - staticcheck
+    - nilnesserr
+    - noctx
+    - predeclared
+    - reassign
+    - recvcheck
+    - rowserrcheck
+    - spancheck
+    - sqlclosecheck
+    - staticcheck # auto-fix
     - unconvert
     - unused
+    - wastedassign
+
+    # ── modernization / performance (all auto-fix) ───────────────────────
+    - copyloopvar # the pre-1.22 `x := x` loop dance
+    - exptostd # golang.org/x/exp/… that has landed in the stdlib
+    - fatcontext # context re-derived inside a loop
+    - intrange # for i := 0; i < n; i++  →  for i := range n
+    - mirror # the bytes/strings twin that avoids a conversion
+    - modernize # slices/maps/min/max/range-over-func/WaitGroup.Go/…
+    - perfsprint # fmt.Sprintf where strconv or concatenation does
+    - prealloc
+    - usestdlibvars # http.MethodGet, http.StatusOK, time.RFC3339, …
+    - usetesting # t.TempDir/t.Setenv/t.Context over the manual dance
+
+    # ── hygiene ──────────────────────────────────────────────────────────
+    - canonicalheader
+    - dupword # auto-fix
+    - errchkjson
+    - forcetypeassert
+    - funcorder
+    - godot # auto-fix
+    - iotamixing
+    - misspell # auto-fix
+    - nolintlint # auto-fix
+    - revive # auto-fix
+    - tagalign # auto-fix
+    - unparam
+    - whitespace # auto-fix
+
+    # ── security ─────────────────────────────────────────────────────────
+    # srv writes config files, builds paths from user input and shells out to
+    # a container engine, so the rules below are load-bearing. Four of gosec's
+    # rules are policy decisions for a local-dev CLI rather than findings, and
+    # are switched off by ID in settings rather than papered over one call site
+    # at a time.
+    - gosec
 
   settings:
     errcheck:
@@ -34,6 +98,33 @@ linters:
       disable:
         - fieldalignment
         - shadow
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    gosec:
+      excludes:
+        # G306: srv writes configs at 0644 on purpose (constants.FilePermDefault).
+        # They are not secrets — Traefik reads several from inside a container,
+        # and a 0600 config in ~/.config/srv would be a usability bug, not a fix.
+        - G306
+        # G703/G304: every path srv touches is one the invoking user gave it —
+        # SRV_ROOT, XDG_CONFIG_HOME, a site directory. It is their own CLI
+        # running as them; there is no privilege boundary to traverse.
+        - G703
+        - G304
+        # G204: shelling out to the container engine *is* the program. The
+        # binary comes from engine's fixed table and the args are srv-built;
+        # see internal/engine for why the binary is never free-form.
+        - G204
+    perfsprint:
+      # Concatenation over Sprintf for the two-operand case as well — this is
+      # the single biggest win the linter has, and it reads fine.
+      strconcat: true
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
     revive:
       rules:
         - name: blank-imports
@@ -57,6 +148,15 @@ linters:
         - name: unused-parameter
           disabled: true
         - name: var-declaration
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
     gocritic:
       disabled-checks:
         - ifElseChain
@@ -80,24 +180,40 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+          - forcetypeassert # map[string]any navigation is the point of a fixture
           - gocritic
+          - gosec
+          - noctx
+          - prealloc
+          - unparam # helpers legitimately take args one caller does not vary
       - path: third_party/
         linters:
+          - bodyclose
+          - durationcheck
           - errcheck
+          - errname
           - errorlint
           - gocritic
           - govet
           - ineffassign
+          - makezero
           - misspell
+          - modernize
           - nilerr
+          - noctx
+          - perfsprint
+          - prealloc
           - revive
           - staticcheck
           - unconvert
           - unused
+          - whitespace
 
 formatters:
+  # gofumpt is gofmt plus the rules gofmt left on the table; its output is still
+  # gofmt-stable, so CI's `gofmt -l` check keeps passing.
   enable:
-    - gofmt
+    - gofumpt
     - goimports
 
 issues:
