@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/mkcert"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
@@ -24,7 +26,7 @@ func engineFake() *shelltest.Fake {
 
 func TestCheckEngineFail(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(engineFake()))
-	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
+	t.Cleanup(ops.SwapEngine(engine.For(engine.Docker)))
 	t.Cleanup(docker.SwapNewClientErr(errors.New("not running")))
 	if issues, _ := checkEngine(); issues != 1 {
 		t.Errorf("expected 1 issue, got %d", issues)
@@ -33,7 +35,7 @@ func TestCheckEngineFail(t *testing.T) {
 
 func TestCheckEngineOK(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(engineFake()))
-	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
+	t.Cleanup(ops.SwapEngine(engine.For(engine.Docker)))
 	t.Cleanup(docker.SwapNewClientOK())
 	if issues, _ := checkEngine(); issues != 0 {
 		t.Errorf("expected 0 issues, got %d", issues)
@@ -44,7 +46,7 @@ func TestCheckEngineOK(t *testing.T) {
 // is nothing to ask about a compose implementation that isn't installed.
 func TestCheckEngineBinaryMissing(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
-	t.Cleanup(engine.Swap(engine.For(engine.Podman)))
+	t.Cleanup(ops.SwapEngine(engine.For(engine.Podman)))
 	t.Cleanup(docker.SwapNewClientOK())
 	if issues, _ := checkEngine(); issues != 1 {
 		t.Errorf("expected 1 issue, got %d", issues)
@@ -235,7 +237,7 @@ func TestScanEnvForHostLoopbackMissingFile(t *testing.T) {
 // the checks that would each wait out their own SDK timeout only to repeat it.
 func TestCheckEngineReportsUnreachable(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(engineFake()))
-	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
+	t.Cleanup(ops.SwapEngine(engine.For(engine.Docker)))
 	t.Cleanup(docker.SwapNewClientErr(errors.New("not running")))
 	if _, up := checkEngine(); up {
 		t.Error("checkEngine reported the runtime up, want unreachable")
@@ -244,9 +246,29 @@ func TestCheckEngineReportsUnreachable(t *testing.T) {
 
 func TestCheckEngineReportsReachable(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(engineFake()))
-	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
+	t.Cleanup(ops.SwapEngine(engine.For(engine.Docker)))
 	t.Cleanup(docker.SwapNewClientOK())
 	if _, up := checkEngine(); !up {
 		t.Error("checkEngine reported the runtime down, want reachable")
+	}
+}
+
+// doctor reads config.yml through the same layer as everything else, so what
+// it reports is exactly what srv will honour.
+func TestCheckUserConfigValid(t *testing.T) {
+	setupSrvRoot(t)
+	if issues := checkUserConfig(); issues != 0 {
+		t.Errorf("checkUserConfig() = %d on a fresh root, want 0", issues)
+	}
+}
+
+func TestCheckUserConfigReportsInvalidValues(t *testing.T) {
+	root := setupSrvRoot(t)
+	if err := os.WriteFile(filepath.Join(root, constants.UserConfigFile),
+		[]byte("upstream_dns:\n  - not-an-ip\ncontainer_engine: podmna\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if issues := checkUserConfig(); issues != 1 {
+		t.Errorf("checkUserConfig() = %d for an invalid config, want 1", issues)
 	}
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/engine"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/traefik"
 )
 
@@ -45,7 +46,7 @@ var requiredPorts = []int{
 // Engine is the container engine this leg of the suite drives, taken from
 // SRV_CONTAINER_ENGINE (default docker) — the same override srv itself reads,
 // so the harness and the binary under test never disagree.
-func Engine() engine.Engine { return engine.Current() }
+func Engine() engine.Engine { return ops.Engine() }
 
 // SkipIfNoEngine bails out when the configured engine isn't on PATH or its API
 // is unreachable, so a Docker-only box stays green on a Podman leg instead of

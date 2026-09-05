@@ -10,6 +10,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/ops"
 )
 
 // Resource URIs exposed by the srv MCP server.
@@ -39,15 +40,15 @@ func registerResources(srv *mcpsdk.Server) {
 }
 
 func userConfigResource(_ context.Context, req *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-	userCfg, err := cfg.LoadUserConfig()
+	// Through ops so the keys are the ones in config.yml and in the published
+	// schema. Marshalling config.UserConfig directly emits Go field names —
+	// UserConfig carries only yaml tags — and an agent that read this resource
+	// would write back keys srv ignores.
+	userCfg, err := ops.UserConfigJSON()
 	if err != nil {
 		return nil, fmt.Errorf("load user config: %w", err)
 	}
-	data, err := json.MarshalIndent(redactedJSONMap(userCfg), "", "  ")
+	data, err := json.MarshalIndent(redactMap(userCfg), "", "  ")
 	if err != nil {
 		return nil, err
 	}

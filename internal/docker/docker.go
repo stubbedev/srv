@@ -21,6 +21,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/engine"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/platform"
 )
 
@@ -29,7 +30,7 @@ import (
 // per-runtime because "start Docker Desktop" is useless advice to someone on
 // Podman or Colima.
 func notRunningErr() error {
-	eng := engine.Current()
+	eng := ops.Engine()
 	return fmt.Errorf("%s is not running or not installed (tried %s).\n  %s",
 		eng.Name, eng.Endpoint, startHint(eng))
 }
@@ -101,7 +102,7 @@ type sdkClient interface {
 var newClientFn = func() (sdkClient, error) {
 	// Resolving the engine exports DOCKER_HOST, which is what FromEnv reads —
 	// so this call is what points the SDK at Podman rather than Docker.
-	_ = engine.Current()
+	_ = ops.Engine()
 	return dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
 }
 
@@ -302,7 +303,7 @@ func RemoveComposeProjectContainers(project string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, engine.Binary(), "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
+	out, err := exec.CommandContext(ctx, ops.EngineBinary(), "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
 	if err != nil {
 		return fmt.Errorf("list project %q containers: %w", project, err)
 	}
@@ -310,7 +311,7 @@ func RemoveComposeProjectContainers(project string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := exec.CommandContext(ctx, engine.Binary(), append([]string{"rm", "-f"}, ids...)...).Run(); err != nil {
+	if err := exec.CommandContext(ctx, ops.EngineBinary(), append([]string{"rm", "-f"}, ids...)...).Run(); err != nil {
 		return fmt.Errorf("remove project %q containers: %w", project, err)
 	}
 	return nil
@@ -323,7 +324,7 @@ func defaultComposePrefixedExec(dir, prefix string, args ...string) error {
 	if err := guardTestExec("compose", "SwapComposePrefixedExec"); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(context.Background(), engine.Binary(), engine.ComposeArgs(args...)...)
+	cmd := exec.CommandContext(context.Background(), ops.EngineBinary(), ops.ComposeArgs(args...)...)
 	cmd.Dir = dir
 	cmd.Stdout = newPrefixWriter(os.Stdout, prefix)
 	cmd.Stderr = newPrefixWriter(os.Stderr, prefix)
@@ -401,7 +402,7 @@ func defaultDockerExec(interactive bool, args ...string) error {
 	if err := guardTestExec("exec", "SwapDockerExec"); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(context.Background(), engine.Binary(), args...)
+	cmd := exec.CommandContext(context.Background(), ops.EngineBinary(), args...)
 	if interactive {
 		cmd.Stdin = os.Stdin
 	}
@@ -454,7 +455,7 @@ func defaultComposeExec(dir string, quiet bool, args ...string) error {
 	if quiet {
 		ctx, cancel := context.WithTimeout(context.Background(), ComposeTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, engine.Binary(), engine.ComposeArgs(args...)...)
+		cmd := exec.CommandContext(ctx, ops.EngineBinary(), ops.ComposeArgs(args...)...)
 		cmd.Dir = dir
 		cmd.Stdin = nil
 		err := cmd.Run()
@@ -463,7 +464,7 @@ func defaultComposeExec(dir string, quiet bool, args ...string) error {
 		}
 		return err
 	}
-	cmd := exec.CommandContext(context.Background(), engine.Binary(), engine.ComposeArgs(args...)...)
+	cmd := exec.CommandContext(context.Background(), ops.EngineBinary(), ops.ComposeArgs(args...)...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -510,7 +511,7 @@ func defaultComposePSOutput(dir string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, engine.Binary(), engine.ComposeArgs("ps", "--format", constants.ComposeStatusFormat)...)
+	cmd := exec.CommandContext(ctx, ops.EngineBinary(), ops.ComposeArgs("ps", "--format", constants.ComposeStatusFormat)...)
 	cmd.Dir = dir
 	return cmd.Output()
 }
@@ -676,7 +677,7 @@ func defaultComposeServiceIDLookup(ctx context.Context, dir, serviceName string)
 	if err := guardTestExec("compose ps -q", "SwapComposeServiceIDLookup"); err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, engine.Binary(), engine.ComposeArgs("ps", "-q", serviceName)...)
+	cmd := exec.CommandContext(ctx, ops.EngineBinary(), ops.ComposeArgs("ps", "-q", serviceName)...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

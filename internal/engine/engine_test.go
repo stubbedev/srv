@@ -11,18 +11,13 @@ import (
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
 
-func envDockerHost() string { return os.Getenv(constants.EnvDockerHost) }
-
-// clean gives a test a resolution with nothing inherited from the developer's
-// own machine: no DOCKER_HOST, no override, and a fresh cache either side.
+// clean gives a probe nothing inherited from the developer's own machine.
 func clean(t *testing.T) {
 	t.Helper()
 	t.Setenv(constants.EnvDockerHost, "")
 	t.Setenv(constants.EnvContainerEngine, "")
 	os.Unsetenv(constants.EnvDockerHost)
 	os.Unsetenv(constants.EnvContainerEngine)
-	ResetCache()
-	t.Cleanup(ResetCache)
 }
 
 func TestDockerIsTheDefaultAndTheFallback(t *testing.T) {
@@ -147,79 +142,5 @@ func TestDetectReportsNothingWhenNoRuntimeIsUsable(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
 	if e, ok := Detect(); ok {
 		t.Errorf("Detect() = %+v, want no match", e)
-	}
-}
-
-func TestExplicitDockerHostWinsOverEverything(t *testing.T) {
-	clean(t)
-	t.Setenv(constants.EnvContainerEngine, Podman)
-	t.Setenv(constants.EnvDockerHost, "tcp://10.0.0.1:2375")
-
-	e := Current()
-	if e.Endpoint != "tcp://10.0.0.1:2375" {
-		t.Errorf("endpoint = %q, want the operator's DOCKER_HOST untouched", e.Endpoint)
-	}
-	if envDockerHost() != "tcp://10.0.0.1:2375" {
-		t.Errorf("DOCKER_HOST = %q, want it left alone", envDockerHost())
-	}
-}
-
-// A DOCKER_HOST that happens to be a known runtime's socket still resolves to
-// that runtime, so `podman compose` is used rather than `docker compose`.
-func TestExplicitDockerHostIsNamedWhenItIsAKnownSocket(t *testing.T) {
-	clean(t)
-	t.Setenv(constants.EnvDockerHost, unixScheme+"/run/podman/podman.sock")
-	if got := Current(); got.Name != Podman || got.Binary != Podman {
-		t.Errorf("Current() = %+v, want podman", got)
-	}
-}
-
-func TestConfiguredRuntimeExportsItsEndpoint(t *testing.T) {
-	clean(t)
-	t.Setenv(constants.EnvContainerEngine, Podman)
-
-	e := Current()
-	if e.Name != Podman {
-		t.Fatalf("engine = %q, want podman", e.Name)
-	}
-	if envDockerHost() != e.Endpoint {
-		t.Errorf("DOCKER_HOST = %q, want %q", envDockerHost(), e.Endpoint)
-	}
-}
-
-func TestUnknownEngineFallsThroughToDetection(t *testing.T) {
-	clean(t)
-	t.Setenv(constants.EnvContainerEngine, "podmna")
-	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
-
-	// Nothing detectable in the test env, so this lands on the docker fallback
-	// rather than on a runtime named after the typo.
-	if got := Current().Name; got != Docker && got != Podman {
-		t.Errorf("engine = %q, want a real runtime, not the typo", got)
-	}
-	if _, err := Configured(); err == nil {
-		t.Error("Configured() error = nil, want doctor to be able to report the typo")
-	}
-}
-
-// The source has to be recorded at resolution time, not inferred afterwards:
-// srv exports DOCKER_HOST itself, so anything that reads the variable back
-// would report every run as "from DOCKER_HOST".
-func TestSourceDistinguishesConfiguredFromInherited(t *testing.T) {
-	clean(t)
-	t.Setenv(constants.EnvContainerEngine, Podman)
-	if got := Current().Source; got != SourceConfig {
-		t.Errorf("source = %q, want %q", got, SourceConfig)
-	}
-	if envDockerHost() == "" {
-		t.Error("DOCKER_HOST was not exported, so the SDK client would miss the runtime")
-	}
-
-	ResetCache()
-	t.Setenv(constants.EnvContainerEngine, "")
-	os.Unsetenv(constants.EnvContainerEngine)
-	t.Setenv(constants.EnvDockerHost, "tcp://10.0.0.1:2375")
-	if got := Current().Source; got != SourceEnv {
-		t.Errorf("source = %q, want %q", got, SourceEnv)
 	}
 }

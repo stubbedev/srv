@@ -326,6 +326,7 @@ Run diagnostic checks
 Run diagnostic checks to identify common issues with your srv setup.
 
 Checks performed:
+  - config.yml validity (container engine, upstream DNS, parked paths)
   - Container engine (docker/podman) availability, Compose v2, socket
   - Required ports (80, 443, 8080)
   - Docker network existence

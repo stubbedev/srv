@@ -19,6 +19,7 @@ import (
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/firewall"
 	"github.com/stubbedev/srv/internal/metrics"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
@@ -39,6 +40,7 @@ var doctorCmd = &cobra.Command{
 	Long: `Run diagnostic checks to identify common issues with your srv setup.
 
 Checks performed:
+  - config.yml validity (container engine, upstream DNS, parked paths)
   - Container engine (docker/podman) availability, Compose v2, socket
   - Required ports (80, 443, 8080)
   - Docker network existence
@@ -63,6 +65,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	ui.Blank()
 
 	issues := 0
+	issues += checkUserConfig()
 	engineIssues, engineUp := checkEngine()
 	issues += engineIssues
 	issues += checkFirewall()
@@ -99,15 +102,43 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// checkUserConfig validates config.yml through the same layer every other
+// surface reads it through, so doctor reports exactly what srv will honour.
+// Every value here is interpolated into a generated config file — dnsmasq.conf,
+// a compose file — so an invalid one is not a cosmetic problem.
+func checkUserConfig() int {
+	ui.Bold("User config")
+	cfg, err := config.Load()
+	if err != nil {
+		ui.IndentedError(1, "cannot load config: %v", err)
+		ui.Blank()
+		return 1
+	}
+	ui.IndentedDim(1, "%s", cfg.ConfigPath())
+
+	if _, err := ops.UserConfig(); err != nil {
+		// errors.Join renders one problem per line; keep that shape.
+		for line := range strings.SplitSeq(err.Error(), "\n") {
+			ui.IndentedError(1, "%s", line)
+		}
+		ui.IndentedDim(2, "srv falls back to defaults for the invalid values")
+		ui.Blank()
+		return 1
+	}
+	ui.IndentedSuccess(1, "valid")
+	ui.Blank()
+	return 0
+}
+
 // checkEngine verifies the configured container engine is installed, its API
 // socket is reachable, and its compose implementation writes the labels srv
 // filters on. Everything else in doctor assumes these hold.
 func checkEngine() (int, bool) {
-	eng := engine.Current()
+	eng := ops.Engine()
 	ui.Bold("Container engine")
 	ui.IndentedDim(1, "%s: %s (%s)", eng.Source, eng.Name, eng.Endpoint)
 
-	if _, err := engine.Configured(); err != nil {
+	if _, err := ops.ConfiguredEngine(); err != nil {
 		ui.IndentedError(1, "%v", err)
 		ui.IndentedDim(2, "ignoring it and using %s instead", eng.Name)
 		ui.Blank()

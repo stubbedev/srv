@@ -25,8 +25,8 @@ type Config struct {
 // UserConfig holds user-configurable settings stored in config.yml.
 type UserConfig struct {
 	ContainerEngine string   `jsonschema:"description=Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2.,enum=auto,enum=docker,enum=podman,enum=colima,enum=orbstack,enum=rancher-desktop" yaml:"container_engine,omitempty"`
-	ParkedPaths     []string `jsonschema:"description=Directories that 'srv park' watches for new sites."                                                                                                                                                                            yaml:"parked_paths,omitempty"`
-	UpstreamDNS     []string `jsonschema:"description=Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty."                                                                                                                            yaml:"upstream_dns,omitempty"`
+	ParkedPaths     []string `jsonschema:"description=Absolute directories that 'srv park' watches for new sites."                                                                                                                                                                   yaml:"parked_paths,omitempty"`
+	UpstreamDNS     []string `jsonschema:"description=Upstream resolvers written into dnsmasq.conf as server= lines. Each entry must be an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4) when empty."                                       yaml:"upstream_dns,omitempty"`
 }
 
 var (
@@ -179,27 +179,4 @@ func (c *Config) SaveUserConfig(userCfg *UserConfig) error {
 	header := "# yaml-language-server: $schema=" + constants.UserConfigSchemaURL + "\n" +
 		"# srv user config\n"
 	return fsutil.AtomicWriteFile(configPath, append([]byte(header), data...), constants.FilePermDefault)
-}
-
-// GetParkedPaths returns the list of parked directories from config.yml.
-func (c *Config) GetParkedPaths() ([]string, error) {
-	userCfg, err := c.LoadUserConfig()
-	if err != nil {
-		return nil, err
-	}
-	if userCfg.ParkedPaths == nil {
-		return []string{}, nil
-	}
-	return userCfg.ParkedPaths, nil
-}
-
-// SetParkedPaths saves the list of parked directories to config.yml.
-func (c *Config) SetParkedPaths(paths []string) error {
-	userCfg, err := c.LoadUserConfig()
-	if err != nil {
-		// If we can't load, start with empty config
-		userCfg = &UserConfig{}
-	}
-	userCfg.ParkedPaths = paths
-	return c.SaveUserConfig(userCfg)
 }

@@ -35,9 +35,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
-	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/shell"
 )
@@ -163,54 +161,6 @@ func (e Engine) Rootless() bool {
 // String renders the engine for user-facing messages.
 func (e Engine) String() string { return e.Name }
 
-var (
-	mu      sync.Mutex
-	loaded  bool
-	current Engine
-)
-
-// Current returns the resolved engine, detecting on first use and exporting
-// DOCKER_HOST as a side effect.
-func Current() Engine {
-	mu.Lock()
-	defer mu.Unlock()
-	if !loaded {
-		current = resolve()
-		loaded = true
-	}
-	return current
-}
-
-// Name is shorthand for Current().Name.
-func Name() string { return Current().Name }
-
-// Binary is shorthand for Current().Binary.
-func Binary() string { return Current().Binary }
-
-// ComposeArgs is shorthand for Current().ComposeArgs.
-func ComposeArgs(args ...string) []string { return Current().ComposeArgs(args...) }
-
-// Swap replaces the resolved engine and returns a restore func for t.Cleanup.
-func Swap(e Engine) func() {
-	mu.Lock()
-	defer mu.Unlock()
-	prev, prevLoaded := current, loaded
-	current, loaded = e, true
-	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		current, loaded = prev, prevLoaded
-	}
-}
-
-// ResetCache forces the next Current() to resolve again.
-func ResetCache() {
-	mu.Lock()
-	defer mu.Unlock()
-	loaded = false
-	current = Engine{}
-}
-
 // Validate reports whether name is a runtime srv knows how to drive.
 func Validate(name string) error {
 	if name == "" || slices.Contains(Supported, name) {
@@ -262,41 +212,12 @@ func Detect() (Engine, bool) {
 
 // resolve applies the precedence: an explicit DOCKER_HOST, then the configured
 // runtime, then detection, then Docker.
-func resolve() Engine {
-	// An operator who exported DOCKER_HOST has named the endpoint directly, and
-	// it is the more specific instruction than any name — it is also the only
-	// way to reach a runtime that is not in the table (a remote daemon, a shim).
-	if host := os.Getenv(constants.EnvDockerHost); host != "" {
-		return forEndpoint(host)
-	}
 
-	if name := configuredName(); name != "" && name != Auto {
-		e := For(name)
-		e.Source = SourceConfig
-		return export(e)
-	}
-
-	if e, ok := Detect(); ok {
-		return export(e)
-	}
-
-	e := For(Docker)
-	e.Source = SourceFallback
-	return export(e)
-}
-
-// export publishes the endpoint as DOCKER_HOST so the SDK client and Compose v2
-// follow the resolved runtime.
-func export(e Engine) Engine {
-	_ = os.Setenv(constants.EnvDockerHost, e.Endpoint)
-	return e
-}
-
-// forEndpoint builds an Engine around an endpoint the operator supplied,
-// naming the runtime whose socket it is so messages and the compose binary are
-// still right. An unrecognised endpoint is Docker's — that is what a remote
-// daemon or a Docker-API shim answers as.
-func forEndpoint(host string) Engine {
+// ForEndpoint builds an Engine around an endpoint an operator supplied
+// directly, naming the runtime whose socket it is so messages and the compose
+// binary are still right. An unrecognised endpoint is Docker's — that is what a
+// remote daemon or a Docker-API shim answers as.
+func ForEndpoint(host string) Engine {
 	sock := strings.TrimPrefix(host, unixScheme)
 	for _, r := range runtimes {
 		if slices.Contains(r.sockets(), sock) {
@@ -309,38 +230,6 @@ func forEndpoint(host string) Engine {
 // Configured returns the raw container_engine value the user wrote (from the
 // environment override or config.yml) together with its validation error, so
 // `srv doctor` can report a typo instead of silently falling back.
-func Configured() (string, error) {
-	name := rawName()
-	return name, Validate(name)
-}
-
-// configuredName returns the validated runtime name, empty for anything
-// unreadable or unknown — a broken config key falls through to detection rather
-// than making every command fail.
-func configuredName() string {
-	name := rawName()
-	if Validate(name) != nil {
-		return ""
-	}
-	return name
-}
-
-// rawName returns the container_engine value as written, empty when neither the
-// environment nor config.yml says anything.
-func rawName() string {
-	if name := os.Getenv(constants.EnvContainerEngine); name != "" {
-		return name
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return ""
-	}
-	userCfg, err := cfg.LoadUserConfig()
-	if err != nil {
-		return ""
-	}
-	return userCfg.ContainerEngine
-}
 
 // ---- socket candidates -----------------------------------------------------
 

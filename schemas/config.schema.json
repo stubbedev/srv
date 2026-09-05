@@ -19,14 +19,14 @@
         "type": "string"
       },
       "type": "array",
-      "description": "Directories that 'srv park' watches for new sites."
+      "description": "Absolute directories that 'srv park' watches for new sites."
     },
     "upstream_dns": {
       "items": {
         "type": "string"
       },
       "type": "array",
-      "description": "Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty."
+      "description": "Upstream resolvers written into dnsmasq.conf as server= lines. Each entry must be an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4) when empty."
     }
   },
   "additionalProperties": false,

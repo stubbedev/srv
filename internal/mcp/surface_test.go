@@ -182,16 +182,17 @@ func TestUserConfigResource(t *testing.T) {
 	}
 
 	out := readResource(t, resourceUserConfig, userConfigResource)
-	// Note the key casing: UserConfig carries only yaml tags, so json.Marshal
-	// emits Go field names here rather than the snake_case an agent sees in
-	// config.yml (and rather than the paths resource, which does have json
-	// tags). Pinned as-is because it is the shipped behaviour, not because it
-	// is the behaviour you would choose.
-	if out["ContainerEngine"] != "podman" {
-		t.Errorf("ContainerEngine = %v, want podman (keys: %v)", out["ContainerEngine"], slices.Sorted(maps.Keys(out)))
+	// The resource goes through ops.UserConfigJSON, so the keys are the ones in
+	// config.yml and in the published schema. It used to emit Go field names —
+	// UserConfig carries only yaml tags — and an agent that read this resource
+	// would have written back keys srv ignores.
+	if out["container_engine"] != "podman" {
+		t.Errorf("container_engine = %v, want podman (keys: %v)", out["container_engine"], slices.Sorted(maps.Keys(out)))
 	}
-	if _, snake := out["container_engine"]; snake {
-		t.Error("resource now emits snake_case — update this test and the README if that was intentional")
+	for _, goName := range []string{"ContainerEngine", "ParkedPaths", "UpstreamDNS"} {
+		if _, leaked := out[goName]; leaked {
+			t.Errorf("resource leaked the Go field name %q", goName)
+		}
 	}
 }
 

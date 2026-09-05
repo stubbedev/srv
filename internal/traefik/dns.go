@@ -19,6 +19,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/fsutil"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell"
 )
@@ -713,8 +714,13 @@ func UpdateDnsmasqConfig() error {
 		}
 	}
 
+	// Through ops: these values are interpolated into dnsmasq.conf as
+	// `server=<value>` below, so they must have passed validation. Before the
+	// ops layer this read the file directly and a newline in a value could
+	// inject arbitrary directives. A config that fails validation falls back to
+	// the defaults rather than writing a conf dnsmasq will not start on.
 	upstreamDNS := []string{constants.GoogleDNS1, constants.GoogleDNS2}
-	if userCfg, ucErr := cfg.LoadUserConfig(); ucErr == nil && len(userCfg.UpstreamDNS) > 0 {
+	if userCfg, ucErr := ops.UserConfig(); ucErr == nil && len(userCfg.UpstreamDNS) > 0 {
 		upstreamDNS = userCfg.UpstreamDNS
 	}
 

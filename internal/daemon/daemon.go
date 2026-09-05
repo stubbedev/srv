@@ -21,7 +21,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
-	"github.com/stubbedev/srv/internal/engine"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -231,7 +231,7 @@ func (d *Daemon) watchEvents() error {
 // runEventLoop runs a single event watching session using the Docker SDK.
 func (d *Daemon) runEventLoop() error {
 	// Resolving the engine exports DOCKER_HOST, which FromEnv then reads.
-	eng := engine.Current()
+	eng := ops.Engine()
 	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
 	if err != nil {
 		return fmt.Errorf("failed to create %s client: %w", eng.Name, err)

@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/docker"
-	"github.com/stubbedev/srv/internal/engine"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -91,7 +91,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 	ui.Dim("Connecting to container: %s", containerName)
 	execArgs := []string{"exec", "-it", containerName, "sh"}
-	c := exec.CommandContext(cmd.Context(), engine.Binary(), execArgs...)
+	c := exec.CommandContext(cmd.Context(), ops.EngineBinary(), execArgs...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -101,7 +101,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
 			return nil
 		}
-		return fmt.Errorf("%s exec failed: %w", engine.Name(), err)
+		return fmt.Errorf("%s exec failed: %w", ops.EngineName(), err)
 	}
 	return nil
 }

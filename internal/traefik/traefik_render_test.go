@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/engine"
+	"github.com/stubbedev/srv/internal/ops"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,7 +60,7 @@ func TestRenderTraefikTemplateInjection(t *testing.T) {
 // provider endpoint is that fixed path whichever runtime srv resolved — the
 // Colima/OrbStack/Podman socket differences stay entirely on the host side.
 func TestRenderTraefikTemplatePinsSocketEndpoint(t *testing.T) {
-	t.Cleanup(engine.Swap(engine.Engine{
+	t.Cleanup(ops.SwapEngine(engine.Engine{
 		Name: "colima", Binary: "docker",
 		Endpoint: "unix:///home/u/.colima/default/docker.sock",
 	}))
@@ -80,7 +81,7 @@ func TestRenderTraefikTemplatePinsSocketEndpoint(t *testing.T) {
 // A remote daemon has no socket to bind: Traefik has to be pointed at the URL,
 // and the compose file must not grow an empty volume entry.
 func TestRemoteEndpointIsPassedThroughAndNotMounted(t *testing.T) {
-	t.Cleanup(engine.Swap(engine.Engine{
+	t.Cleanup(ops.SwapEngine(engine.Engine{
 		Name: "docker", Binary: "docker", Endpoint: "tcp://10.0.0.1:2375",
 	}))
 	out, err := renderTraefikTemplate("srv-network", "ops@example.com")

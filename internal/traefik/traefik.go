@@ -17,8 +17,8 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
-	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/fsutil"
+	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/yamlpatch"
 )
@@ -147,7 +147,7 @@ func DockerComposeTemplate(networkName, sitesDir, dnsUser, dnsPass string) (stri
 	// A unix socket is bind-mounted so the container always sees it at the same
 	// path; a remote endpoint (tcp://) has nothing to mount and is reached over
 	// the network instead — renderTraefikTemplate points the provider at it.
-	if mount := engine.Current().SocketMount(); mount != "" {
+	if mount := ops.Engine().SocketMount(); mount != "" {
 		traefikSvc.Volumes = append([]string{mount}, traefikSvc.Volumes...)
 	}
 
@@ -538,7 +538,7 @@ func renderTraefikTemplate(networkName, email string) ([]byte, error) {
 	if err := yamlpatch.SetPath(&doc, "providers.docker.network", networkName); err != nil {
 		return nil, fmt.Errorf("failed to set provider network: %w", err)
 	}
-	if err := yamlpatch.SetPath(&doc, "providers.docker.endpoint", engine.Current().TraefikEndpoint()); err != nil {
+	if err := yamlpatch.SetPath(&doc, "providers.docker.endpoint", ops.Engine().TraefikEndpoint()); err != nil {
 		return nil, fmt.Errorf("failed to set provider endpoint: %w", err)
 	}
 	if err := yamlpatch.SetPath(&doc, "certificatesResolvers.letsencrypt.acme.email", email); err != nil {

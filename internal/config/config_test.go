@@ -259,70 +259,6 @@ func TestSaveAndLoadUserConfig(t *testing.T) {
 	}
 }
 
-func TestGetParkedPaths(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SRV_ROOT", tmpDir)
-	ResetCache()
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	// Initially empty
-	paths, err := cfg.GetParkedPaths()
-	if err != nil {
-		t.Fatalf("GetParkedPaths() failed: %v", err)
-	}
-	if len(paths) != 0 {
-		t.Errorf("expected empty paths, got %v", paths)
-	}
-
-	// Set some paths
-	if err := cfg.SetParkedPaths([]string{"/foo", "/bar"}); err != nil {
-		t.Fatalf("SetParkedPaths() failed: %v", err)
-	}
-
-	// Get them back
-	paths, err = cfg.GetParkedPaths()
-	if err != nil {
-		t.Fatalf("GetParkedPaths() failed: %v", err)
-	}
-	if len(paths) != 2 {
-		t.Errorf("expected 2 paths, got %d", len(paths))
-	}
-}
-
-func TestSetParkedPathsPreservesOtherConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SRV_ROOT", tmpDir)
-	ResetCache()
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	// Set initial paths
-	if err := cfg.SetParkedPaths([]string{"/initial"}); err != nil {
-		t.Fatalf("SetParkedPaths() failed: %v", err)
-	}
-
-	// Update paths
-	if err := cfg.SetParkedPaths([]string{"/updated", "/paths"}); err != nil {
-		t.Fatalf("SetParkedPaths() failed: %v", err)
-	}
-
-	// Verify update worked
-	paths, err := cfg.GetParkedPaths()
-	if err != nil {
-		t.Fatalf("GetParkedPaths() failed: %v", err)
-	}
-	if len(paths) != 2 || paths[0] != "/updated" {
-		t.Errorf("expected [/updated, /paths], got %v", paths)
-	}
-}
-
 func TestSiteCertsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SRV_ROOT", tmpDir)
@@ -385,35 +321,5 @@ func TestLoadCachesPanicSafe(t *testing.T) {
 	cfg2, _ := Load()
 	if cfg1 != cfg2 {
 		t.Error("Load should return same pointer when cached")
-	}
-}
-
-func TestSetParkedPathsEmptyList(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SRV_ROOT", tmpDir)
-	ResetCache()
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	// Set some paths first
-	if err := cfg.SetParkedPaths([]string{"/foo"}); err != nil {
-		t.Fatalf("SetParkedPaths() failed: %v", err)
-	}
-
-	// Clear paths
-	if err := cfg.SetParkedPaths([]string{}); err != nil {
-		t.Fatalf("SetParkedPaths() failed: %v", err)
-	}
-
-	// Verify cleared
-	paths, err := cfg.GetParkedPaths()
-	if err != nil {
-		t.Fatalf("GetParkedPaths() failed: %v", err)
-	}
-	if len(paths) != 0 {
-		t.Errorf("expected empty paths after clear, got %v", paths)
 	}
 }
