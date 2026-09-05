@@ -1,6 +1,6 @@
 module github.com/stubbedev/srv
 
-go 1.25.8
+go 1.27.0
 
 require (
 	github.com/containerd/errdefs v1.0.0

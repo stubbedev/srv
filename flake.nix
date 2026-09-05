@@ -20,7 +20,9 @@
       in
       {
         packages = {
-          srv = pkgs.buildGoModule {
+          # nixpkgs' default `go` still trails the toolchain in go.mod, so the
+          # builder is pinned to the same major the module declares.
+          srv = (pkgs.buildGoModule.override { go = pkgs.go_1_27; }) {
             pname = "srv";
             version = version;
             src = self;
@@ -52,7 +54,7 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            go
+            go_1_27
             gopls
             golangci-lint
             mkcert
