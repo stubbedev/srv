@@ -314,3 +314,65 @@ func TestCertSiteNameIsDistinctAndPathSafe(t *testing.T) {
 		t.Errorf("certSiteName() = %q, want a path-safe name", got)
 	}
 }
+
+// ─── self-targeting redirects ────────────────────────────────────────────
+//
+// Both kinds are loops, and neither used to be rejected. The DNS one is the
+// quieter failure: dnsmasq is told to answer the source name with whatever the
+// source resolved to when the conf was generated, so it either silently
+// comments the entry out or pins the name to the address of the very site the
+// redirect was meant to move traffic away from.
+
+func TestAddRejectsDNSAliasToItself(t *testing.T) {
+	cfg := addEnv(t)
+	_, err := Add(cfg, AddSpec{Domain: "old.test", To: "old.test", DNSOnly: true})
+	if err == nil {
+		t.Fatal("Add() = nil for a self-targeting DNS alias, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "loop") {
+		t.Errorf("err = %v, want it to name the loop", err)
+	}
+	if _, statErr := os.Stat(redirectPath(cfg, "old-test")); statErr == nil {
+		t.Error("a self-targeting alias was written to disk")
+	}
+}
+
+// Case must not be a way around it: DNS names are case-insensitive.
+func TestAddRejectsDNSAliasToItselfRegardlessOfCase(t *testing.T) {
+	cfg := addEnv(t)
+	if _, err := Add(cfg, AddSpec{Domain: "old.test", To: "OLD.TEST", DNSOnly: true}); err == nil {
+		t.Fatal("Add() = nil for a differently-cased self-target, want a refusal")
+	}
+}
+
+func TestAddRejectsHTTPRedirectToItself(t *testing.T) {
+	cfg := addEnv(t)
+	for _, to := range []string{
+		"https://old.test",
+		"http://old.test",
+		"https://old.test/somewhere",
+		"https://OLD.TEST",
+		"https://old.test:8443",
+	} {
+		_, err := Add(cfg, AddSpec{Domain: "old.test", To: to})
+		if err == nil {
+			t.Errorf("Add(to=%q) = nil, want a refusal — this is a browser redirect loop", to)
+		}
+	}
+}
+
+// The check is on the host, not the whole string: a different host is fine even
+// when the source domain appears inside the URL.
+func TestAddAllowsATargetThatMerelyMentionsTheDomain(t *testing.T) {
+	cfg := addEnv(t)
+	if _, err := Add(cfg, AddSpec{Domain: "old.test", To: "https://new.test/from/old.test"}); err != nil {
+		t.Errorf("Add() = %v, want the redirect allowed", err)
+	}
+}
+
+func TestAddAllowsASubdomainTarget(t *testing.T) {
+	cfg := addEnv(t)
+	if _, err := Add(cfg, AddSpec{Domain: "old.test", To: "https://www.old.test"}); err != nil {
+		t.Errorf("Add() = %v: www.old.test is a different host, not a loop", err)
+	}
+}

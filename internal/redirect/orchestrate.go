@@ -7,6 +7,7 @@ package redirect
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,10 +199,26 @@ func validateAddSpec(spec AddSpec) (name, normalizedTo string, err error) {
 		if spec.Wildcard {
 			return "", "", errors.New("wildcard is not supported with dns_only")
 		}
+		// A DNS alias to itself is a loop: dnsmasq would be told to answer the
+		// source name with whatever the source name resolved to at generation
+		// time, which is either nothing (the entry is silently commented out) or
+		// the address of the site it is meant to be redirecting away from.
+		if strings.EqualFold(to, spec.Domain) {
+			return "", "", fmt.Errorf("target %q is the same as the source domain: a redirect to itself is a loop", to)
+		}
 		normalizedTo = to
 	} else {
 		if !strings.HasPrefix(to, "http://") && !strings.HasPrefix(to, "https://") {
 			return "", "", fmt.Errorf("invalid target %q: must be an absolute http:// or https:// URL", to)
+		}
+		targetURL, parseErr := url.Parse(to)
+		if parseErr != nil {
+			return "", "", fmt.Errorf("invalid target %q: %w", to, parseErr)
+		}
+		// Same loop, one layer up: Traefik would answer the domain with a 301 to
+		// the same domain, and the browser would follow it until it gives up.
+		if strings.EqualFold(targetURL.Hostname(), spec.Domain) {
+			return "", "", fmt.Errorf("target %q points back at %s: a redirect to itself is a loop", to, spec.Domain)
 		}
 		normalizedTo = strings.TrimRight(to, "/")
 	}
