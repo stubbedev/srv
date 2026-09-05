@@ -361,15 +361,19 @@ func (e *errAfter) Run(name string, args ...string) error { return e.fake.Run(na
 func (e *errAfter) RunWithContext(ctx context.Context, name string, args ...string) error {
 	return e.fake.RunWithContext(ctx, name, args...)
 }
+
 func (e *errAfter) RunQuiet(name string, args ...string) ([]byte, error) {
 	return e.fake.RunQuiet(name, args...)
 }
+
 func (e *errAfter) RunQuietWithContext(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return e.fake.RunQuietWithContext(ctx, name, args...)
 }
+
 func (e *errAfter) RunWithStdin(stdin string, name string, args ...string) error {
 	return e.fake.RunWithStdin(stdin, name, args...)
 }
+
 func (e *errAfter) SudoRun(args ...string) error {
 	*e.calls++
 	if *e.calls >= e.n {
@@ -377,6 +381,7 @@ func (e *errAfter) SudoRun(args ...string) error {
 	}
 	return e.fake.SudoRun(args...)
 }
+
 func (e *errAfter) SudoRunQuiet(args ...string) ([]byte, error) {
 	return e.fake.SudoRunQuiet(args...)
 }
@@ -391,4 +396,5 @@ func (e *errAfter) CheckPort(port string) (bool, error) { return e.fake.CheckPor
 func (e *errAfter) CheckPortOnAddr(addr, port string) (bool, error) {
 	return e.fake.CheckPortOnAddr(addr, port)
 }
+
 func (e *errAfter) IdentifyPortProcess(port string) string { return e.fake.IdentifyPortProcess(port) }

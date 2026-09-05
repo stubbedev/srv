@@ -85,7 +85,7 @@ func TestUpdateSystemdResolvedConfigDotLocalPerName(t *testing.T) {
 		if !strings.Contains(c.Stdin, "~grafana.local") {
 			t.Errorf("grafana.local should be routed per-name: %q", c.Stdin)
 		}
-		for _, tok := range strings.Fields(c.Stdin) {
+		for tok := range strings.FieldsSeq(c.Stdin) {
 			if tok == "~local" {
 				t.Errorf("~local TLD-wide route must not be emitted: %q", c.Stdin)
 			}

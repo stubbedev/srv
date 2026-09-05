@@ -74,7 +74,7 @@ func TestParseVolumeSpecExpandsTilde(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Skip("cannot create home subdir")
 	}
-	defer os.Remove(sub) //nolint:errcheck
+	defer os.Remove(sub)
 
 	m, err := ParseVolumeSpec("~/.srv-test-tilde:/mnt")
 	if err != nil {

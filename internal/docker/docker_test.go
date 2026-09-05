@@ -814,14 +814,14 @@ func TestSwapNewClientOK(t *testing.T) {
 type erringWriter struct{}
 
 func (erringWriter) Write([]byte) (int, error) {
-	return 0, errFakeIO
+	return 0, errFakeIOFailed
 }
 
-var errFakeIO = errFake("io fail")
+var errFakeIOFailed = fakeError("io fail")
 
-type errFake string
+type fakeError string
 
-func (e errFake) Error() string { return string(e) }
+func (e fakeError) Error() string { return string(e) }
 
 func TestPrefixWriterPropagatesError(t *testing.T) {
 	p := newPrefixWriter(erringWriter{}, "x")
@@ -863,6 +863,39 @@ func TestComposeUpDownNoRemoveOrphans(t *testing.T) {
 			if a == "--remove-orphans" {
 				t.Errorf("--remove-orphans must not be passed (would wipe sibling stacks): %v", args)
 			}
+		}
+	}
+}
+
+// The guard is the reason a forgotten seam swap fails loudly instead of
+// recreating the developer's own srv containers against a temp directory.
+// This test runs in a test binary, so every default seam must refuse.
+func TestDefaultSeamsRefuseToRunFromTests(t *testing.T) {
+	cases := map[string]func() error{
+		"compose":          func() error { return defaultComposeExec(t.TempDir(), true, "up") },
+		"compose prefixed": func() error { return defaultComposePrefixedExec(t.TempDir(), "p", "up") },
+		"exec":             func() error { return defaultDockerExec(false, "ps") },
+		"compose ps": func() error {
+			_, err := defaultComposePSOutput(t.TempDir())
+			return err
+		},
+		"compose ps -q": func() error {
+			_, err := defaultComposeServiceIDLookup(t.Context(), t.TempDir(), "web")
+			return err
+		},
+		"project sweep": func() error { return RemoveComposeProjectContainers("srv-site-x") },
+	}
+	for name, call := range cases {
+		err := call()
+		if err == nil {
+			t.Errorf("%s: reached the real engine from a test, want a refusal", name)
+			continue
+		}
+		if !errors.Is(err, ErrRealEngineInTest) {
+			t.Errorf("%s: err = %v, want it to wrap ErrRealEngineInTest", name, err)
+		}
+		if !strings.Contains(err.Error(), "Swap") {
+			t.Errorf("%s: err = %q, want it to name the seam to swap", name, err)
 		}
 	}
 }

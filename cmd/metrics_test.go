@@ -68,6 +68,7 @@ type stubMkcertRunner struct{}
 
 func (stubMkcertRunner) Stream(args ...string) error           { return nil }
 func (stubMkcertRunner) Output(args ...string) ([]byte, error) { return []byte("/tmp/mkcert\n"), nil }
+
 func (stubMkcertRunner) Combined(args ...string) ([]byte, error) {
 	return []byte("Created a new local CA"), nil
 }

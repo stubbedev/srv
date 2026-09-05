@@ -21,10 +21,12 @@ func (s *stubRunner) Stream(args ...string) error {
 	s.calls = append(s.calls, "Stream:"+strings.Join(args, ","))
 	return s.streamErr
 }
+
 func (s *stubRunner) Output(args ...string) ([]byte, error) {
 	s.calls = append(s.calls, "Output:"+strings.Join(args, ","))
 	return s.outOut, s.outErr
 }
+
 func (s *stubRunner) Combined(args ...string) ([]byte, error) {
 	s.calls = append(s.calls, "Combined:"+strings.Join(args, ","))
 	return s.combinedOut, s.combinedErr

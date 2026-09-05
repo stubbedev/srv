@@ -2,6 +2,7 @@
 package site
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -189,7 +190,7 @@ func TestIsNotFoundError(t *testing.T) {
 	})
 
 	t.Run("unrelated error is not a not-found error", func(t *testing.T) {
-		err := fmt.Errorf("some other error")
+		err := errors.New("some other error")
 		if IsNotFoundError(err) {
 			t.Errorf("IsNotFoundError on generic error = true, want false")
 		}

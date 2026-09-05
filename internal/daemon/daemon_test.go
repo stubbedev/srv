@@ -90,11 +90,11 @@ func TestDaemonLogConcurrent(t *testing.T) {
 
 	const goroutines, perGoroutine = 8, 50
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < perGoroutine; i++ {
+			for i := range perGoroutine {
 				d.log("g%d-line%d", id, i)
 			}
 		}(g)

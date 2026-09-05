@@ -180,8 +180,8 @@ func TestResolveAliases(t *testing.T) {
 func TestBuildDnsmasqConfWithAliases(t *testing.T) {
 	t.Run("emits address= directive per resolved alias", func(t *testing.T) {
 		aliases := []ResolvedAlias{
-			{DNSAlias: DNSAlias{Source: "a.test", Target: "x.example.com"}, IP: "1.2.3.4"},
-			{DNSAlias: DNSAlias{Source: "b.test", Target: "y.example.com"}, IP: "5.6.7.8"},
+			{Source: "a.test", Target: "x.example.com", IP: "1.2.3.4"},
+			{Source: "b.test", Target: "y.example.com", IP: "5.6.7.8"},
 		}
 		out := buildDnsmasqConf(nil, aliases, []string{"8.8.8.8"})
 		for _, want := range []string{
@@ -198,7 +198,7 @@ func TestBuildDnsmasqConfWithAliases(t *testing.T) {
 
 	t.Run("failed resolution becomes a commented-out skip line", func(t *testing.T) {
 		aliases := []ResolvedAlias{
-			{DNSAlias: DNSAlias{Source: "bad.test", Target: "broken.invalid"}, ResolveErr: errStub("nope")},
+			{Source: "bad.test", Target: "broken.invalid", ResolveErr: stubError("nope")},
 		}
 		out := buildDnsmasqConf(nil, aliases, []string{"8.8.8.8"})
 		if strings.Contains(out, "address=/bad.test/") {
@@ -217,8 +217,8 @@ func TestBuildDnsmasqConfWithAliases(t *testing.T) {
 	})
 }
 
-// errStub is a tiny error type for tests that need a non-nil error without
+// stubError is a tiny error type for tests that need a non-nil error without
 // pulling in errors.New everywhere.
-type errStub string
+type stubError string
 
-func (e errStub) Error() string { return string(e) }
+func (e stubError) Error() string { return string(e) }

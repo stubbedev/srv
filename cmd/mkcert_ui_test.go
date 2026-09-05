@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stubbedev/srv/internal/mkcert"
@@ -103,9 +104,11 @@ func TestColorFlagLine(t *testing.T) {
 	id := func(s ...any) string {
 		// noop colorer
 		out := ""
+		var outSb106 strings.Builder
 		for _, x := range s {
-			out += x.(string)
+			outSb106.WriteString(x.(string))
 		}
+		out += outSb106.String()
 		return out
 	}
 	cases := []struct {

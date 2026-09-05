@@ -62,7 +62,7 @@ LISTEN 0      128         0.0.0.0:443       0.0.0.0:*    users:(("traefik",pid=2
 }
 
 func TestParseSSProcessNameSkipsShortLines(t *testing.T) {
-	out := "short\nshort line"
+	out := "short\nline"
 	if got := parseSSProcessName(out, "80"); got != "" {
 		t.Errorf("short lines -> %q, want empty", got)
 	}

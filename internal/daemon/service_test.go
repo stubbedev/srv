@@ -383,8 +383,11 @@ func (e *errAfterShell) Run(name string, args ...string) error {
 	}
 	return nil
 }
+
 func (e *errAfterShell) RunWithContext(_ context.Context, _ string, _ ...string) error { return nil }
-func (e *errAfterShell) RunQuiet(string, ...string) ([]byte, error)                    { return nil, nil }
+
+func (e *errAfterShell) RunQuiet(string, ...string) ([]byte, error) { return nil, nil }
+
 func (e *errAfterShell) RunQuietWithContext(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return nil, nil
 }

@@ -32,10 +32,12 @@ func (m *mkcertStub) Stream(args ...string) error {
 	m.calls = append(m.calls, "Stream:"+strings.Join(args, ","))
 	return m.streamErr
 }
+
 func (m *mkcertStub) Output(args ...string) ([]byte, error) {
 	m.calls = append(m.calls, "Output:"+strings.Join(args, ","))
 	return []byte("/root/mkcert\n"), m.outErr
 }
+
 func (m *mkcertStub) Combined(args ...string) ([]byte, error) {
 	m.calls = append(m.calls, "Combined:"+strings.Join(args, ","))
 	return []byte("Created a new local CA"), m.combErr

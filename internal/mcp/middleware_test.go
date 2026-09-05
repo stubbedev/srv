@@ -74,9 +74,8 @@ func TestMiddlewareSerializesWritesNotReads(t *testing.T) {
 
 	// Writes: a real write-tier tool name → serialized.
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); call("add_site") }()
+	for range 5 {
+		wg.Go(func() { ; call("add_site") })
 	}
 	wg.Wait()
 	if maxInFlight != 1 {
@@ -87,9 +86,8 @@ func TestMiddlewareSerializesWritesNotReads(t *testing.T) {
 	mu.Lock()
 	maxInFlight = 0
 	mu.Unlock()
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); call("list_sites") }()
+	for range 5 {
+		wg.Go(func() { ; call("list_sites") })
 	}
 	wg.Wait()
 	if maxInFlight < 2 {

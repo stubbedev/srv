@@ -58,7 +58,7 @@ func TestBuildDnsmasqConfWildcards(t *testing.T) {
 
 func TestBuildDnsmasqConfAliasResolved(t *testing.T) {
 	aliases := []ResolvedAlias{
-		{DNSAlias: DNSAlias{Source: "old.local", Target: "new.local"}, IP: "10.0.0.1"},
+		{Source: "old.local", Target: "new.local", IP: "10.0.0.1"},
 	}
 	out := buildDnsmasqConf(nil, aliases, []string{"8.8.8.8"})
 	if !strings.Contains(out, "address=/old.local/10.0.0.1") {
@@ -68,7 +68,7 @@ func TestBuildDnsmasqConfAliasResolved(t *testing.T) {
 
 func TestBuildDnsmasqConfAliasResolveErr(t *testing.T) {
 	aliases := []ResolvedAlias{
-		{DNSAlias: DNSAlias{Source: "old.local", Target: "missing"}, ResolveErr: errors.New("nx")},
+		{Source: "old.local", Target: "missing", ResolveErr: errors.New("nx")},
 	}
 	out := buildDnsmasqConf(nil, aliases, []string{"8.8.8.8"})
 	if !strings.Contains(out, "resolution failed") {

@@ -13,7 +13,6 @@ import (
 // failing round-trip on every call, or dropping roots for clients that still
 // answer them.
 func TestRootsAllowedProtocolGate(t *testing.T) {
-	//nolint:staticcheck // SA1019: exercising the deprecated roots path on purpose
 	caps := &mcpsdk.ClientCapabilities{RootsV2: &mcpsdk.RootCapabilities{}}
 	for ver, want := range map[string]bool{
 		"2024-11-05": true,

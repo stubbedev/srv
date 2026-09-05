@@ -17,7 +17,10 @@ func TestReadConfigMissing(t *testing.T) {
 func TestReadConfigPresent(t *testing.T) {
 	dir := t.TempDir()
 	body := map[string]any{"paths": []string{"/srv/a", "/srv/b"}}
-	data, _ := json.Marshal(body)
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
