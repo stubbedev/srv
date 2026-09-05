@@ -69,11 +69,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman docker-compose-v2
           sudo systemctl enable --now podman.socket
-          # The suite runs as the runner user against the rootful socket. A
-          # throwaway CI box is the one place opening it up is reasonable;
-          # rootless podman needs a sysctl for the privileged ports Traefik
-          # binds and is tracked separately.
-          sudo chmod 666 /run/podman/podman.sock
+          # The suite runs as the runner user against the rootful socket. Both
+          # the directory and the socket need opening: /run/podman is 0700
+          # root:root, so the socket's own mode is irrelevant until the user
+          # can traverse into it. A throwaway CI box is the one place doing
+          # this is reasonable; rootless podman needs a sysctl for the
+          # privileged ports Traefik binds and is tracked separately.
+          sudo chmod 0755 /run/podman
+          sudo chmod 0666 /run/podman/podman.sock
+          ls -ld /run/podman /run/podman/podman.sock
           # Fail here rather than inside a test if the socket is not actually
           # serving: this is the whole premise of the leg.
           podman --remote --url unix:///run/podman/podman.sock info >/dev/null
