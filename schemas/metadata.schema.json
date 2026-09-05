@@ -193,5 +193,5 @@
   "additionalProperties": false,
   "type": "object",
   "title": "srv site metadata",
-  "description": "SiteMetadata holds all configuration for a site.\nThis is stored in ~/.config/srv/sites/{name}/metadata.yml"
+  "description": "SiteMetadata holds all configuration for a site.\nThis is stored in ~/.config/srv/sites/{name}/metadata.yml."
 }

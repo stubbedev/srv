@@ -6,6 +6,8 @@
 package proxy
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -158,10 +160,10 @@ func RemoveProxy(cfg *config.Config, name string) (warnings []string, err error)
 // port/container, valid domain/port/container, and a derived-or-validated name.
 func validateAddSpec(spec AddSpec) (name, containerName, containerPort string, isContainer bool, err error) {
 	if spec.Port == "" && spec.Container == "" {
-		return "", "", "", false, fmt.Errorf("either port or container must be specified")
+		return "", "", "", false, errors.New("either port or container must be specified")
 	}
 	if spec.Port != "" && spec.Container != "" {
-		return "", "", "", false, fmt.Errorf("port and container are mutually exclusive")
+		return "", "", "", false, errors.New("port and container are mutually exclusive")
 	}
 	if err := validate.Domain(spec.Domain); err != nil {
 		return "", "", "", false, fmt.Errorf("invalid domain: %w", err)
@@ -169,7 +171,7 @@ func validateAddSpec(spec AddSpec) (name, containerName, containerPort string, i
 	if spec.Container != "" {
 		host, port, ok := splitContainer(spec.Container)
 		if !ok {
-			return "", "", "", false, fmt.Errorf("invalid container format, use name:port (e.g. myapp:3000)")
+			return "", "", "", false, errors.New("invalid container format, use name:port (e.g. myapp:3000)")
 		}
 		if err := validate.PortString(port); err != nil {
 			return "", "", "", false, fmt.Errorf("invalid container port: %w", err)
@@ -198,7 +200,8 @@ func resolveTarget(cfg *config.Config, isContainer bool, containerName, containe
 	if !isContainer {
 		// Best-effort liveness check; not fatal — proxies are often added before
 		// the dev server starts.
-		if conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", port), 500*time.Millisecond); dialErr == nil {
+		dialer := &net.Dialer{Timeout: 500 * time.Millisecond}
+		if conn, dialErr := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", port)); dialErr == nil {
 			_ = conn.Close()
 		}
 		host := constants.DockerHostInternal

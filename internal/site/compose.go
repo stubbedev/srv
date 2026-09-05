@@ -123,7 +123,7 @@ type composeNotFoundError struct {
 }
 
 func (e *composeNotFoundError) Error() string {
-	return fmt.Sprintf("no docker-compose file found in %s", e.dir)
+	return "no docker-compose file found in " + e.dir
 }
 
 // IsNotFoundError reports whether err is a "compose file not found" error as
@@ -305,7 +305,7 @@ func discoverServicePort(service ComposeService, envVars map[string]string) int 
 	return 0
 }
 
-// envVarPattern matches ${VAR}, ${VAR:-default}, ${VAR-default}, $VAR patterns
+// envVarPattern matches ${VAR}, ${VAR:-default}, ${VAR-default}, $VAR patterns.
 var envVarPattern = regexp.MustCompile(`\$\{([^}:]+)(?::-?([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
 
 // expandEnvVars replaces environment variable references in a string.

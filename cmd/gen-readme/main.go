@@ -48,18 +48,12 @@ func main() {
 	}
 	doc := string(raw)
 
-	cli, err := genCLI()
-	if err != nil {
-		fail(fmt.Errorf("cli: %w", err))
-	}
+	cli := genCLI()
 	tools, err := genMCP()
 	if err != nil {
 		fail(fmt.Errorf("mcp: %w", err))
 	}
-	cfg, err := genConfig()
-	if err != nil {
-		fail(fmt.Errorf("config: %w", err))
-	}
+	cfg := genConfig()
 
 	for _, blk := range []struct{ name, body string }{
 		{"cli", cli},
@@ -104,7 +98,7 @@ func replaceBlock(doc, name, body string) (string, error) {
 
 // ─── CLI surface ─────────────────────────────────────────────────────────
 
-func genCLI() (string, error) {
+func genCLI() string {
 	root := srvcmd.RootCmd
 	var b strings.Builder
 	for _, g := range root.Groups() {
@@ -120,7 +114,7 @@ func genCLI() (string, error) {
 		}
 		b.WriteString("\n")
 	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 // commandInvocation renders a compact invocation for a top-level command. A
@@ -166,7 +160,7 @@ func genMCP() (string, error) {
 
 // ─── config file reference ───────────────────────────────────────────────
 
-func genConfig() (string, error) {
+func genConfig() string {
 	type target struct {
 		heading string
 		file    string
@@ -201,7 +195,7 @@ func genConfig() (string, error) {
 		}
 		b.WriteString("\n")
 	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 // reflectStruct mirrors gen-schema's reflector so the README field reference

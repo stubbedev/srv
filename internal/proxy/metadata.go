@@ -7,6 +7,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,7 +85,7 @@ func Read(name string) (*Metadata, error) {
 // write.
 func Write(meta Metadata) error {
 	if meta.Name == "" {
-		return fmt.Errorf("proxy metadata is missing name")
+		return errors.New("proxy metadata is missing name")
 	}
 	cfg, err := config.Load()
 	if err != nil {

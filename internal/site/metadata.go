@@ -33,27 +33,27 @@ const (
 // Upstream points a route at a backend. Exactly one of Port/Container/URL is
 // set per Kind.
 type Upstream struct {
-	Kind      string `yaml:"kind" jsonschema:"enum=localhost,enum=container,enum=url,description=Upstream target type."`
-	Port      int    `yaml:"port,omitempty" jsonschema:"description=Port when kind=localhost or kind=container."`
-	Container string `yaml:"container,omitempty" jsonschema:"description=Container name when kind=container."`
-	URL       string `yaml:"url,omitempty" jsonschema:"description=Full URL when kind=url (e.g. https://api.example.com)."`
+	Kind      string `jsonschema:"enum=localhost,enum=container,enum=url,description=Upstream target type." yaml:"kind"`
+	Port      int    `jsonschema:"description=Port when kind=localhost or kind=container."                  yaml:"port,omitempty"`
+	Container string `jsonschema:"description=Container name when kind=container."                          yaml:"container,omitempty"`
+	URL       string `jsonschema:"description=Full URL when kind=url (e.g. https://api.example.com)."       yaml:"url,omitempty"`
 	// InsecureSkipVerify disables TLS cert verification for an https url upstream
 	// whose certificate can't be verified (self-signed, or a SAN that doesn't
 	// match the dialed host/IP). No effect on http upstreams.
-	InsecureSkipVerify bool `yaml:"insecure_skip_verify,omitempty" jsonschema:"description=Skip TLS verification for an https url upstream (self-signed / mismatched cert)."`
+	InsecureSkipVerify bool `jsonschema:"description=Skip TLS verification for an https url upstream (self-signed / mismatched cert)." yaml:"insecure_skip_verify,omitempty"`
 }
 
 // Route attaches an extra Traefik router to a site, used for path-prefix splits
 // (e.g. /app → WebSocket on :6001) or regex rewrites (e.g. /videos/...).
 type Route struct {
-	ID               string   `yaml:"id" jsonschema:"description=Stable handle for the route used by 'srv route' CLI."`
-	Path             string   `yaml:"path,omitempty" jsonschema:"description=PathPrefix to match (e.g. /api)."`
-	PathRegex        string   `yaml:"path_regex,omitempty" jsonschema:"description=Regex pattern to match (Traefik PathRegexp)."`
-	Rewrite          string   `yaml:"rewrite,omitempty" jsonschema:"description=ReplacePathRegex replacement (e.g. /v1/$1)."`
+	ID               string   `jsonschema:"description=Stable handle for the route used by 'srv route' CLI."    yaml:"id"`
+	Path             string   `jsonschema:"description=PathPrefix to match (e.g. /api)."                        yaml:"path,omitempty"`
+	PathRegex        string   `jsonschema:"description=Regex pattern to match (Traefik PathRegexp)."            yaml:"path_regex,omitempty"`
+	Rewrite          string   `jsonschema:"description=ReplacePathRegex replacement (e.g. /v1/$1)."             yaml:"rewrite,omitempty"`
 	Upstream         Upstream `yaml:"upstream"`
-	PreserveHost     *bool    `yaml:"preserve_host,omitempty" jsonschema:"description=Whether to preserve the Host header (default true)."`
-	PassRangeHeaders bool     `yaml:"pass_range_headers,omitempty" jsonschema:"description=Forward Range/If-Range headers for byte-range requests."`
-	Priority         int      `yaml:"priority,omitempty" jsonschema:"description=Traefik router priority override."`
+	PreserveHost     *bool    `jsonschema:"description=Whether to preserve the Host header (default true)."     yaml:"preserve_host,omitempty"`
+	PassRangeHeaders bool     `jsonschema:"description=Forward Range/If-Range headers for byte-range requests." yaml:"pass_range_headers,omitempty"`
+	Priority         int      `jsonschema:"description=Traefik router priority override."                       yaml:"priority,omitempty"`
 }
 
 // VolumeMount is an extra bind-mount the user added to a site so its container
@@ -61,9 +61,9 @@ type Route struct {
 // binaries, demo asset trees, etc.). Source and Target are absolute paths;
 // the source must already exist on the host.
 type VolumeMount struct {
-	Source   string `yaml:"source" jsonschema:"description=Absolute host path."`
-	Target   string `yaml:"target" jsonschema:"description=Absolute path inside the container."`
-	ReadOnly bool   `yaml:"read_only,omitempty" jsonschema:"description=Mount the bind read-only."`
+	Source   string `jsonschema:"description=Absolute host path."                 yaml:"source"`
+	Target   string `jsonschema:"description=Absolute path inside the container." yaml:"target"`
+	ReadOnly bool   `jsonschema:"description=Mount the bind read-only."           yaml:"read_only,omitempty"`
 }
 
 // CurrentMetadataSchema is the version written to new metadata.yml files. Bump
@@ -71,29 +71,29 @@ type VolumeMount struct {
 const CurrentMetadataSchema = 1
 
 // SiteMetadata holds all configuration for a site.
-// This is stored in ~/.config/srv/sites/{name}/metadata.yml
+// This is stored in ~/.config/srv/sites/{name}/metadata.yml.
 type SiteMetadata struct {
-	SchemaVersion      int           `yaml:"schema_version,omitempty" jsonschema:"description=metadata.yml schema version (1 = current)."`
-	Type               SiteType      `yaml:"type" jsonschema:"enum=compose,enum=static,enum=dockerfile,description=Site runtime type."`
-	Domains            []string      `yaml:"domains,omitempty" jsonschema:"description=All hostnames; the first entry is canonical."`
-	ProjectPath        string        `yaml:"project_path" jsonschema:"description=Absolute path to the project on disk."`
-	ServiceName        string        `yaml:"service_name,omitempty" jsonschema:"description=Container name used for Traefik routing."`
-	ComposeServiceName string        `yaml:"compose_service_name,omitempty" jsonschema:"description=docker-compose service name (for compose commands)."`
-	Profile            string        `yaml:"profile,omitempty" jsonschema:"description=docker-compose profile (if the service uses profiles)."`
-	Port               int           `yaml:"port" jsonschema:"description=Port the service listens on inside the container."`
-	IsLocal            bool          `yaml:"is_local" jsonschema:"description=Whether to use a locally-issued (mkcert) SSL certificate."`
-	Wildcard           bool          `yaml:"wildcard,omitempty" jsonschema:"description=Match apex + one-level subdomains (*.example.com)."`
-	NetworkName        string        `yaml:"network_name" jsonschema:"description=Docker network the site joins."`
-	ExtraNetworks      []string      `yaml:"extra_networks,omitempty" jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)."`
-	Volumes            []VolumeMount `yaml:"volumes,omitempty" jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile, TEMP dirs)."`
-	Listeners          []string      `yaml:"listeners,omitempty" jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."`
-	Routes             []Route       `yaml:"routes,omitempty" jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."`
+	SchemaVersion      int           `jsonschema:"description=metadata.yml schema version (1 = current)."                                                         yaml:"schema_version,omitempty"`
+	Type               SiteType      `jsonschema:"enum=compose,enum=static,enum=dockerfile,description=Site runtime type."                                        yaml:"type"`
+	Domains            []string      `jsonschema:"description=All hostnames; the first entry is canonical."                                                       yaml:"domains,omitempty"`
+	ProjectPath        string        `jsonschema:"description=Absolute path to the project on disk."                                                              yaml:"project_path"`
+	ServiceName        string        `jsonschema:"description=Container name used for Traefik routing."                                                           yaml:"service_name,omitempty"`
+	ComposeServiceName string        `jsonschema:"description=docker-compose service name (for compose commands)."                                                yaml:"compose_service_name,omitempty"`
+	Profile            string        `jsonschema:"description=docker-compose profile (if the service uses profiles)."                                             yaml:"profile,omitempty"`
+	Port               int           `jsonschema:"description=Port the service listens on inside the container."                                                  yaml:"port"`
+	IsLocal            bool          `jsonschema:"description=Whether to use a locally-issued (mkcert) SSL certificate."                                          yaml:"is_local"`
+	Wildcard           bool          `jsonschema:"description=Match apex + one-level subdomains (*.example.com)."                                                 yaml:"wildcard,omitempty"`
+	NetworkName        string        `jsonschema:"description=Docker network the site joins."                                                                     yaml:"network_name"`
+	ExtraNetworks      []string      `jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)." yaml:"extra_networks,omitempty"`
+	Volumes            []VolumeMount `jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile, TEMP dirs)."          yaml:"volumes,omitempty"`
+	Listeners          []string      `jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."                                 yaml:"listeners,omitempty"`
+	Routes             []Route       `jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."                                        yaml:"routes,omitempty"`
 	// Static site options
-	SPA   bool `yaml:"spa,omitempty" jsonschema:"description=Single-page-app mode (fall back to /index.html)."`
-	Cache bool `yaml:"cache,omitempty" jsonschema:"description=Emit aggressive caching headers for static assets."`
-	CORS  bool `yaml:"cors,omitempty" jsonschema:"description=Emit permissive CORS headers."`
+	SPA   bool `jsonschema:"description=Single-page-app mode (fall back to /index.html)."   yaml:"spa,omitempty"`
+	Cache bool `jsonschema:"description=Emit aggressive caching headers for static assets." yaml:"cache,omitempty"`
+	CORS  bool `jsonschema:"description=Emit permissive CORS headers."                      yaml:"cors,omitempty"`
 	// Dockerfile site options
-	DockerfilePort int `yaml:"dockerfile_port,omitempty" jsonschema:"description=Port discovered from the Dockerfile EXPOSE directive."`
+	DockerfilePort int `jsonschema:"description=Port discovered from the Dockerfile EXPOSE directive." yaml:"dockerfile_port,omitempty"`
 }
 
 // PrimaryDomain returns the canonical (first) domain registered for the site,

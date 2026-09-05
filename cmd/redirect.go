@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -167,10 +168,10 @@ func validateRedirectInput() (*redirectInput, error) {
 		// that the DNS layer cannot honor. Reject them outright so the user
 		// gets a clean error instead of a silently-ignored flag.
 		if redirectAddFlags.wildcard {
-			return nil, fmt.Errorf("--wildcard is not supported with --dns-only (DNS records do not match wildcard children)")
+			return nil, errors.New("--wildcard is not supported with --dns-only (DNS records do not match wildcard children)")
 		}
 		if redirectAddFlags.temporary {
-			return nil, fmt.Errorf("--temporary is not supported with --dns-only (DNS records carry no HTTP status code)")
+			return nil, errors.New("--temporary is not supported with --dns-only (DNS records carry no HTTP status code)")
 		}
 		normalizedTo = to
 	} else {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -322,7 +323,7 @@ func installCAWithRetry() error {
 		case res.SystemUnsupported:
 			ui.Warn("mkcert CA install: system trust store not supported on this platform")
 			reportCAInstall(res, true)
-			return fmt.Errorf("mkcert cannot install the CA on this platform — install it manually and re-run `srv install`")
+			return errors.New("mkcert cannot install the CA on this platform — install it manually and re-run `srv install`")
 		default:
 			ui.Warn("mkcert CA install: did not land in the system trust store")
 			if res.RawOutput != "" {
@@ -332,9 +333,9 @@ func installCAWithRetry() error {
 	}
 	reportCAInstall(mkcert.InstallResult{}, true)
 	if !installFlags.yes {
-		return fmt.Errorf("mkcert CA was not installed; re-run `srv install --yes` to retry the sudo prompt up to three times, or install the CA manually")
+		return errors.New("mkcert CA was not installed; re-run `srv install --yes` to retry the sudo prompt up to three times, or install the CA manually")
 	}
-	return fmt.Errorf("mkcert CA was not installed — browsers will reject every *.test URL; install it manually and re-run `srv install`")
+	return errors.New("mkcert CA was not installed — browsers will reject every *.test URL; install it manually and re-run `srv install`")
 }
 
 // resolvePortConflicts handles port conflicts detected before starting Traefik.
@@ -378,7 +379,7 @@ func resolvePortConflicts(conflicts []traefik.PortConflict) error {
 	ui.Blank()
 
 	if !installFlags.yes {
-		return fmt.Errorf("port conflicts detected; re-run with --yes to auto-fix via sudo or stop the listed processes manually")
+		return errors.New("port conflicts detected; re-run with --yes to auto-fix via sudo or stop the listed processes manually")
 	}
 
 	for _, c := range fixable {

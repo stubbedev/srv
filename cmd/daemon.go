@@ -304,7 +304,7 @@ func printLastLines(path string, n int) error {
 	if write > n {
 		start = write % n
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		fmt.Println(ring[(start+i)%n])
 	}
 	return nil

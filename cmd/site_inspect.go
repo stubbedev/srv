@@ -162,7 +162,7 @@ func getSiteTypeLabel(s site.Site) string {
 	}
 }
 
-// getSSLStatus returns a formatted SSL status string for a site
+// getSSLStatus returns a formatted SSL status string for a site.
 func getSSLStatus(s site.Site) string {
 	if s.IsBroken {
 		return ui.DimText("-")
@@ -281,7 +281,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// showCertInfo displays SSL certificate information for a domain
+// showCertInfo displays SSL certificate information for a domain.
 func showCertInfo(domain string) {
 	certs := traefik.ListLocalCerts()
 	for _, cert := range certs {
@@ -403,10 +403,7 @@ func runLogsAll() error {
 
 	var wg sync.WaitGroup
 	for _, s := range running {
-		s := s
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			composeArgs := []string{"logs"}
 			if logsFlags.follow {
 				composeArgs = append(composeArgs, "-f")
@@ -423,7 +420,7 @@ func runLogsAll() error {
 			if err := docker.ComposePrefixed(s.ComposeDir, s.Name, composeArgs...); err != nil {
 				ui.Warn("[%s] log stream ended: %v", s.Name, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return nil

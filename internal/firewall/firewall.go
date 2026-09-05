@@ -234,7 +234,7 @@ func persistIPTablesRules() {
 	// Try iptables-save (Debian/Ubuntu with iptables-persistent)
 	if shell.Exists("netfilter-persistent") {
 		// Best effort - rules are already applied, persistence is optional
-		_ = shell.SudoRun("netfilter-persistent", "save") //nolint:errcheck
+		_ = shell.SudoRun("netfilter-persistent", "save")
 		return
 	}
 
@@ -246,14 +246,14 @@ func persistIPTablesRules() {
 		// Best effort - rules are already applied, persistence is optional
 		out, err := shell.SudoRunQuiet("iptables-save")
 		if err == nil {
-			_ = shell.RunWithStdin(string(out), "sudo", "tee", "/etc/iptables/rules.v4") //nolint:errcheck
+			_ = shell.RunWithStdin(string(out), "sudo", "tee", "/etc/iptables/rules.v4")
 		}
 		return
 	}
 
 	// Try service iptables save (RHEL/CentOS without firewalld)
 	// Best effort - rules are already applied, persistence is optional
-	_ = shell.SudoRun("service", "iptables", "save") //nolint:errcheck
+	_ = shell.SudoRun("service", "iptables", "save")
 }
 
 // IsActive returns true if any firewall is detected and active.

@@ -12,10 +12,9 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// boolPtr is needed because ToolAnnotations uses *bool for
-// DestructiveHint and OpenWorldHint — the SDK distinguishes
-// unset (nil → default) from explicitly-false.
-func boolPtr(b bool) *bool { return &b }
+// ToolAnnotations uses *bool for DestructiveHint and OpenWorldHint — the SDK
+// distinguishes unset (nil → default) from explicitly-false — so the hints
+// below are taken as new(x) rather than passed by value.
 
 // readOnlyAnno marks a tool as side-effect-free. openWorld=true means the
 // tool reaches outside srv's own state (filesystem, docker daemon, network
@@ -24,7 +23,7 @@ func readOnlyAnno(title string, openWorld bool) *mcpsdk.ToolAnnotations {
 	return &mcpsdk.ToolAnnotations{
 		Title:         title,
 		ReadOnlyHint:  true,
-		OpenWorldHint: boolPtr(openWorld),
+		OpenWorldHint: new(openWorld),
 	}
 }
 
@@ -36,8 +35,8 @@ func readOnlyAnno(title string, openWorld bool) *mcpsdk.ToolAnnotations {
 func writeAnno(title string, destructive, idempotent, openWorld bool) *mcpsdk.ToolAnnotations {
 	return &mcpsdk.ToolAnnotations{
 		Title:           title,
-		DestructiveHint: boolPtr(destructive),
+		DestructiveHint: new(destructive),
 		IdempotentHint:  idempotent,
-		OpenWorldHint:   boolPtr(openWorld),
+		OpenWorldHint:   new(openWorld),
 	}
 }

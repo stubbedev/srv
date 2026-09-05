@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -151,10 +152,10 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 			skipped++
 			continue
 		}
-		cmd := exec.Command(srvBinary, step.args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		sub := exec.CommandContext(cmd.Context(), srvBinary, step.args...)
+		sub.Stdout = os.Stdout
+		sub.Stderr = os.Stderr
+		if err := sub.Run(); err != nil {
 			_ = saveImportDecisions(decisions)
 			return fmt.Errorf("step %d (%s) failed: %w", i+1, step.line, err)
 		}
@@ -429,7 +430,7 @@ func planPHPSite(g *importGroup) []importStep {
 		"needs a Dockerfile or docker-compose.yml in the project — write one, then uncomment this line",
 	}
 	for _, r := range s.Routes {
-		notes = append(notes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
+		notes = append(notes, "post-add: srv route add <name> "+routeFlags(r))
 	}
 	for _, alias := range g.aliases {
 		for _, r := range alias.Routes {
@@ -458,7 +459,7 @@ func planLooseSite(s *valet.Site) (importStep, bool) {
 		if port == 0 {
 			return importStep{}, false
 		}
-		args := []string{"proxy", "add", "-d", s.Domain, "-p", fmt.Sprintf("%d", port)}
+		args := []string{"proxy", "add", "-d", s.Domain, "-p", strconv.Itoa(port)}
 		if s.Wildcard {
 			args = append(args, "--wildcard")
 		}
@@ -490,9 +491,9 @@ func planLooseSite(s *valet.Site) (importStep, bool) {
 		}
 		notes := []string{}
 		for _, r := range s.Routes {
-			notes = append(notes, fmt.Sprintf("post-add: srv route add <name> %s", routeFlags(r)))
+			notes = append(notes, "post-add: srv route add <name> "+routeFlags(r))
 		}
-		notes = append(notes, fmt.Sprintf("source: %s", filepath.Base(s.File)))
+		notes = append(notes, "source: "+filepath.Base(s.File))
 		return importStep{
 			line:  "# unresolved (fill in <PROJECT_PATH>): srv " + strings.Join(args, " "),
 			args:  nil, // never executed via --apply because line is commented
@@ -514,15 +515,15 @@ func routeFlags(r valet.Route) string {
 		parts = append(parts, "--rewrite", fmt.Sprintf("'%s'", r.Rewrite))
 	}
 	if r.Port != 0 {
-		parts = append(parts, "--port", fmt.Sprintf("%d", r.Port))
+		parts = append(parts, "--port", strconv.Itoa(r.Port))
 	}
 	return strings.Join(parts, " ")
 }
 
 func portFromHostPort(hp string) int {
-	if i := strings.LastIndex(hp, ":"); i >= 0 {
+	if _, port, ok := strings.CutLast(hp, ":"); ok {
 		var p int
-		_, _ = fmt.Sscanf(hp[i+1:], "%d", &p)
+		_, _ = fmt.Sscanf(port, "%d", &p)
 		return p
 	}
 	return 0

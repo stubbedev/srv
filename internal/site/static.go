@@ -7,6 +7,7 @@ package site
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -176,7 +177,7 @@ func buildTraefikLabels(name string, domains []string, isLocal, wildcard bool, p
 		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domains, wildcard),
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
-		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): fmt.Sprintf("%d", port),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): strconv.Itoa(port),
 	}
 	if !isLocal {
 		labels[fmt.Sprintf("traefik.http.routers.%s.tls.certresolver", name)] = "letsencrypt"

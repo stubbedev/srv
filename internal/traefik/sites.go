@@ -46,7 +46,7 @@ type SiteRouteConfig struct {
 
 // WriteSiteRouteConfig creates a Traefik file provider config for a site.
 // This allows routing to Docker compose services without modifying the project's compose files.
-// The config is written to ~/.config/srv/traefik/conf/site-{name}.yml
+// The config is written to ~/.config/srv/traefik/conf/site-{name}.yml.
 func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 	routerName := constants.SiteConfigPrefix + route.Name
 	serviceName := constants.SiteConfigPrefix + route.Name

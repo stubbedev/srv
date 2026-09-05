@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 // so the MCP SDK's schema reflector doesn't choke on invopop/jsonschema
 // struct tags (which use a different syntax than the SDK's reflector
 // understands). Returns nil on marshal/unmarshal failure — callers treat
-// that as "no metadata available."
+// that as "no metadata available.".
 func toJSONMap(v any) map[string]any {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -97,24 +98,28 @@ func registerReadTools(srv *mcpsdk.Server) {
 
 // ─── version + paths ─────────────────────────────────────────────────
 
-type versionIn struct{}
-type versionOut struct {
-	Version string `json:"version"`
-}
+type (
+	versionIn  struct{}
+	versionOut struct {
+		Version string `json:"version"`
+	}
+)
 
 func versionTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ versionIn) (*mcpsdk.CallToolResult, versionOut, error) {
 	return nil, versionOut{Version: version}, nil
 }
 
-type pathsIn struct{}
-type pathsOut struct {
-	ConfigRoot     string `json:"config_root"`
-	SitesDir       string `json:"sites_dir"`
-	ProxiesDir     string `json:"proxies_dir"`
-	TraefikDir     string `json:"traefik_dir"`
-	TraefikConfDir string `json:"traefik_conf_dir"`
-	UserConfigFile string `json:"user_config_file"`
-}
+type (
+	pathsIn  struct{}
+	pathsOut struct {
+		ConfigRoot     string `json:"config_root"`
+		SitesDir       string `json:"sites_dir"`
+		ProxiesDir     string `json:"proxies_dir"`
+		TraefikDir     string `json:"traefik_dir"`
+		TraefikConfDir string `json:"traefik_conf_dir"`
+		UserConfigFile string `json:"user_config_file"`
+	}
+)
 
 func pathsTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ pathsIn) (*mcpsdk.CallToolResult, pathsOut, error) {
 	cfg, err := config.Load()
@@ -142,10 +147,12 @@ type siteSummary struct {
 	Broken  bool   `json:"broken,omitempty"`
 }
 
-type listSitesIn struct{}
-type listSitesOut struct {
-	Sites []siteSummary `json:"sites"`
-}
+type (
+	listSitesIn  struct{}
+	listSitesOut struct {
+		Sites []siteSummary `json:"sites"`
+	}
+)
 
 func listSitesTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ listSitesIn) (*mcpsdk.CallToolResult, listSitesOut, error) {
 	sites, err := site.List()
@@ -178,7 +185,7 @@ type getSiteOut struct {
 
 func getSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in getSiteIn) (*mcpsdk.CallToolResult, getSiteOut, error) {
 	if in.Name == "" {
-		return nil, getSiteOut{}, fmt.Errorf("name is required")
+		return nil, getSiteOut{}, errors.New("name is required")
 	}
 	s, err := site.GetByName(in.Name)
 	if err != nil {
@@ -213,7 +220,7 @@ type validateSiteOut struct {
 
 func validateSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in validateSiteIn) (*mcpsdk.CallToolResult, validateSiteOut, error) {
 	if in.Name == "" {
-		return nil, validateSiteOut{}, fmt.Errorf("name is required")
+		return nil, validateSiteOut{}, errors.New("name is required")
 	}
 	meta, err := site.ReadSiteMetadata(in.Name)
 	if err != nil {
@@ -230,10 +237,12 @@ func validateSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in validateS
 
 // ─── proxies ─────────────────────────────────────────────────────────
 
-type listProxiesIn struct{}
-type listProxiesOut struct {
-	Proxies []string `json:"proxies"`
-}
+type (
+	listProxiesIn  struct{}
+	listProxiesOut struct {
+		Proxies []string `json:"proxies"`
+	}
+)
 
 func listProxiesTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ listProxiesIn) (*mcpsdk.CallToolResult, listProxiesOut, error) {
 	return nil, listProxiesOut{Proxies: proxy.ListNames()}, nil
@@ -248,7 +257,7 @@ type getProxyOut struct {
 
 func getProxyTool(_ context.Context, _ *mcpsdk.CallToolRequest, in getProxyIn) (*mcpsdk.CallToolResult, getProxyOut, error) {
 	if in.Name == "" {
-		return nil, getProxyOut{}, fmt.Errorf("name is required")
+		return nil, getProxyOut{}, errors.New("name is required")
 	}
 	m, err := proxy.Read(in.Name)
 	if err != nil {
@@ -262,10 +271,12 @@ func getProxyTool(_ context.Context, _ *mcpsdk.CallToolRequest, in getProxyIn) (
 
 // ─── redirects ───────────────────────────────────────────────────────
 
-type listRedirectsIn struct{}
-type listRedirectsOut struct {
-	Redirects []string `json:"redirects"`
-}
+type (
+	listRedirectsIn  struct{}
+	listRedirectsOut struct {
+		Redirects []string `json:"redirects"`
+	}
+)
 
 func listRedirectsTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ listRedirectsIn) (*mcpsdk.CallToolResult, listRedirectsOut, error) {
 	cfg, err := config.Load()

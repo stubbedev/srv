@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -147,7 +148,7 @@ func resolveAddSetup(opts AddOptions) (*addSetup, error) {
 	}
 
 	if opts.Domain == "" {
-		return nil, fmt.Errorf("domain is required")
+		return nil, errors.New("domain is required")
 	}
 	if err := validate.Domain(opts.Domain); err != nil {
 		return nil, fmt.Errorf("invalid domain: %w", err)
@@ -166,7 +167,7 @@ func resolveAddSetup(opts AddOptions) (*addSetup, error) {
 	}
 
 	if opts.Wildcard && !opts.Local {
-		return nil, fmt.Errorf("wildcard requires local (Let's Encrypt cannot issue local wildcard certs)")
+		return nil, errors.New("wildcard requires local (Let's Encrypt cannot issue local wildcard certs)")
 	}
 	aliases, err := normalizeAddAliases(opts.Domain, opts.Aliases)
 	if err != nil {
@@ -199,7 +200,7 @@ func detectType(s *addSetup, override string) error {
 		case "compose":
 			composePath, err := FindComposeFile(s.sitePath)
 			if err != nil {
-				return fmt.Errorf("no docker-compose.yml found (required for type=compose)")
+				return errors.New("no docker-compose.yml found (required for type=compose)")
 			}
 			s.composePath = composePath
 		default:
@@ -237,7 +238,7 @@ func selectComposeService(s *addSetup, service, profile string) error {
 		return fmt.Errorf("parse compose file: %w", err)
 	}
 	if len(services) == 0 {
-		return fmt.Errorf("no services found in compose file")
+		return errors.New("no services found in compose file")
 	}
 
 	var selected *ServiceInfo
@@ -282,13 +283,7 @@ func selectComposeService(s *addSetup, service, profile string) error {
 		if profile == "" {
 			return fmt.Errorf("compose service declares %d profiles (%s); set profile to pick one", len(selected.Profiles), strings.Join(selected.Profiles, ", "))
 		}
-		ok := false
-		for _, p := range selected.Profiles {
-			if p == profile {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(selected.Profiles, profile)
 		if !ok {
 			return fmt.Errorf("profile %q is not one of the service's profiles (%s)", profile, strings.Join(selected.Profiles, ", "))
 		}

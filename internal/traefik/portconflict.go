@@ -6,6 +6,8 @@ package traefik
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/platform"
@@ -24,26 +26,28 @@ func stopCmd(proc string) (cmd []string, hint string) {
 			brewName = "httpd"
 		}
 		args := []string{"brew", "services", "stop", brewName}
-		return args, fmt.Sprintf("sudo %s", joinShell(args))
+		return args, "sudo " + joinShell(args)
 	}
 	args := []string{"systemctl", "stop", proc}
-	return args, fmt.Sprintf("sudo %s", joinShell(args))
+	return args, "sudo " + joinShell(args)
 }
 
 func joinShell(args []string) string {
 	out := ""
+	var outSb35 strings.Builder
 	for i, a := range args {
 		if i > 0 {
-			out += " "
+			outSb35.WriteString(" ")
 		}
-		out += a
+		outSb35.WriteString(a)
 	}
+	out += outSb35.String()
 	return out
 }
 
 // CheckPortAvailable checks if a port is available for binding.
 func CheckPortAvailable(port int) bool {
-	portStr := fmt.Sprintf("%d", port)
+	portStr := strconv.Itoa(port)
 	inUse, err := shell.CheckPort(portStr)
 	if err != nil {
 		return true // Assume available if we can't check
@@ -120,7 +124,7 @@ func CheckPortConflicts() []PortConflict {
 
 	var conflicts []PortConflict
 	for _, c := range checks {
-		portStr := fmt.Sprintf("%d", c.port)
+		portStr := strconv.Itoa(c.port)
 		inUse, _ := shell.CheckPortOnAddr(c.bindAddr, portStr)
 		if !inUse {
 			continue // port is free at the relevant address

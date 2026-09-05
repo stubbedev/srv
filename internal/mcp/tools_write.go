@@ -2,7 +2,7 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -45,7 +45,7 @@ type reloadSiteOut struct {
 
 func reloadSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in reloadSiteIn) (*mcpsdk.CallToolResult, reloadSiteOut, error) {
 	if in.Name == "" {
-		return nil, reloadSiteOut{}, fmt.Errorf("name is required")
+		return nil, reloadSiteOut{}, errors.New("name is required")
 	}
 	res, err := site.Reload(in.Name)
 	if err != nil {

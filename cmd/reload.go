@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -91,7 +92,7 @@ func reloadOne(name string) error {
 			return fmt.Errorf("lookup site: %w", gerr)
 		}
 		if s.IsBroken {
-			return fmt.Errorf("site is broken (target directory missing)")
+			return errors.New("site is broken (target directory missing)")
 		}
 		ui.Info("Restarting %s...", name)
 		if err := docker.ComposeUpWithProfile(s.ComposeDir, s.Profile); err != nil {

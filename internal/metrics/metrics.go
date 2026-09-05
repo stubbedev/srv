@@ -175,7 +175,7 @@ type composeFile struct {
 // error is ignored: these models are fixed-shape structs of scalars and slices,
 // which yaml.Marshal cannot fail to encode.
 func marshalYAML(header string, v any) string {
-	data, _ := yaml.Marshal(v) //nolint:errcheck // static structs never fail to marshal
+	data, _ := yaml.Marshal(v)
 	return header + string(data)
 }
 

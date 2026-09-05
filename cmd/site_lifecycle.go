@@ -137,7 +137,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// startAllSites starts all registered sites in parallel
+// startAllSites starts all registered sites in parallel.
 func startAllSites() error {
 	sites, err := site.List()
 	if err != nil {
@@ -250,7 +250,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// stopAllSites stops all registered sites in parallel
+// stopAllSites stops all registered sites in parallel.
 func stopAllSites() error {
 	sites, err := site.List()
 	if err != nil {
@@ -352,7 +352,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// restartAllSites restarts all registered sites in parallel
+// restartAllSites restarts all registered sites in parallel.
 func restartAllSites() error {
 	sites, err := site.List()
 	if err != nil {
@@ -406,9 +406,7 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 
 	// Start workers
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for s := range siteChan {
 				ui.SafeIndentedDim(1, "%s %s...", opName, s.Name)
 				if err := op(&s); err != nil {
@@ -418,7 +416,7 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 					failMu.Unlock()
 				}
 			}
-		}()
+		})
 	}
 
 	// Send sites to workers

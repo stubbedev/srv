@@ -75,7 +75,7 @@ func sudoArgs(args []string) []string {
 // (creds cached or NOPASSWD). Used as a preflight so a surface that cannot
 // prompt can return an actionable error before attempting a privileged step.
 func SudoFunctional() bool {
-	return exec.Command("sudo", "-n", "true").Run() == nil
+	return exec.CommandContext(context.Background(), "sudo", "-n", "true").Run() == nil
 }
 
 // SwapDefault replaces Default with r and returns a function that restores
@@ -90,7 +90,8 @@ func SwapDefault(r Runner) func() {
 
 // ---- package-level conveniences (production callers) -----------------------
 
-// Run executes a command with stdout/stderr attached.
+// Run executes a command with stdout/stderr attached. It carries no deadline —
+// callers that need one use RunWithContext.
 func Run(name string, args ...string) error { return Default.Run(name, args...) }
 
 // RunWithContext executes a command with a context for timeout/cancellation.
@@ -151,11 +152,8 @@ func IdentifyPortProcess(port string) string { return Default.IdentifyPortProces
 // processes against the host.
 type OSRunner struct{}
 
-func (OSRunner) Run(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+func (r OSRunner) Run(name string, args ...string) error {
+	return r.RunWithContext(context.Background(), name, args...)
 }
 
 func (OSRunner) RunWithContext(ctx context.Context, name string, args ...string) error {
@@ -165,8 +163,8 @@ func (OSRunner) RunWithContext(ctx context.Context, name string, args ...string)
 	return cmd.Run()
 }
 
-func (OSRunner) RunQuiet(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+func (r OSRunner) RunQuiet(name string, args ...string) ([]byte, error) {
+	return r.RunQuietWithContext(context.Background(), name, args...)
 }
 
 func (OSRunner) RunQuietWithContext(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -174,7 +172,7 @@ func (OSRunner) RunQuietWithContext(ctx context.Context, name string, args ...st
 }
 
 func (OSRunner) RunWithStdin(stdin string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -211,8 +209,12 @@ func (r OSRunner) CheckPortOnAddr(addr, port string) (bool, error) {
 		bindAddr = "0.0.0.0"
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
 	// First, try direct port binding — most reliable method.
-	listener, err := net.Listen("tcp", bindAddr+":"+port)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", bindAddr+":"+port)
 	if err != nil {
 		if isPortInUseError(err) {
 			return true, nil
@@ -224,9 +226,6 @@ func (r OSRunner) CheckPortOnAddr(addr, port string) (bool, error) {
 	}
 
 	// Fallback to ss/netstat for privileged ports or when binding fails.
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-	defer cancel()
-
 	var output []byte
 
 	switch {
@@ -349,7 +348,7 @@ func isPortInUseError(err error) bool {
 }
 
 // extractProcessName parses the process name out of an ss users field.
-// Input looks like: users:(("nginx",pid=1234,fd=6))
+// Input looks like: users:(("nginx",pid=1234,fd=6)).
 func extractProcessName(field string) string {
 	_, after, ok := strings.Cut(field, `"`)
 	if !ok {

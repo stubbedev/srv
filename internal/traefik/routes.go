@@ -5,6 +5,7 @@
 package traefik
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func WriteRoutesConfig(cfg *config.Config, set SiteRouteSet) error {
 
 	for _, r := range set.Routes {
 		if r.ID == "" {
-			return fmt.Errorf("route is missing id")
+			return errors.New("route is missing id")
 		}
 		if seen[r.ID] {
 			return fmt.Errorf("duplicate route id %q", r.ID)
@@ -168,9 +169,9 @@ func routesConfigPath(cfg *config.Config, name string) string {
 func routeMatcher(r RouteSpec) (string, error) {
 	switch {
 	case r.Path != "" && r.PathRegex != "":
-		return "", fmt.Errorf("set exactly one of path / path_regex")
+		return "", errors.New("set exactly one of path / path_regex")
 	case r.Path == "" && r.PathRegex == "":
-		return "", fmt.Errorf("missing path / path_regex")
+		return "", errors.New("missing path / path_regex")
 	case r.PathRegex != "":
 		if _, err := regexp.Compile(r.PathRegex); err != nil {
 			return "", fmt.Errorf("invalid path_regex: %w", err)
@@ -189,20 +190,20 @@ func ResolveUpstreamURL(kind, container, urlStr string, port int) (string, error
 	switch kind {
 	case "localhost":
 		if port <= 0 {
-			return "", fmt.Errorf("upstream kind=localhost requires a port")
+			return "", errors.New("upstream kind=localhost requires a port")
 		}
 		return fmt.Sprintf("http://%s:%d", constants.DockerHostInternal, port), nil
 	case "container":
 		if container == "" || port <= 0 {
-			return "", fmt.Errorf("upstream kind=container requires container and port")
+			return "", errors.New("upstream kind=container requires container and port")
 		}
 		return fmt.Sprintf("http://%s:%d", container, port), nil
 	case "url":
 		if urlStr == "" {
-			return "", fmt.Errorf("upstream kind=url requires url")
+			return "", errors.New("upstream kind=url requires url")
 		}
 		if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
-			return "", fmt.Errorf("upstream url must start with http:// or https://")
+			return "", errors.New("upstream url must start with http:// or https://")
 		}
 		return urlStr, nil
 	default:

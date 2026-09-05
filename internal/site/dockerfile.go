@@ -56,7 +56,7 @@ func parseDockerfileExposePort(f io.Reader) int {
 		if len(parts) < 2 {
 			continue
 		}
-		portStr := strings.SplitN(parts[1], "/", 2)[0]
+		portStr, _, _ := strings.Cut(parts[1], "/")
 		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
 			return p
 		}

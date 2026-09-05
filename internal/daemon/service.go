@@ -16,15 +16,15 @@ import (
 	"github.com/stubbedev/srv/internal/shell"
 )
 
-// Service file paths
+// Service file paths.
 const (
-	// SystemdUserDir is the user systemd directory
+	// SystemdUserDir is the user systemd directory.
 	SystemdUserDir = ".config/systemd/user"
-	// SystemdServiceName is the name of the systemd service
+	// SystemdServiceName is the name of the systemd service.
 	SystemdServiceName = "srv-daemon.service"
-	// LaunchdPlistName is the name of the launchd plist
+	// LaunchdPlistName is the name of the launchd plist.
 	LaunchdPlistName = "dev.stubbe.srv-daemon.plist"
-	// LaunchAgentsDir is the user LaunchAgents directory
+	// LaunchAgentsDir is the user LaunchAgents directory.
 	LaunchAgentsDir = "Library/LaunchAgents"
 )
 

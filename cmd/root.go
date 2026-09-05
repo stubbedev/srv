@@ -2,7 +2,8 @@
 package cmd
 
 import (
-	"fmt"
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 
@@ -22,12 +23,12 @@ const (
 )
 
 var (
-	// Version information - set at build time via ldflags
+	// Version information - set at build time via ldflags.
 	Version   = constants.DefaultVersion
 	Commit    = constants.DefaultCommit
 	BuildDate = constants.DefaultBuildDate
 
-	// Root command flags
+	// Root command flags.
 	verbose      bool
 	quiet        bool
 	outputFormat string
@@ -153,7 +154,7 @@ func getSiteFromArgsOrCwd(args []string, required bool) (*site.Site, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		if required {
-			return nil, fmt.Errorf("no site specified and could not get current directory")
+			return nil, errors.New("no site specified and could not get current directory")
 		}
 		return nil, err
 	}
@@ -172,7 +173,7 @@ func getSiteFromArgsOrCwd(args []string, required bool) (*site.Site, error) {
 	}
 
 	if required {
-		return nil, fmt.Errorf("no site specified and current directory is not a registered site")
+		return nil, errors.New("no site specified and current directory is not a registered site")
 	}
 	return nil, nil
 }
@@ -196,7 +197,7 @@ func CommandExists(name string) bool {
 // want to return control immediately without blocking on process completion.
 // The started process will be orphaned (reparented to init) which is intentional.
 func RunCommandDetached(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	// Detach from parent process group so it doesn't get signals
 	cmd.Stdin = nil
 	cmd.Stdout = nil

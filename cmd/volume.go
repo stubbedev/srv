@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -179,7 +180,7 @@ func ParseVolumeSpec(spec string) (site.VolumeMount, error) {
 	target = strings.TrimSpace(target)
 
 	if source == "" || target == "" {
-		return site.VolumeMount{}, fmt.Errorf("source and target are required")
+		return site.VolumeMount{}, errors.New("source and target are required")
 	}
 	if !filepath.IsAbs(source) {
 		return site.VolumeMount{}, fmt.Errorf("source %q must be an absolute path (use ~/… or /…)", source)

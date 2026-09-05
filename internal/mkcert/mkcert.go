@@ -5,6 +5,7 @@ package mkcert
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -37,7 +38,7 @@ func (defaultRunner) Stream(args ...string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(path, args...)
+	cmd := exec.CommandContext(context.Background(), path, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -49,7 +50,7 @@ func (defaultRunner) Output(args ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return exec.Command(path, args...).Output()
+	return exec.CommandContext(context.Background(), path, args...).Output()
 }
 
 func (defaultRunner) Combined(args ...string) ([]byte, error) {
@@ -57,7 +58,7 @@ func (defaultRunner) Combined(args ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(path, args...)
+	cmd := exec.CommandContext(context.Background(), path, args...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -154,7 +155,7 @@ func Install() (InstallResult, error) {
 // (without the CARootPath, which requires another mkcert invocation).
 func parseInstallOutput(out string) InstallResult {
 	res := InstallResult{RawOutput: out}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case strings.Contains(line, "Created a new local CA"):
 			res.NewCA = true

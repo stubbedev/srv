@@ -75,7 +75,7 @@ func registerSiteWriteTools(srv *mcpsdk.Server) {
 // ─── lifecycle ───────────────────────────────────────────────────────
 
 type lifecycleIn struct {
-	Name  string `json:"name" jsonschema:"site name as listed by list_sites"`
+	Name  string `json:"name"            jsonschema:"site name as listed by list_sites"`
 	Build bool   `json:"build,omitempty" jsonschema:"rebuild images before starting (start/restart only)"`
 }
 type okOut struct {
@@ -117,29 +117,29 @@ func restartSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in lifecycleI
 // ─── add_site ────────────────────────────────────────────────────────
 
 type addSiteVolume struct {
-	Source   string `json:"source" jsonschema:"host path"`
-	Target   string `json:"target" jsonschema:"container path (must not overlap /app)"`
+	Source   string `json:"source"              jsonschema:"host path"`
+	Target   string `json:"target"              jsonschema:"container path (must not overlap /app)"`
 	ReadOnly bool   `json:"read_only,omitempty"`
 }
 
 type addSiteIn struct {
-	Path         string          `json:"path" jsonschema:"project directory to register"`
-	Domain       string          `json:"domain" jsonschema:"canonical hostname (required)"`
-	Type         string          `json:"type,omitempty" jsonschema:"force site type: compose, dockerfile, or static (default: auto-detect)"`
-	Name         string          `json:"name,omitempty" jsonschema:"site name; derived from domain when omitted"`
-	Aliases      []string        `json:"aliases,omitempty" jsonschema:"extra hostnames mapped to the same site"`
-	Port         int             `json:"port,omitempty" jsonschema:"container port (default 80)"`
-	Local        bool            `json:"local,omitempty" jsonschema:"use local mkcert TLS instead of Let's Encrypt"`
-	Wildcard     bool            `json:"wildcard,omitempty" jsonschema:"match one-level subdomains (local only)"`
+	Path         string          `json:"path"                    jsonschema:"project directory to register"`
+	Domain       string          `json:"domain"                  jsonschema:"canonical hostname (required)"`
+	Type         string          `json:"type,omitempty"          jsonschema:"force site type: compose, dockerfile, or static (default: auto-detect)"`
+	Name         string          `json:"name,omitempty"          jsonschema:"site name; derived from domain when omitted"`
+	Aliases      []string        `json:"aliases,omitempty"       jsonschema:"extra hostnames mapped to the same site"`
+	Port         int             `json:"port,omitempty"          jsonschema:"container port (default 80)"`
+	Local        bool            `json:"local,omitempty"         jsonschema:"use local mkcert TLS instead of Let's Encrypt"`
+	Wildcard     bool            `json:"wildcard,omitempty"      jsonschema:"match one-level subdomains (local only)"`
 	InternalHTTP bool            `json:"internal_http,omitempty" jsonschema:"also expose on the internal plain-HTTP entrypoint"`
-	Service      string          `json:"service,omitempty" jsonschema:"compose service to route to (multi-service projects)"`
-	Profile      string          `json:"profile,omitempty" jsonschema:"compose profile to select"`
-	SPA          bool            `json:"spa,omitempty" jsonschema:"static sites: SPA fallback to index.html"`
-	Cache        bool            `json:"cache,omitempty" jsonschema:"static sites: asset caching headers"`
-	CORS         bool            `json:"cors,omitempty" jsonschema:"static sites: permissive CORS headers"`
-	Volumes      []addSiteVolume `json:"volumes,omitempty" jsonschema:"extra host bind-mounts"`
-	Force        bool            `json:"force,omitempty" jsonschema:"overwrite an existing site"`
-	Start        *bool           `json:"start,omitempty" jsonschema:"start the containers after adding (default true)"`
+	Service      string          `json:"service,omitempty"       jsonschema:"compose service to route to (multi-service projects)"`
+	Profile      string          `json:"profile,omitempty"       jsonschema:"compose profile to select"`
+	SPA          bool            `json:"spa,omitempty"           jsonschema:"static sites: SPA fallback to index.html"`
+	Cache        bool            `json:"cache,omitempty"         jsonschema:"static sites: asset caching headers"`
+	CORS         bool            `json:"cors,omitempty"          jsonschema:"static sites: permissive CORS headers"`
+	Volumes      []addSiteVolume `json:"volumes,omitempty"       jsonschema:"extra host bind-mounts"`
+	Force        bool            `json:"force,omitempty"         jsonschema:"overwrite an existing site"`
+	Start        *bool           `json:"start,omitempty"         jsonschema:"start the containers after adding (default true)"`
 }
 type addSiteOut struct {
 	OK       bool     `json:"ok"`
@@ -202,9 +202,9 @@ func addSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in addSiteIn)
 // ─── remove_site ─────────────────────────────────────────────────────
 
 type removeSiteIn struct {
-	Name   string `json:"name" jsonschema:"site name as listed by list_sites"`
+	Name   string `json:"name"              jsonschema:"site name as listed by list_sites"`
 	DryRun bool   `json:"dry_run,omitempty" jsonschema:"preview without removing"`
-	Ack    bool   `json:"ack,omitempty" jsonschema:"skip the confirmation prompt"`
+	Ack    bool   `json:"ack,omitempty"     jsonschema:"skip the confirmation prompt"`
 }
 
 func removeSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in removeSiteIn) (*mcpsdk.CallToolResult, okOut, error) {
@@ -227,8 +227,8 @@ func removeSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in removeS
 // ─── aliases ─────────────────────────────────────────────────────────
 
 type aliasIn struct {
-	Name   string `json:"name" jsonschema:"site name"`
-	Alias  string `json:"alias" jsonschema:"the hostname to add or remove"`
+	Name   string `json:"name"              jsonschema:"site name"`
+	Alias  string `json:"alias"             jsonschema:"the hostname to add or remove"`
 	DryRun bool   `json:"dry_run,omitempty"`
 	Ack    bool   `json:"ack,omitempty"`
 }
@@ -264,7 +264,7 @@ func removeAliasTool(ctx context.Context, req *mcpsdk.CallToolRequest, in aliasI
 // ─── internal listener ───────────────────────────────────────────────
 
 type setInternalIn struct {
-	Name   string `json:"name" jsonschema:"site name"`
+	Name   string `json:"name"   jsonschema:"site name"`
 	Enable bool   `json:"enable" jsonschema:"true to enable the internal listener, false to disable"`
 }
 
@@ -282,9 +282,9 @@ func setInternalListenerTool(_ context.Context, _ *mcpsdk.CallToolRequest, in se
 // ─── volumes ─────────────────────────────────────────────────────────
 
 type addVolumeIn struct {
-	Name     string `json:"name" jsonschema:"site name"`
-	Source   string `json:"source" jsonschema:"host path to mount"`
-	Target   string `json:"target" jsonschema:"container path to mount at (must not overlap /app)"`
+	Name     string `json:"name"                jsonschema:"site name"`
+	Source   string `json:"source"              jsonschema:"host path to mount"`
+	Target   string `json:"target"              jsonschema:"container path to mount at (must not overlap /app)"`
 	ReadOnly bool   `json:"read_only,omitempty" jsonschema:"mount read-only"`
 }
 
@@ -303,8 +303,8 @@ func addVolumeTool(ctx context.Context, req *mcpsdk.CallToolRequest, in addVolum
 }
 
 type removeVolumeIn struct {
-	Name   string `json:"name" jsonschema:"site name"`
-	Target string `json:"target" jsonschema:"the container target path of the mount to remove"`
+	Name   string `json:"name"              jsonschema:"site name"`
+	Target string `json:"target"            jsonschema:"the container target path of the mount to remove"`
 	DryRun bool   `json:"dry_run,omitempty"`
 	Ack    bool   `json:"ack,omitempty"`
 }

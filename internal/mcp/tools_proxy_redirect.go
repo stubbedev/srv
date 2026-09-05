@@ -62,12 +62,12 @@ func registerRedirectWriteTools(srv *mcpsdk.Server) {
 // ─── add_proxy ───────────────────────────────────────────────────────
 
 type addProxyIn struct {
-	Domain    string `json:"domain" jsonschema:"the hostname clients hit, e.g. app.test"`
-	Port      string `json:"port,omitempty" jsonschema:"localhost port to forward to; mutually exclusive with container"`
+	Domain    string `json:"domain"              jsonschema:"the hostname clients hit, e.g. app.test"`
+	Port      string `json:"port,omitempty"      jsonschema:"localhost port to forward to; mutually exclusive with container"`
 	Container string `json:"container,omitempty" jsonschema:"docker target as name:port; mutually exclusive with port"`
-	Name      string `json:"name,omitempty" jsonschema:"proxy name; derived from domain when omitted"`
-	Wildcard  bool   `json:"wildcard,omitempty" jsonschema:"also match one-level subdomains"`
-	Force     bool   `json:"force,omitempty" jsonschema:"overwrite an existing proxy of the same name"`
+	Name      string `json:"name,omitempty"      jsonschema:"proxy name; derived from domain when omitted"`
+	Wildcard  bool   `json:"wildcard,omitempty"  jsonschema:"also match one-level subdomains"`
+	Force     bool   `json:"force,omitempty"     jsonschema:"overwrite an existing proxy of the same name"`
 }
 type addProxyOut struct {
 	OK        bool     `json:"ok"`
@@ -103,9 +103,9 @@ func addProxyTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addProxyIn) (
 // ─── remove_proxy ────────────────────────────────────────────────────
 
 type removeProxyIn struct {
-	Name   string `json:"name" jsonschema:"proxy name as listed by list_proxies"`
+	Name   string `json:"name"              jsonschema:"proxy name as listed by list_proxies"`
 	DryRun bool   `json:"dry_run,omitempty" jsonschema:"preview without removing"`
-	Ack    bool   `json:"ack,omitempty" jsonschema:"skip the confirmation prompt"`
+	Ack    bool   `json:"ack,omitempty"     jsonschema:"skip the confirmation prompt"`
 }
 type removeProxyOut struct {
 	OK       bool     `json:"ok"`
@@ -138,13 +138,13 @@ func removeProxyTool(ctx context.Context, req *mcpsdk.CallToolRequest, in remove
 // ─── add_redirect ────────────────────────────────────────────────────
 
 type addRedirectIn struct {
-	Domain    string `json:"domain" jsonschema:"source hostname clients hit"`
-	To        string `json:"to" jsonschema:"target: absolute http(s) URL for HTTP mode, or a bare hostname for dns_only"`
-	Name      string `json:"name,omitempty" jsonschema:"redirect name; derived from domain when omitted"`
+	Domain    string `json:"domain"              jsonschema:"source hostname clients hit"`
+	To        string `json:"to"                  jsonschema:"target: absolute http(s) URL for HTTP mode, or a bare hostname for dns_only"`
+	Name      string `json:"name,omitempty"      jsonschema:"redirect name; derived from domain when omitted"`
 	Temporary bool   `json:"temporary,omitempty" jsonschema:"use a 302 instead of 301 (HTTP mode only)"`
-	Wildcard  bool   `json:"wildcard,omitempty" jsonschema:"also match one-level subdomains (HTTP mode only)"`
-	DNSOnly   bool   `json:"dns_only,omitempty" jsonschema:"create a dnsmasq A-record alias instead of an HTTP redirect"`
-	Force     bool   `json:"force,omitempty" jsonschema:"overwrite an existing redirect of the same name"`
+	Wildcard  bool   `json:"wildcard,omitempty"  jsonschema:"also match one-level subdomains (HTTP mode only)"`
+	DNSOnly   bool   `json:"dns_only,omitempty"  jsonschema:"create a dnsmasq A-record alias instead of an HTTP redirect"`
+	Force     bool   `json:"force,omitempty"     jsonschema:"overwrite an existing redirect of the same name"`
 }
 type addRedirectOut struct {
 	OK       bool     `json:"ok"`
@@ -185,9 +185,9 @@ func addRedirectTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRedirec
 // ─── remove_redirect ─────────────────────────────────────────────────
 
 type removeRedirectIn struct {
-	Name   string `json:"name" jsonschema:"redirect name as listed by list_redirects"`
+	Name   string `json:"name"              jsonschema:"redirect name as listed by list_redirects"`
 	DryRun bool   `json:"dry_run,omitempty" jsonschema:"preview without removing"`
-	Ack    bool   `json:"ack,omitempty" jsonschema:"skip the confirmation prompt"`
+	Ack    bool   `json:"ack,omitempty"     jsonschema:"skip the confirmation prompt"`
 }
 type removeRedirectOut struct {
 	OK       bool     `json:"ok"`

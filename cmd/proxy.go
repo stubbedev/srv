@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -140,10 +142,10 @@ func validateProxyInput() (*proxyInput, error) {
 
 	// Validate that either port or container is provided, but not both
 	if port == "" && container == "" {
-		return nil, fmt.Errorf("either --port or --container must be specified")
+		return nil, errors.New("either --port or --container must be specified")
 	}
 	if port != "" && container != "" {
-		return nil, fmt.Errorf("--port and --container are mutually exclusive")
+		return nil, errors.New("--port and --container are mutually exclusive")
 	}
 
 	// Validate domain
@@ -160,7 +162,7 @@ func validateProxyInput() (*proxyInput, error) {
 	if container != "" {
 		parts := strings.SplitN(container, ":", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid container format. Use: container_name:port (e.g., myapp:3000)")
+			return nil, errors.New("invalid container format. Use: container_name:port (e.g., myapp:3000)")
 		}
 		input.containerName = parts[0]
 		input.containerPort = parts[1]
@@ -221,7 +223,8 @@ func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error
 	if !input.isContainer {
 		// Warn if nothing is listening on the port yet so the proxy isn't silently broken.
 		// Not a hard error: users often register a proxy before starting their dev server.
-		conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", input.port), 500*time.Millisecond)
+		dialer := &net.Dialer{Timeout: 500 * time.Millisecond}
+		conn, dialErr := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", input.port))
 		if dialErr != nil {
 			ui.Warn("Nothing is listening on port %s — start your service before using the proxy", input.port)
 		} else {

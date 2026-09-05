@@ -40,17 +40,17 @@ func registerRouteNetworkTools(srv *mcpsdk.Server) {
 // ─── add_route / remove_route ────────────────────────────────────────
 
 type addRouteIn struct {
-	Target             string `json:"target" jsonschema:"site or proxy name to attach the route to"`
-	ID                 string `json:"id,omitempty" jsonschema:"route id; derived from the path when omitted"`
-	Path               string `json:"path,omitempty" jsonschema:"PathPrefix to match (e.g. /api); mutually exclusive with path_regex"`
-	PathRegex          string `json:"path_regex,omitempty" jsonschema:"Traefik PathRegexp; mutually exclusive with path"`
-	Rewrite            string `json:"rewrite,omitempty" jsonschema:"replacement for a path_regex rewrite (requires path_regex)"`
-	Port               int    `json:"port,omitempty" jsonschema:"localhost upstream port"`
-	Container          string `json:"container,omitempty" jsonschema:"container upstream as name:port"`
-	URL                string `json:"url,omitempty" jsonschema:"raw upstream URL"`
-	PreserveHost       *bool  `json:"preserve_host,omitempty" jsonschema:"forward the Host header unchanged (default true)"`
+	Target             string `json:"target"                         jsonschema:"site or proxy name to attach the route to"`
+	ID                 string `json:"id,omitempty"                   jsonschema:"route id; derived from the path when omitted"`
+	Path               string `json:"path,omitempty"                 jsonschema:"PathPrefix to match (e.g. /api); mutually exclusive with path_regex"`
+	PathRegex          string `json:"path_regex,omitempty"           jsonschema:"Traefik PathRegexp; mutually exclusive with path"`
+	Rewrite            string `json:"rewrite,omitempty"              jsonschema:"replacement for a path_regex rewrite (requires path_regex)"`
+	Port               int    `json:"port,omitempty"                 jsonschema:"localhost upstream port"`
+	Container          string `json:"container,omitempty"            jsonschema:"container upstream as name:port"`
+	URL                string `json:"url,omitempty"                  jsonschema:"raw upstream URL"`
+	PreserveHost       *bool  `json:"preserve_host,omitempty"        jsonschema:"forward the Host header unchanged (default true)"`
 	PassRangeHeaders   bool   `json:"pass_range_headers,omitempty"`
-	Priority           int    `json:"priority,omitempty" jsonschema:"override the auto-computed Traefik router priority"`
+	Priority           int    `json:"priority,omitempty"             jsonschema:"override the auto-computed Traefik router priority"`
 	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty" jsonschema:"skip TLS verification for an https url upstream (self-signed / mismatched cert)"`
 }
 type routeOut struct {
@@ -90,8 +90,8 @@ func addRouteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRouteIn) (
 }
 
 type removeRouteIn struct {
-	Target string `json:"target" jsonschema:"site or proxy name"`
-	ID     string `json:"id" jsonschema:"route id to remove"`
+	Target string `json:"target"            jsonschema:"site or proxy name"`
+	ID     string `json:"id"                jsonschema:"route id to remove"`
 	DryRun bool   `json:"dry_run,omitempty"`
 	Ack    bool   `json:"ack,omitempty"`
 }
@@ -128,7 +128,7 @@ func applyRoute(target string, onSite, onProxy func() error) (kind string, err e
 // ─── attach_network / detach_network ─────────────────────────────────
 
 type attachNetworkIn struct {
-	Name    string `json:"name" jsonschema:"site name"`
+	Name    string `json:"name"    jsonschema:"site name"`
 	Network string `json:"network" jsonschema:"existing Docker network name to attach"`
 }
 
@@ -144,8 +144,8 @@ func attachNetworkTool(_ context.Context, _ *mcpsdk.CallToolRequest, in attachNe
 }
 
 type detachNetworkIn struct {
-	Name    string `json:"name" jsonschema:"site name"`
-	Network string `json:"network" jsonschema:"network to detach"`
+	Name    string `json:"name"              jsonschema:"site name"`
+	Network string `json:"network"           jsonschema:"network to detach"`
 	DryRun  bool   `json:"dry_run,omitempty"`
 	Ack     bool   `json:"ack,omitempty"`
 }

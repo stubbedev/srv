@@ -5,6 +5,7 @@
 package redirect
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -195,7 +196,7 @@ func validateAddSpec(spec AddSpec) (name, normalizedTo string, err error) {
 			return "", "", fmt.Errorf("invalid target hostname: %w", err)
 		}
 		if spec.Wildcard {
-			return "", "", fmt.Errorf("wildcard is not supported with dns_only")
+			return "", "", errors.New("wildcard is not supported with dns_only")
 		}
 		normalizedTo = to
 	} else {

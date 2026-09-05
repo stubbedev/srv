@@ -6,6 +6,7 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -36,7 +37,7 @@ var (
 // config lines.
 func Domain(domain string) error {
 	if domain == "" {
-		return fmt.Errorf("domain cannot be empty")
+		return errors.New("domain cannot be empty")
 	}
 	if len(domain) > constants.MaxDomainLength {
 		return fmt.Errorf("domain is too long (max %d characters)", constants.MaxDomainLength)
@@ -59,7 +60,7 @@ func Domain(domain string) error {
 // joined into filesystem paths.
 func NoTraversal(s string) error {
 	if s == "" {
-		return fmt.Errorf("path element cannot be empty")
+		return errors.New("path element cannot be empty")
 	}
 	if strings.ContainsAny(s, `/\`) || s == ".." || strings.Contains(s, "..") {
 		return fmt.Errorf("path element %q contains illegal path characters", s)
@@ -78,7 +79,7 @@ func Port(port int) error {
 // PortString validates a port number supplied as a string.
 func PortString(port string) error {
 	if port == "" {
-		return fmt.Errorf("port cannot be empty")
+		return errors.New("port cannot be empty")
 	}
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
@@ -90,7 +91,7 @@ func PortString(port string) error {
 // SiteName validates a site name.
 func SiteName(name string) error {
 	if name == "" {
-		return fmt.Errorf("site name cannot be empty")
+		return errors.New("site name cannot be empty")
 	}
 	if !siteNameRegex.MatchString(name) {
 		return fmt.Errorf("invalid site name: %s (use alphanumeric characters, hyphens, and underscores)", name)
@@ -104,7 +105,7 @@ func SiteName(name string) error {
 // ContainerName validates a Docker container or compose service name.
 func ContainerName(name string) error {
 	if name == "" {
-		return fmt.Errorf("container name cannot be empty")
+		return errors.New("container name cannot be empty")
 	}
 	if !containerNameRegex.MatchString(name) {
 		return fmt.Errorf("invalid container name: %s (use alphanumeric characters, hyphens, underscores, and periods)", name)
@@ -116,7 +117,7 @@ func ContainerName(name string) error {
 // they are often derived from domain names (e.g. "myapp.com").
 func ProxyName(name string) error {
 	if name == "" {
-		return fmt.Errorf("proxy name cannot be empty")
+		return errors.New("proxy name cannot be empty")
 	}
 	if !domainRegex.MatchString(name) {
 		return fmt.Errorf("invalid proxy name: %s (use alphanumeric characters, hyphens, periods, and underscores)", name)

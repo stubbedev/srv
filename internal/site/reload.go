@@ -10,6 +10,7 @@ package site
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -188,15 +189,15 @@ func reload(name string, force bool) (*ReloadResult, error) {
 // itself cannot express.
 func ValidateMetadata(meta *SiteMetadata) error {
 	if meta == nil {
-		return fmt.Errorf("metadata is nil")
+		return errors.New("metadata is nil")
 	}
 	if len(meta.Domains) == 0 {
-		return fmt.Errorf("`domains` must list at least one hostname")
+		return errors.New("`domains` must list at least one hostname")
 	}
 	seen := make(map[string]bool, len(meta.Domains))
 	for _, d := range meta.Domains {
 		if d == "" {
-			return fmt.Errorf("`domains` contains an empty entry")
+			return errors.New("`domains` contains an empty entry")
 		}
 		if seen[d] {
 			return fmt.Errorf("duplicate domain %q", d)

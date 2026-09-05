@@ -64,31 +64,6 @@ func New(responses map[string]Response) *Fake {
 	return &Fake{Responses: responses}
 }
 
-func (f *Fake) lookup(key string) Response {
-	if r, ok := f.Responses[key]; ok {
-		return r
-	}
-	return f.Default
-}
-
-// resolve consults Handler first (if set), then the keyed Responses map.
-// method, name, args, stdin describe the current call.
-func (f *Fake) resolve(method, name string, args []string, stdin, key string) Response {
-	if f.Handler != nil {
-		if r, ok := f.Handler(method, name, args, stdin); ok {
-			return r
-		}
-	}
-	return f.lookup(key)
-}
-
-func (f *Fake) record(method, name string, args []string, stdin string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	cp := append([]string(nil), args...)
-	f.Calls = append(f.Calls, Call{Method: method, Name: name, Args: cp, Stdin: stdin})
-}
-
 // Snapshot returns a copy of the calls recorded so far.
 func (f *Fake) Snapshot() []Call {
 	f.mu.Lock()
@@ -202,4 +177,31 @@ func (f *Fake) CheckPortOnAddr(addr, port string) (bool, error) {
 func (f *Fake) IdentifyPortProcess(port string) string {
 	f.record("IdentifyPortProcess", port, nil, "")
 	return f.resolve("IdentifyPortProcess", port, nil, "", "process:"+port).Process
+}
+
+// ---- internals ------------------------------------------------------------
+
+func (f *Fake) lookup(key string) Response {
+	if r, ok := f.Responses[key]; ok {
+		return r
+	}
+	return f.Default
+}
+
+// resolve consults Handler first (if set), then the keyed Responses map.
+// method, name, args, stdin describe the current call.
+func (f *Fake) resolve(method, name string, args []string, stdin, key string) Response {
+	if f.Handler != nil {
+		if r, ok := f.Handler(method, name, args, stdin); ok {
+			return r
+		}
+	}
+	return f.lookup(key)
+}
+
+func (f *Fake) record(method, name string, args []string, stdin string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := append([]string(nil), args...)
+	f.Calls = append(f.Calls, Call{Method: method, Name: name, Args: cp, Stdin: stdin})
 }

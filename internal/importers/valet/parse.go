@@ -316,8 +316,8 @@ func parsePrimaryBlock(block string, site *Site) {
 // Returns ("", false) when no candidate resolves.
 func resolveValetProjectPath(domain, sitesDir string, parkedPaths []string) (string, bool) {
 	base := domain
-	if idx := strings.Index(domain, "."); idx >= 0 {
-		base = domain[:idx]
+	if before, _, ok := strings.Cut(domain, "."); ok {
+		base = before
 	}
 
 	// Generate all candidates: full label, then each hyphen-delimited
@@ -424,9 +424,9 @@ func extractPort(target string) int {
 	if i := strings.IndexAny(target, "/?"); i >= 0 {
 		target = target[:i]
 	}
-	if i := strings.LastIndex(target, ":"); i >= 0 {
+	if _, portPart, ok := strings.CutLast(target, ":"); ok {
 		var port int
-		_, _ = fmt.Sscanf(target[i+1:], "%d", &port)
+		_, _ = fmt.Sscanf(portPart, "%d", &port)
 		return port
 	}
 	return 0
@@ -529,7 +529,7 @@ func expandIncludes(block, baseDir string) string {
 		if !filepath.IsAbs(inc) {
 			inc = filepath.Join(baseDir, inc)
 		}
-		data, err := os.ReadFile(inc) //nolint:gosec // path comes from valet config
+		data, err := os.ReadFile(inc)
 		if err != nil {
 			// Keep the original `include …;` directive in place so downstream
 			// code can flag it as unhandled if relevant; don't drop the rest

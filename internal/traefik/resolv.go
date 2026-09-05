@@ -90,7 +90,7 @@ func needsBootstrapSwap(path string) bool {
 // address (127.0.0.0/8 IPv4 or ::1 IPv6).
 func loopbackOnlyResolvConf(contents string) bool {
 	seen := false
-	for _, line := range strings.Split(contents, "\n") {
+	for line := range strings.SplitSeq(contents, "\n") {
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "#") {
 			continue

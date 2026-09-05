@@ -6,9 +6,12 @@
 package site
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/stubbedev/srv/internal/constants"
 )
 
 // routeIDPattern (the allowed shape for a route id) is declared in reload.go.
@@ -35,13 +38,13 @@ type RouteInput struct {
 // the path when not supplied.
 func BuildRoute(in RouteInput) (Route, error) {
 	if in.Path != "" && in.PathRegex != "" {
-		return Route{}, fmt.Errorf("path and path_regex are mutually exclusive")
+		return Route{}, errors.New("path and path_regex are mutually exclusive")
 	}
 	if in.Path == "" && in.PathRegex == "" {
-		return Route{}, fmt.Errorf("one of path or path_regex is required")
+		return Route{}, errors.New("one of path or path_regex is required")
 	}
 	if in.Rewrite != "" && in.PathRegex == "" {
-		return Route{}, fmt.Errorf("rewrite requires path_regex")
+		return Route{}, errors.New("rewrite requires path_regex")
 	}
 	if in.PathRegex != "" {
 		if _, err := regexp.Compile(in.PathRegex); err != nil {
@@ -58,7 +61,7 @@ func BuildRoute(in RouteInput) (Route, error) {
 	if id == "" {
 		id = autoRouteID(in.Path, in.PathRegex)
 		if id == "" {
-			return Route{}, fmt.Errorf("could not derive id from path; supply id explicitly")
+			return Route{}, errors.New("could not derive id from path; supply id explicitly")
 		}
 	}
 	if !routeIDPattern.MatchString(id) {
@@ -93,13 +96,13 @@ func buildUpstream(in RouteInput) (Upstream, error) {
 		forms++
 	}
 	if forms == 0 {
-		return Upstream{}, fmt.Errorf("one of port, container, url is required")
+		return Upstream{}, errors.New("one of port, container, url is required")
 	}
 	if forms > 1 {
-		return Upstream{}, fmt.Errorf("port, container, url are mutually exclusive")
+		return Upstream{}, errors.New("port, container, url are mutually exclusive")
 	}
 	if in.InsecureSkipVerify && in.URL == "" {
-		return Upstream{}, fmt.Errorf("insecure_skip_verify only applies to a url upstream")
+		return Upstream{}, errors.New("insecure_skip_verify only applies to a url upstream")
 	}
 	switch {
 	case in.Port != 0:
@@ -174,17 +177,26 @@ func DropRoute(routes []Route, id string) ([]Route, bool) {
 	return out, removed
 }
 
-// SplitContainerPort parses a "name:port" upstream spec.
+// SplitContainerPort parses a "name:port" upstream spec. Both halves are
+// validated here because the result goes straight into a Traefik service URL:
+// an empty name yields "http://:3000" and an out-of-range port yields a router
+// Traefik rejects at load time, taking every other route on the site with it.
 func SplitContainerPort(s string) (string, int, error) {
-	parts := strings.SplitN(s, ":", 2)
-	if len(parts) != 2 {
-		return "", 0, fmt.Errorf("container must be name:port")
+	name, portStr, ok := strings.Cut(s, ":")
+	if !ok {
+		return "", 0, errors.New("container must be name:port")
+	}
+	if name == "" {
+		return "", 0, errors.New("container name cannot be empty")
 	}
 	var port int
-	if _, err := fmt.Sscanf(parts[1], "%d", &port); err != nil || port <= 0 {
-		return "", 0, fmt.Errorf("invalid container port %q", parts[1])
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		return "", 0, fmt.Errorf("invalid container port %q", portStr)
 	}
-	return parts[0], port, nil
+	if port < constants.PortMin || port > constants.PortMax {
+		return "", 0, fmt.Errorf("invalid container port %q: out of range 1-%d", portStr, constants.PortMax)
+	}
+	return name, port, nil
 }
 
 // autoRouteID derives a route id from a path or regex source.

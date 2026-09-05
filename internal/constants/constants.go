@@ -130,6 +130,6 @@ const (
 
 const (
 	// InitBaseSteps is the base number of initialization steps.
-	// network + config + start traefik + dashboard proxy
+	// network + config + start traefik + dashboard proxy.
 	InitBaseSteps = 4
 )

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// setupColoredHelp configures custom colored help output for Cobra
+// setupColoredHelp configures custom colored help output for Cobra.
 func setupColoredHelp() {
 	// Colors (auto-detects TTY for color support)
 	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
@@ -71,7 +71,7 @@ Use {{styleCyan "\"srv [command] --help\""}} for more information about a comman
 	RootCmd.SetUsageTemplate(template)
 }
 
-// splitLines splits a string into lines
+// splitLines splits a string into lines.
 func splitLines(s string) []string {
 	var lines []string
 	var current string
@@ -89,7 +89,7 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// colorFlagLine colors the flag portion of a flag usage line
+// colorFlagLine colors the flag portion of a flag usage line.
 func colorFlagLine(line string, colorFunc func(...any) string) string {
 	// Find where the flag starts and where the description starts
 	// Format is typically: "  -f, --flag string   Description here"

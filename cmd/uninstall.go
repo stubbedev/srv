@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -79,7 +79,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		}
 		ui.Blank()
 		ui.Dim("Site directories and their contents will NOT be removed.")
-		return fmt.Errorf("uninstall refused: re-run with --force to proceed")
+		return errors.New("uninstall refused: re-run with --force to proceed")
 	}
 
 	ui.Blank()

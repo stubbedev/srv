@@ -3,6 +3,7 @@ package traefik
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -143,7 +144,7 @@ func SetupDNS() error {
 	case ResolverNetworkManager:
 		return setupNetworkManager()
 	default:
-		return fmt.Errorf("unsupported DNS configuration. Please manually configure your system to use 127.0.0.1 for .test, .local, and .localhost domains")
+		return errors.New("unsupported DNS configuration. Please manually configure your system to use 127.0.0.1 for .test, .local, and .localhost domains")
 	}
 }
 
@@ -178,7 +179,7 @@ func renderResolvedConf(routingDomains []string) string {
 	var c resolvedConf
 	c.Resolve.DNS = sd.Value{constants.LocalhostIP}
 	c.Resolve.Domains = sd.Value{strings.Join(routingDomains, " ")}
-	data, _ := sd.Marshal(&c) //nolint:errcheck // static struct never fails to marshal
+	data, _ := sd.Marshal(&c)
 	return string(data)
 }
 

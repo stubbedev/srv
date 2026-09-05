@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	// Version information - set at build time via ldflags
+	// Version information - set at build time via ldflags.
 	Version   = constants.DefaultVersion
 	Commit    = constants.DefaultCommit
 	BuildDate = constants.DefaultBuildDate

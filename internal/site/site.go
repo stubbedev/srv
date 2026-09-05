@@ -139,14 +139,12 @@ func fetchSiteStatuses(sites []Site, indices []int) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for i := range jobs {
 				sites[i].Status = statusForIndex(sites, i)
 			}
-		}()
+		})
 	}
 
 	for _, idx := range indices {
@@ -284,7 +282,7 @@ func ResolvePath(path string) (string, error) {
 	realPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
 		// Path might not exist yet, return absolute path
-		return absPath, nil //nolint:nilerr
+		return absPath, nil //nolint:nilerr // a path that does not exist yet is not an error here — the absolute path is the answer
 	}
 
 	return realPath, nil

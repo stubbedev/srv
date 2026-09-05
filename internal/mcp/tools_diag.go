@@ -35,13 +35,15 @@ func registerDiagTools(srv *mcpsdk.Server) {
 	}, metricsStatusTool)
 }
 
-type daemonStatusIn struct{}
-type daemonStatusOut struct {
-	Installed bool   `json:"installed"`
-	Running   bool   `json:"running"`
-	Status    string `json:"status"`
-	LogPath   string `json:"log_path,omitempty"`
-}
+type (
+	daemonStatusIn  struct{}
+	daemonStatusOut struct {
+		Installed bool   `json:"installed"`
+		Running   bool   `json:"running"`
+		Status    string `json:"status"`
+		LogPath   string `json:"log_path,omitempty"`
+	}
+)
 
 func daemonStatusTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ daemonStatusIn) (*mcpsdk.CallToolResult, daemonStatusOut, error) {
 	out := daemonStatusOut{
@@ -91,14 +93,16 @@ func daemonLogTool(_ context.Context, _ *mcpsdk.CallToolRequest, in daemonLogIn)
 	return nil, daemonLogOut{Path: path, Lines: all}, nil
 }
 
-type metricsStatusIn struct{}
-type metricsStatusOut struct {
-	Enabled           bool   `json:"enabled"`
-	PrometheusRunning bool   `json:"prometheus_running"`
-	GrafanaRunning    bool   `json:"grafana_running"`
-	GrafanaDomain     string `json:"grafana_domain"`
-	PrometheusDomain  string `json:"prometheus_domain"`
-}
+type (
+	metricsStatusIn  struct{}
+	metricsStatusOut struct {
+		Enabled           bool   `json:"enabled"`
+		PrometheusRunning bool   `json:"prometheus_running"`
+		GrafanaRunning    bool   `json:"grafana_running"`
+		GrafanaDomain     string `json:"grafana_domain"`
+		PrometheusDomain  string `json:"prometheus_domain"`
+	}
+)
 
 func metricsStatusTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ metricsStatusIn) (*mcpsdk.CallToolResult, metricsStatusOut, error) {
 	prom := docker.IsContainerRunning(metrics.PrometheusContainer)

@@ -5,7 +5,9 @@
 package site
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -84,10 +86,8 @@ func AddAlias(siteName, alias string) (changed bool, warnings []string, err erro
 	if len(meta.Domains) == 0 {
 		return false, nil, fmt.Errorf("site %q has no canonical domain", siteName)
 	}
-	for _, d := range meta.Domains {
-		if d == alias {
-			return false, nil, nil
-		}
+	if slices.Contains(meta.Domains, alias) {
+		return false, nil, nil
 	}
 	meta.Domains = append(meta.Domains, alias)
 	if err := WriteSiteMetadata(siteName, *meta); err != nil {
@@ -204,7 +204,7 @@ func AddVolume(siteName string, mount VolumeMount) (warnings []string, err error
 func AttachNetwork(siteName, network string) (changed bool, warnings []string, err error) {
 	network = strings.TrimSpace(network)
 	if network == "" {
-		return false, nil, fmt.Errorf("network name is required")
+		return false, nil, errors.New("network name is required")
 	}
 	meta, err := requireMeta(siteName)
 	if err != nil {
@@ -216,10 +216,8 @@ func AttachNetwork(siteName, network string) (changed bool, warnings []string, e
 	if network == meta.NetworkName {
 		return false, nil, fmt.Errorf("%q is the site's primary traefik network — already attached", network)
 	}
-	for _, n := range meta.ExtraNetworks {
-		if n == network {
-			return false, nil, nil
-		}
+	if slices.Contains(meta.ExtraNetworks, network) {
+		return false, nil, nil
 	}
 	meta.ExtraNetworks = append(meta.ExtraNetworks, network)
 	sort.Strings(meta.ExtraNetworks)
