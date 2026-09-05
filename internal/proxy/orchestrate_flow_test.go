@@ -42,6 +42,9 @@ func addEnv(t *testing.T) *config.Config {
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
 
+	// SwapRunner alone is not enough: CheckMkcert asks exec.LookPath directly,
+	// which fails in a sandboxed build (nix) where mkcert is not installed.
+	t.Cleanup(mkcert.SwapLookPath(func(string) (string, error) { return "/usr/bin/mkcert", nil }))
 	t.Cleanup(mkcert.SwapRunner(mkcertStub{}))
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
 	// Without these the reload paths reach a real `docker compose` and
