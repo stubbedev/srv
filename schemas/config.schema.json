@@ -2,6 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/stubbedev/srv/master/schemas/config.schema.json",
   "properties": {
+    "container_engine": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "docker",
+        "podman",
+        "colima",
+        "orbstack",
+        "rancher-desktop"
+      ],
+      "description": "Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2."
+    },
     "parked_paths": {
       "items": {
         "type": "string"

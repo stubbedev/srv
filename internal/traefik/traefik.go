@@ -17,6 +17,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/yamlpatch"
@@ -56,8 +57,12 @@ entryPoints:
     address: ":88"
 
 providers:
+  # endpoint and network are filled in per machine by renderTraefikTemplate: a
+  # unix socket is bind-mounted to /var/run/docker.sock whichever runtime it
+  # came from, and a remote daemon is pointed at directly.
   docker:
     exposedByDefault: false
+    endpoint: ""
     network: ""
   file:
     directory: /etc/traefik/conf
@@ -131,13 +136,19 @@ func DockerComposeTemplate(networkName, sitesDir, dnsUser, dnsPass string) (stri
 		ContainerName: docker.ContainerTraefik,
 		Restart:       "unless-stopped",
 		Volumes: []string{
-			"/var/run/docker.sock:/var/run/docker.sock:ro",
 			"./conf/traefik.yml:/etc/traefik/traefik.yml:ro",
 			"./conf:/etc/traefik/conf:ro",
 			"./certs:/etc/traefik/certs",
 			"./logs:/etc/traefik/logs",
 			sitesDir + ":/etc/traefik/sites:ro",
 		},
+	}
+
+	// A unix socket is bind-mounted so the container always sees it at the same
+	// path; a remote endpoint (tcp://) has nothing to mount and is reached over
+	// the network instead — renderTraefikTemplate points the provider at it.
+	if mount := engine.Current().SocketMount(); mount != "" {
+		traefikSvc.Volumes = append([]string{mount}, traefikSvc.Volumes...)
 	}
 
 	if platform.IsLinux() {
@@ -527,6 +538,9 @@ func renderTraefikTemplate(networkName, email string) ([]byte, error) {
 	if err := yamlpatch.SetPath(&doc, "providers.docker.network", networkName); err != nil {
 		return nil, fmt.Errorf("failed to set provider network: %w", err)
 	}
+	if err := yamlpatch.SetPath(&doc, "providers.docker.endpoint", engine.Current().TraefikEndpoint()); err != nil {
+		return nil, fmt.Errorf("failed to set provider endpoint: %w", err)
+	}
 	if err := yamlpatch.SetPath(&doc, "certificatesResolvers.letsencrypt.acme.email", email); err != nil {
 		return nil, fmt.Errorf("failed to set acme email: %w", err)
 	}
@@ -536,7 +550,7 @@ func renderTraefikTemplate(networkName, email string) ([]byte, error) {
 // mergeTraefikConfigs merges existing config with template.
 // - Managed sections (providers, certificatesResolvers) are taken from template
 // - entryPoints are merged: user additions preserved, web/websecure ensured from template
-// - Every other top-level key in either map is preserved (existing wins on conflict)
+// - Every other top-level key in either map is preserved (existing wins on conflict).
 func mergeTraefikConfigs(existing, template map[string]any) map[string]any {
 	result := make(map[string]any, len(existing)+len(template))
 

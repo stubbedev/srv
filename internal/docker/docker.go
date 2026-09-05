@@ -20,17 +20,39 @@ import (
 	dockerclient "github.com/docker/docker/client"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/platform"
 )
 
-// notRunningErr renders the "docker is not running" message with a platform-
-// appropriate hint. macOS has no `systemctl`, so we point at Docker Desktop /
-// `colima start` instead.
+// notRunningErr renders the "runtime is not running" message, naming the
+// runtime srv resolved and the endpoint it tried. The startup hint is
+// per-runtime because "start Docker Desktop" is useless advice to someone on
+// Podman or Colima.
 func notRunningErr() error {
-	if platform.IsDarwin() {
-		return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop, or run `colima start` if you're on Colima")
+	eng := engine.Current()
+	return fmt.Errorf("%s is not running or not installed (tried %s).\n  %s",
+		eng.Name, eng.Endpoint, startHint(eng))
+}
+
+// startHint is the one line most likely to fix an unreachable runtime.
+func startHint(eng engine.Engine) string {
+	switch eng.Name {
+	case engine.Podman:
+		return "Start its API socket: systemctl --user enable --now podman.socket"
+	case engine.Colima:
+		return "Start it with: colima start"
+	case engine.OrbStack:
+		return "Start the OrbStack app"
+	case engine.RancherDesktop:
+		return "Start the Rancher Desktop app"
+	case engine.Docker:
+		if platform.IsDarwin() {
+			return "Start Docker Desktop, or run `colima start` if you're on Colima"
+		}
+		return "Start Docker Desktop or run: sudo systemctl start docker"
+	default:
+		return "Check: " + eng.Binary + " info"
 	}
-	return fmt.Errorf("docker is not running or not installed.\n  Start Docker Desktop or run: sudo systemctl start docker")
 }
 
 // Timeout constants for Docker operations.
@@ -77,6 +99,9 @@ type sdkClient interface {
 // newClientFn produces an sdkClient. Tests swap this to install a fake. By
 // default it dials the daemon described by the standard Docker env vars.
 var newClientFn = func() (sdkClient, error) {
+	// Resolving the engine exports DOCKER_HOST, which is what FromEnv reads —
+	// so this call is what points the SDK at Podman rather than Docker.
+	_ = engine.Current()
 	return dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
 }
 
@@ -140,7 +165,7 @@ func EnsureRunning() error {
 
 	if _, err := cli.Ping(ctx); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
+			return errors.New("docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
 		}
 		return notRunningErr()
 	}
@@ -151,7 +176,7 @@ func EnsureRunning() error {
 // by srv install. Returns a clear error directing the user to run srv install if not.
 func EnsureInitialized(networkName string) error {
 	if !NetworkExists(networkName) {
-		return fmt.Errorf("srv is not installed. Run: srv install")
+		return errors.New("srv is not installed. Run: srv install")
 	}
 	return nil
 }
@@ -195,7 +220,7 @@ func CreateNetwork(name string) error {
 	_, err = cli.NetworkCreate(ctx, name, network.CreateOptions{Driver: "bridge"})
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("docker network create timed out")
+			return errors.New("docker network create timed out")
 		}
 		// Network already exists → idempotent no-op. errdefs.IsConflict
 		// covers the HTTP 409 the daemon returns regardless of error wording.
@@ -272,7 +297,12 @@ func ComposeDown(dir string) error {
 // reuse their fixed container_names without a name conflict. No-op when none
 // match.
 func RemoveComposeProjectContainers(project string) error {
-	out, err := exec.Command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
+	if err := guardTestExec("ps/rm", "SwapComposeExec"); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, engine.Binary(), "ps", "-aq", "--filter", "label=com.docker.compose.project="+project).Output()
 	if err != nil {
 		return fmt.Errorf("list project %q containers: %w", project, err)
 	}
@@ -280,7 +310,7 @@ func RemoveComposeProjectContainers(project string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := exec.Command("docker", append([]string{"rm", "-f"}, ids...)...).Run(); err != nil {
+	if err := exec.CommandContext(ctx, engine.Binary(), append([]string{"rm", "-f"}, ids...)...).Run(); err != nil {
 		return fmt.Errorf("remove project %q containers: %w", project, err)
 	}
 	return nil
@@ -290,7 +320,10 @@ func RemoveComposeProjectContainers(project string) error {
 var composePrefixedExec = defaultComposePrefixedExec
 
 func defaultComposePrefixedExec(dir, prefix string, args ...string) error {
-	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
+	if err := guardTestExec("compose", "SwapComposePrefixedExec"); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(context.Background(), engine.Binary(), engine.ComposeArgs(args...)...)
 	cmd.Dir = dir
 	cmd.Stdout = newPrefixWriter(os.Stdout, prefix)
 	cmd.Stderr = newPrefixWriter(os.Stderr, prefix)
@@ -365,7 +398,10 @@ func ComposeRestart(dir string) error {
 var dockerExec = defaultDockerExec
 
 func defaultDockerExec(interactive bool, args ...string) error {
-	cmd := exec.Command("docker", args...)
+	if err := guardTestExec("exec", "SwapDockerExec"); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(context.Background(), engine.Binary(), args...)
 	if interactive {
 		cmd.Stdin = os.Stdin
 	}
@@ -412,10 +448,13 @@ func ExecNonInteractiveAt(container, workDir string, args ...string) error {
 var composeExec = defaultComposeExec
 
 func defaultComposeExec(dir string, quiet bool, args ...string) error {
+	if err := guardTestExec("compose", "SwapComposeExec"); err != nil {
+		return err
+	}
 	if quiet {
 		ctx, cancel := context.WithTimeout(context.Background(), ComposeTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, args...)...)
+		cmd := exec.CommandContext(ctx, engine.Binary(), engine.ComposeArgs(args...)...)
 		cmd.Dir = dir
 		cmd.Stdin = nil
 		err := cmd.Run()
@@ -424,7 +463,7 @@ func defaultComposeExec(dir string, quiet bool, args ...string) error {
 		}
 		return err
 	}
-	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), engine.Binary(), engine.ComposeArgs(args...)...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -466,9 +505,12 @@ func ComposeQuietWithProfile(dir, profile string, args ...string) error {
 var composePSOutput = defaultComposePSOutput
 
 func defaultComposePSOutput(dir string) ([]byte, error) {
+	if err := guardTestExec("compose ps", "SwapComposePSOutput"); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "--format", constants.ComposeStatusFormat)
+	cmd := exec.CommandContext(ctx, engine.Binary(), engine.ComposeArgs("ps", "--format", constants.ComposeStatusFormat)...)
 	cmd.Dir = dir
 	return cmd.Output()
 }
@@ -631,7 +673,10 @@ var ErrServiceNotRunning = errors.New("service not running")
 var composeServiceIDLookup = defaultComposeServiceIDLookup
 
 func defaultComposeServiceIDLookup(ctx context.Context, dir, serviceName string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "-q", serviceName)
+	if err := guardTestExec("compose ps -q", "SwapComposeServiceIDLookup"); err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, engine.Binary(), engine.ComposeArgs("ps", "-q", serviceName)...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -704,8 +749,8 @@ func GetContainerImageVersion(containerName string) string {
 // extractImageTag returns the tag portion of "image:tag" or "latest" when
 // untagged. Empty input yields "latest" to mirror Docker's default tag.
 func extractImageTag(image string) string {
-	if idx := strings.LastIndex(image, ":"); idx != -1 {
-		return image[idx+1:]
+	if _, tag, ok := strings.CutLast(image, ":"); ok {
+		return tag
 	}
 	return "latest"
 }
@@ -768,6 +813,7 @@ func (noopSDK) Ping(context.Context) (types.Ping, error) { return types.Ping{}, 
 func (noopSDK) NetworkList(context.Context, network.ListOptions) ([]network.Summary, error) {
 	return nil, nil
 }
+
 func (noopSDK) NetworkCreate(context.Context, string, network.CreateOptions) (network.CreateResponse, error) {
 	return network.CreateResponse{}, nil
 }
@@ -775,12 +821,15 @@ func (noopSDK) NetworkRemove(context.Context, string) error { return nil }
 func (noopSDK) NetworkConnect(context.Context, string, string, *network.EndpointSettings) error {
 	return nil
 }
+
 func (noopSDK) ContainerInspect(context.Context, string) (container.InspectResponse, error) {
 	return container.InspectResponse{}, errors.New("noopSDK: not found")
 }
+
 func (noopSDK) ContainerList(context.Context, container.ListOptions) ([]container.Summary, error) {
 	return nil, nil
 }
+
 func (noopSDK) ImagePull(context.Context, string, image.PullOptions) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }

@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -82,7 +84,7 @@ func IsRunning() bool {
 // Stop stops the running daemon via the service manager.
 func Stop() error {
 	if !IsInstalled() {
-		return fmt.Errorf("daemon service is not installed")
+		return errors.New("daemon service is not installed")
 	}
 	return stopService()
 }
@@ -228,9 +230,11 @@ func (d *Daemon) watchEvents() error {
 
 // runEventLoop runs a single event watching session using the Docker SDK.
 func (d *Daemon) runEventLoop() error {
+	// Resolving the engine exports DOCKER_HOST, which FromEnv then reads.
+	eng := engine.Current()
 	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return fmt.Errorf("failed to create %s client: %w", eng.Name, err)
 	}
 	defer func() { _ = cli.Close() }()
 

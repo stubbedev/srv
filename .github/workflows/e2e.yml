@@ -1,9 +1,9 @@
 name: e2e
 
-# End-to-end tests boot a real Traefik via docker compose and route real
-# HTTP through it. They need docker + mkcert + free ports 80/443/88/8080, so
-# they run in their own workflow (not the main `test` job) on a clean
-# ubuntu-latest runner. Gated behind the `e2e` build tag.
+# End-to-end tests boot a real Traefik via compose and route real HTTP through
+# it. They need a container engine + mkcert + free ports 80/443/88/8080, so they
+# run in their own workflow (not the main `test` job) on a clean ubuntu-latest
+# runner. Gated behind the `e2e` build tag, one leg per engine.
 
 on:
   push:
@@ -18,7 +18,17 @@ concurrency:
 
 jobs:
   e2e:
+    # One leg per container engine. The harness skips cleanly when its engine
+    # is absent or its API is unreachable, so a leg never fails for being on
+    # the wrong box — it just reports skipped.
+    name: e2e (${{ matrix.engine }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [docker, podman]
+    env:
+      SRV_CONTAINER_ENGINE: ${{ matrix.engine }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -41,6 +51,24 @@ jobs:
           chmod +x mkcert
           sudo mv mkcert /usr/local/bin/mkcert
           mkcert -version
+
+      # Rootful podman with its Docker-compatible API socket enabled, which is
+      # what the deliverable targets. Compose v2 is what writes the
+      # com.docker.compose.* labels srv filters on, so it is installed as
+      # podman's compose provider rather than podman-compose.
+      - name: Install podman + Compose v2
+        if: matrix.engine == 'podman'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y podman docker-compose-v2
+          sudo systemctl enable --now podman.socket
+          # The suite runs as the runner user against the rootful socket. A
+          # throwaway CI box is the one place opening it up is reasonable;
+          # rootless podman needs a sysctl for the privileged ports Traefik
+          # binds and is tracked separately.
+          sudo chmod 666 /run/podman/podman.sock
+          podman compose version
 
       - name: Run e2e tests
         run: go test -tags=e2e -v ./e2e/... -timeout 30m

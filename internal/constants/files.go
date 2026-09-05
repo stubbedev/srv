@@ -106,11 +106,20 @@ const (
 	// EnvDNSHTTPUser is the environment variable for the dnsmasq HTTP user.
 	EnvDNSHTTPUser = "DNS_HTTP_USER"
 	// EnvDNSHTTPPass is the environment variable for the dnsmasq HTTP password.
-	EnvDNSHTTPPass = "DNS_HTTP_PASS"
+	EnvDNSHTTPPass = "DNS_HTTP_PASS" //nolint:gosec // G101: the name of an env var, not a credential
 	// EnvMCPHTTPAddr overrides the listen address for `srv mcp --http`.
 	EnvMCPHTTPAddr = "SRV_MCP_HTTP_ADDR"
 	// EnvMCPHTTPPath overrides the endpoint path for `srv mcp --http`.
 	EnvMCPHTTPPath = "SRV_MCP_HTTP_PATH"
+	// EnvContainerEngine overrides the container_engine config key. Set by the
+	// e2e harness so one checkout can be driven against several engines.
+	EnvContainerEngine = "SRV_CONTAINER_ENGINE"
+	// EnvDockerHost is the socket every Docker-compatible API client reads. srv
+	// exports it from the resolved engine so the SDK client and Compose v2 both
+	// talk to the same daemon.
+	EnvDockerHost = "DOCKER_HOST"
+	// EnvXDGRuntimeDir is where a rootless engine puts its per-user socket.
+	EnvXDGRuntimeDir = "XDG_RUNTIME_DIR"
 )
 
 // =============================================================================

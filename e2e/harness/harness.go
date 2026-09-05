@@ -29,6 +29,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/traefik"
 )
 
@@ -41,16 +42,22 @@ var requiredPorts = []int{
 	constants.PortDashboard,
 }
 
-// SkipIfNoDocker bails out when docker isn't on PATH or its daemon is
-// unreachable, so machines without docker see a clean Skip.
-func SkipIfNoDocker(t *testing.T) {
+// Engine is the container engine this leg of the suite drives, taken from
+// SRV_CONTAINER_ENGINE (default docker) — the same override srv itself reads,
+// so the harness and the binary under test never disagree.
+func Engine() engine.Engine { return engine.Current() }
+
+// SkipIfNoEngine bails out when the configured engine isn't on PATH or its API
+// is unreachable, so a Docker-only box stays green on a Podman leg instead of
+// failing.
+func SkipIfNoEngine(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker not installed")
+	eng := Engine()
+	if _, err := exec.LookPath(eng.Binary); err != nil {
+		t.Skipf("%s not installed", eng.Binary)
 	}
-	cmd := exec.Command("docker", "info")
-	if err := cmd.Run(); err != nil {
-		t.Skipf("docker daemon not reachable: %v", err)
+	if err := exec.CommandContext(t.Context(), eng.Binary, "info").Run(); err != nil {
+		t.Skipf("%s API not reachable: %v", eng.Name, err)
 	}
 }
 
@@ -138,24 +145,25 @@ func TraefikUp(t *testing.T, root string) {
 
 	// The compose file declares the srv network as external; create it so
 	// compose validation passes. Idempotent.
-	_ = exec.Command("docker", "network", "create", cfg.NetworkName).Run()
+	eng := Engine()
+	_ = exec.CommandContext(t.Context(), eng.Binary, "network", "create", cfg.NetworkName).Run()
 
 	compose := cfg.TraefikComposePath()
-	up := exec.Command("docker", "compose", "-f", compose, "up", "-d", "--wait", "traefik")
+	up := exec.CommandContext(t.Context(), eng.Binary, eng.ComposeArgs("-f", compose, "up", "-d", "--wait", "traefik")...)
 	up.Stdout = os.Stderr
 	up.Stderr = os.Stderr
 	if err := up.Run(); err != nil {
-		t.Fatalf("docker compose up traefik: %v", err)
+		t.Fatalf("%s compose up traefik: %v", eng.Name, err)
 	}
 
 	t.Cleanup(func() {
-		down := exec.Command("docker", "compose", "-f", compose, "down", "-v", "--remove-orphans")
+		down := exec.CommandContext(context.WithoutCancel(t.Context()), eng.Binary, eng.ComposeArgs("-f", compose, "down", "-v", "--remove-orphans")...)
 		down.Stdout = os.Stderr
 		down.Stderr = os.Stderr
 		if err := down.Run(); err != nil {
 			t.Logf("compose down: %v", err)
 		}
-		_ = exec.Command("docker", "network", "rm", cfg.NetworkName).Run()
+		_ = exec.CommandContext(context.WithoutCancel(t.Context()), eng.Binary, "network", "rm", cfg.NetworkName).Run()
 	})
 }
 

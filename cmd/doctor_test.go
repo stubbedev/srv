@@ -7,22 +7,58 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
 
-func TestCheckDockerFail(t *testing.T) {
+// engineFake is a shell fake where the engine binary exists and its compose
+// subcommand reports itself as Compose v2 — the healthy baseline the engine
+// checks assert against.
+func engineFake() *shelltest.Fake {
+	return shelltest.New(map[string]shelltest.Response{
+		"docker": {Exists: true, Out: []byte("Docker Compose version v2.40.0\n")},
+	})
+}
+
+func TestCheckEngineFail(t *testing.T) {
+	t.Cleanup(shell.SwapDefault(engineFake()))
+	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
 	t.Cleanup(docker.SwapNewClientErr(errors.New("not running")))
-	if issues := checkDocker(); issues != 1 {
+	if issues, _ := checkEngine(); issues != 1 {
 		t.Errorf("expected 1 issue, got %d", issues)
 	}
 }
 
-func TestCheckDockerOK(t *testing.T) {
+func TestCheckEngineOK(t *testing.T) {
+	t.Cleanup(shell.SwapDefault(engineFake()))
+	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
 	t.Cleanup(docker.SwapNewClientOK())
-	if issues := checkDocker(); issues != 0 {
+	if issues, _ := checkEngine(); issues != 0 {
 		t.Errorf("expected 0 issues, got %d", issues)
+	}
+}
+
+// A missing engine binary is reported once and short-circuits the rest — there
+// is nothing to ask about a compose implementation that isn't installed.
+func TestCheckEngineBinaryMissing(t *testing.T) {
+	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
+	t.Cleanup(engine.Swap(engine.For(engine.Podman)))
+	t.Cleanup(docker.SwapNewClientOK())
+	if issues, _ := checkEngine(); issues != 1 {
+		t.Errorf("expected 1 issue, got %d", issues)
+	}
+}
+
+// podman-compose labels containers io.podman.compose.*, so every srv lookup
+// against com.docker.compose.project comes back empty. Doctor must say so.
+func TestCheckComposeV2RejectsPodmanCompose(t *testing.T) {
+	t.Cleanup(shell.SwapDefault(shelltest.New(map[string]shelltest.Response{
+		"podman": {Exists: true, Out: []byte("podman-compose version 1.0.6\n")},
+	})))
+	if issues := checkComposeV2(engine.For(engine.Podman)); issues != 1 {
+		t.Errorf("expected 1 issue for podman-compose, got %d", issues)
 	}
 }
 
@@ -81,7 +117,7 @@ func TestCheckSitesValidEmpty(t *testing.T) {
 
 func TestCheckPortsSmoke(t *testing.T) {
 	// just exercise the function.
-	_ = checkPorts()
+	_ = checkPorts(true)
 }
 
 func TestRunUpdateDockerDown(t *testing.T) {
@@ -192,5 +228,25 @@ DATABASE_URL=mysql://root@127.0.0.1:3306/db
 func TestScanEnvForHostLoopbackMissingFile(t *testing.T) {
 	if hits := scanEnvForHostLoopback("/nonexistent/.env"); hits != nil {
 		t.Errorf("missing file should return nil, got %v", hits)
+	}
+}
+
+// An unreachable runtime must be reported as unreachable, so runDoctor can skip
+// the checks that would each wait out their own SDK timeout only to repeat it.
+func TestCheckEngineReportsUnreachable(t *testing.T) {
+	t.Cleanup(shell.SwapDefault(engineFake()))
+	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
+	t.Cleanup(docker.SwapNewClientErr(errors.New("not running")))
+	if _, up := checkEngine(); up {
+		t.Error("checkEngine reported the runtime up, want unreachable")
+	}
+}
+
+func TestCheckEngineReportsReachable(t *testing.T) {
+	t.Cleanup(shell.SwapDefault(engineFake()))
+	t.Cleanup(engine.Swap(engine.For(engine.Docker)))
+	t.Cleanup(docker.SwapNewClientOK())
+	if _, up := checkEngine(); !up {
+		t.Error("checkEngine reported the runtime down, want reachable")
 	}
 }

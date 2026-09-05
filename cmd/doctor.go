@@ -2,17 +2,21 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/firewall"
 	"github.com/stubbedev/srv/internal/metrics"
 	"github.com/stubbedev/srv/internal/shell"
@@ -35,7 +39,7 @@ var doctorCmd = &cobra.Command{
 	Long: `Run diagnostic checks to identify common issues with your srv setup.
 
 Checks performed:
-  - Docker availability and status
+  - Container engine (docker/podman) availability, Compose v2, socket
   - Required ports (80, 443, 8080)
   - Docker network existence
   - Traefik container status
@@ -59,14 +63,26 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	ui.Blank()
 
 	issues := 0
-	issues += checkDocker()
+	engineIssues, engineUp := checkEngine()
+	issues += engineIssues
 	issues += checkFirewall()
-	issues += checkPorts()
-	issues += checkNetwork()
-	issues += checkTraefik()
-	issues += checkDNS()
-	issues += checkCertificates()
-	issues += checkMetrics()
+	issues += checkPorts(engineUp)
+
+	// Every check below asks the runtime's API something. Against an
+	// unreachable endpoint each one waits out its own timeout and then reports
+	// the same failure the engine section already reported, so skip them: the
+	// runtime is the finding.
+	if !engineUp {
+		ui.Bold("Network, Traefik, DNS, metrics")
+		ui.IndentedDim(1, "skipped — the container runtime is unreachable")
+		ui.Blank()
+	} else {
+		issues += checkNetwork()
+		issues += checkTraefik()
+		issues += checkDNS()
+		issues += checkCertificates()
+		issues += checkMetrics()
+	}
 	issues += checkSitesValid()
 	issues += checkSiteEnvHostLoopback()
 	issues += checkConfigDirOwnership(doctorFlags.fixPerms)
@@ -83,20 +99,113 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// checkDocker verifies Docker is running
-func checkDocker() int {
-	ui.Bold("Docker")
-	if err := docker.EnsureRunning(); err != nil {
-		ui.IndentedError(1, "Docker is not running or not installed")
+// checkEngine verifies the configured container engine is installed, its API
+// socket is reachable, and its compose implementation writes the labels srv
+// filters on. Everything else in doctor assumes these hold.
+func checkEngine() (int, bool) {
+	eng := engine.Current()
+	ui.Bold("Container engine")
+	ui.IndentedDim(1, "%s: %s (%s)", eng.Source, eng.Name, eng.Endpoint)
+
+	if _, err := engine.Configured(); err != nil {
+		ui.IndentedError(1, "%v", err)
+		ui.IndentedDim(2, "ignoring it and using %s instead", eng.Name)
 		ui.Blank()
+		return 1, false
+	}
+
+	if !shell.Exists(eng.Binary) {
+		ui.IndentedError(1, "%s is not on $PATH", eng.Binary)
+		ui.Blank()
+		return 1, false
+	}
+
+	issues := 0
+	reachable := true
+	if err := docker.EnsureRunning(); err != nil {
+		ui.IndentedError(1, "%s is not running or its API is unreachable", eng.Name)
+		reportUnreachable(eng)
+		issues++
+		reachable = false
+	} else {
+		ui.IndentedSuccess(1, "%s is running", eng.Name)
+	}
+
+	issues += checkComposeV2(eng)
+	issues += checkPrivilegedPorts(eng)
+
+	ui.Blank()
+	return issues, reachable
+}
+
+// reportUnreachable explains an unreachable endpoint: a missing socket is a
+// different problem from a socket that exists but refuses the connection, and
+// when nothing was configured it is worth saying what else was probed.
+func reportUnreachable(eng engine.Engine) {
+	sock := eng.Socket()
+	if sock == "" {
+		ui.IndentedDim(2, "endpoint %s did not answer", eng.Endpoint)
+		return
+	}
+	if _, err := os.Stat(sock); err != nil {
+		ui.IndentedDim(2, "no socket at %s", sock)
+		if eng.Name == engine.Podman {
+			ui.IndentedDim(2, "enable it with: systemctl --user enable --now podman.socket")
+		}
+		if other, ok := engine.Detect(); ok && other.Name != eng.Name {
+			ui.IndentedDim(2, "%s looks usable here — set container_engine: %s", other.Name, other.Name)
+		}
+	} else {
+		ui.IndentedDim(2, "socket %s exists but refused the connection", sock)
+	}
+}
+
+// checkComposeV2 asserts the engine's `compose` subcommand is Docker Compose v2.
+// podman-compose (the Python reimplementation) labels containers
+// io.podman.compose.project, so every lookup srv makes against
+// com.docker.compose.project silently returns nothing — a failure mode worth
+// naming up front rather than discovering as an empty site list.
+func checkComposeV2(eng engine.Engine) int {
+	// A dead endpoint makes the CLI retry, so this is bounded: doctor has to
+	// finish and report, not hang on the runtime it is diagnosing.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := shell.RunQuietWithContext(ctx, eng.Binary, eng.ComposeArgs("version")...)
+	if err != nil {
+		ui.IndentedError(1, "`%s compose version` failed — Compose v2 is required", eng.Binary)
 		return 1
 	}
-	ui.IndentedSuccess(1, "Docker is running")
-	ui.Blank()
+	if !strings.Contains(string(out), "Docker Compose version") {
+		ui.IndentedError(1, "`%s compose` is not Docker Compose v2", eng.Binary)
+		ui.IndentedDim(2, "reported: %s", strings.TrimSpace(string(out)))
+		ui.IndentedDim(2, "srv filters on com.docker.compose.* labels, which only Compose v2 writes")
+		return 1
+	}
+	ui.IndentedSuccess(1, "Docker Compose v2 available")
 	return 0
 }
 
-// checkFirewall checks firewall status and port accessibility
+// checkPrivilegedPorts reports the one genuine behavioural difference between a
+// rootful and a rootless engine: Traefik binds 80/443 and dnsmasq binds 53, all
+// below the kernel's unprivileged floor.
+func checkPrivilegedPorts(eng engine.Engine) int {
+	if !eng.Rootless() {
+		return 0
+	}
+	start, err := os.ReadFile("/proc/sys/net/ipv4/ip_unprivileged_port_start")
+	if err != nil {
+		return 0 // Not Linux, or no procfs — nothing to assert.
+	}
+	floor, err := strconv.Atoi(strings.TrimSpace(string(start)))
+	if err != nil || floor <= constants.PortDNS {
+		return 0
+	}
+	ui.IndentedError(1, "rootless %s cannot bind ports below %d (srv needs 53, 80, 443)", eng.Name, floor)
+	ui.IndentedDim(2, "either run the engine rootful, or: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
+	return 1
+}
+
+// checkFirewall checks firewall status and port accessibility.
 func checkFirewall() int {
 	issues := 0
 	ui.Bold("Firewall")
@@ -130,8 +239,8 @@ func checkFirewall() int {
 	return issues
 }
 
-// checkPorts verifies required ports are available or in use by srv
-func checkPorts() int {
+// checkPorts verifies required ports are available or in use by srv.
+func checkPorts(engineUp bool) int {
 	issues := 0
 	ui.Bold("Ports")
 
@@ -155,14 +264,14 @@ func checkPorts() int {
 			continue
 		}
 
-		if p.ownedByFn() {
+		if engineUp && p.ownedByFn() {
 			version := docker.GetContainerImageVersion(p.container)
 			ui.IndentedSuccess(1, ":%d (%s) - in use by srv [%s:%s]", p.port, p.name, p.container, version)
 			continue
 		}
 
 		// Port is occupied by a foreign process — identify it.
-		conflict := traefik.PortConflict{Port: p.port, Name: p.name, Process: shell.IdentifyPortProcess(fmt.Sprintf("%d", p.port))}
+		conflict := traefik.PortConflict{Port: p.port, Name: p.name, Process: shell.IdentifyPortProcess(strconv.Itoa(p.port))}
 		if conflict.Process != "" {
 			ui.IndentedWarn(1, ":%d (%s) - in use by %s", p.port, p.name, conflict.Process)
 		} else {
@@ -176,7 +285,7 @@ func checkPorts() int {
 	return issues
 }
 
-// checkNetwork verifies Docker network exists
+// checkNetwork verifies Docker network exists.
 func checkNetwork() int {
 	ui.Bold("Docker Network")
 	cfg, err := config.Load()
@@ -199,7 +308,7 @@ func checkNetwork() int {
 	return 0
 }
 
-// checkTraefik verifies Traefik container is running
+// checkTraefik verifies Traefik container is running.
 func checkTraefik() int {
 	ui.Bold("Traefik")
 	if traefik.IsRunning() {
@@ -214,7 +323,7 @@ func checkTraefik() int {
 	return 1
 }
 
-// checkDNS verifies DNS server status and configuration
+// checkDNS verifies DNS server status and configuration.
 func checkDNS() int {
 	issues := 0
 	ui.Bold("DNS Server")
@@ -322,7 +431,7 @@ func checkMetrics() int {
 	return 1
 }
 
-// checkCertificates verifies mkcert installation and certificate status
+// checkCertificates verifies mkcert installation and certificate status.
 func checkCertificates() int {
 	issues := 0
 	ui.Bold("Local SSL Certificates")
@@ -350,7 +459,7 @@ func checkCertificates() int {
 	return issues
 }
 
-// checkCertificateExpiry checks for expired or expiring certificates
+// checkCertificateExpiry checks for expired or expiring certificates.
 func checkCertificateExpiry() int {
 	certs := traefik.ListLocalCerts()
 	if len(certs) == 0 {
@@ -485,11 +594,11 @@ func plural(n int, singular, pluralForm string) string {
 var envLoopbackPattern = regexp.MustCompile(`(?i)^\s*([A-Z][A-Z0-9_]*?)(_HOST|_HOSTS|_ENDPOINT|_URL|_DSN|_URI)\s*=\s*[\"']?[^\"'\n]*127\.0\.0\.1`)
 
 func scanEnvForHostLoopback(path string) []string {
-	f, err := os.Open(path) //nolint:gosec // path comes from site metadata (trusted)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()
 
 	var hits []string
 	scanner := bufio.NewScanner(f)
@@ -574,7 +683,14 @@ func checkConfigDirOwnership(fix bool) int {
 // cap so we don't blow up on misconfigured systems with thousands of files.
 func findRootOwnedPaths(root string) ([]string, error) {
 	const maxFindings = 256
-	currentUser := uint32(currentUID())
+	uid := currentUID()
+	if uid < 0 {
+		// No meaningful uid (Windows, or a platform that cannot report one).
+		// Converting a negative uid would wrap to 4294967295 and flag every
+		// file as wrongly-owned, offering to chown the whole tree.
+		return nil, nil
+	}
+	currentUser := uint32(uid) //nolint:gosec // G115: the uid < 0 case returned above, and a uid is 32-bit
 	var hits []string
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil, nil

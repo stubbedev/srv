@@ -38,7 +38,7 @@ available.
 
 `harness/` is a thin, build-tagged helper layer:
 
-- `SkipIfNoDocker` / `SkipIfNoMkcert` / `SkipIfPortsBusy` — environment guards.
+- `SkipIfNoEngine` / `SkipIfNoMkcert` / `SkipIfPortsBusy` — environment guards.
 - `BuildSrv` — compiles the `srv` binary once per run.
 - `NewRoot` — a throwaway `SRV_ROOT`.
 - `TraefikUp` — writes config via `traefik.EnsureConfig` and starts only the
@@ -52,6 +52,6 @@ available.
 ## Adding a new e2e
 
 1. New subdir under `e2e/` with `<name>_test.go` carrying `//go:build e2e`.
-2. Start with the guard calls (`harness.SkipIfNoDocker`, `SkipIfNoMkcert`,
+2. Start with the guard calls (`harness.SkipIfNoEngine`, `SkipIfNoMkcert`,
    `SkipIfPortsBusy`), then `harness.NewRoot` + `harness.TraefikUp`.
 3. Drive `srv` via `harness.RunSrv`, assert via `harness.WaitForHTTPS`.

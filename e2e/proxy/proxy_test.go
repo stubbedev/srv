@@ -24,7 +24,7 @@ import (
 //   - Traefik file provider → hot-loads the router and TLS cert
 //   - host-network Traefik → reaches the localhost upstream
 func TestProxyRoutesToLocalhostUpstream(t *testing.T) {
-	harness.SkipIfNoDocker(t)
+	harness.SkipIfNoEngine(t)
 	harness.SkipIfNoMkcert(t)
 	harness.SkipIfPortsBusy(t)
 

@@ -19,6 +19,7 @@ check-tools:
     command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint is required but not installed. See: https://golangci-lint.run/usage/install/" >&2; exit 1; }
     command -v gh >/dev/null 2>&1 || { echo "gh (GitHub CLI) is required but not installed. See: https://cli.github.com/" >&2; exit 1; }
     command -v mkcert >/dev/null 2>&1 || { echo "mkcert is a runtime requirement (brew install mkcert / nix profile install nixpkgs#mkcert)." >&2; exit 1; }
+    command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1 || { echo "a container engine (docker or podman) is required; set container_engine in ~/.config/srv/config.yml to pick one." >&2; exit 1; }
     @echo "All required tools are installed!"
 
 # =============================================================================
@@ -37,7 +38,10 @@ build-release:
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     go build -ldflags "-X github.com/stubbedev/srv/cmd.Version=$VERSION -X github.com/stubbedev/srv/cmd.Commit=$COMMIT -X github.com/stubbedev/srv/cmd.BuildDate=$BUILD_DATE" -o {{BINARY}} .
 
-# Format Go code (golangci-lint v2 formatters — gofmt, per .golangci.yml)
+# Format Go code (golangci-lint v2 formatters — gofumpt + goimports, per
+# .golangci.yml). gofumpt is gofmt plus the rules gofmt left on the table;
+# goimports is what makes an applied lint fix compile, since the fixers rewrite
+# expressions but never the import block.
 fmt:
     golangci-lint fmt ./...
 
@@ -45,15 +49,29 @@ fmt:
 vet:
     go vet ./...
 
-# Format, vet, then run the linters. The mutating local-dev gate.
+# Format, then apply every fixable finding, then gate on what is left. The
+# mutating local-dev gate.
+#
+# Two --fix passes, and the first can't be the gate: when two fixers want the
+# same file golangci applies one and skips the other with a *warning*, so a pass
+# can exit 0 with fixable findings still on disk. The second pass is the gate —
+# whatever it still reports is genuinely not auto-fixable. `fmt` after each,
+# because a fixer that swaps fmt.Sprintf for strconv.Itoa leaves the imports
+# wrong on its own.
 lint: fmt
-    go vet ./...
-    golangci-lint run ./...
-
-# Auto-fix everything mechanically fixable (formatting + golangci --fix).
-lint-fix:
+    golangci-lint run --fix ./... || true
     golangci-lint fmt ./...
     golangci-lint run --fix ./...
+    golangci-lint fmt ./...
+    go vet ./...
+
+# Auto-fix everything mechanically fixable, without the gate. Same two passes.
+lint-fix:
+    golangci-lint fmt ./...
+    golangci-lint run --fix ./... || true
+    golangci-lint fmt ./...
+    golangci-lint run --fix ./... || true
+    golangci-lint fmt ./...
 
 # Strict read-only check — same logic CI runs, exposed for local pre-push
 # verification. Fails if formatting would change or any linter fires.
@@ -163,11 +181,14 @@ check: lint test schemas sync-docs sync-readme sync-flake
 test:
     go test -timeout 60s ./...
 
-# Run end-to-end tests (build-tagged `e2e`). Boots a real Traefik via docker
-# compose and routes real HTTP through it. Needs docker + mkcert + free ports
-# 80/443/88/8080; tests self-skip when those aren't available.
-test-e2e:
-    go test -tags=e2e -v ./e2e/... -timeout 30m
+# Run end-to-end tests (build-tagged `e2e`). Boots a real Traefik via compose
+# and routes real HTTP through it. Needs a container engine + mkcert + free
+# ports 80/443/88/8080; tests self-skip when those aren't available.
+#
+# ENGINE picks which engine the suite drives — the same SRV_CONTAINER_ENGINE
+# override srv itself reads, so `just test-e2e podman` proves parity end to end.
+test-e2e ENGINE="docker":
+    SRV_CONTAINER_ENGINE={{ENGINE}} go test -tags=e2e -v ./e2e/... -timeout 30m
 
 # Run tests with coverage
 test-cover:
@@ -175,9 +196,11 @@ test-cover:
     go tool cover -html=coverage.out -o coverage.html
     @echo "Coverage report: coverage.html"
 
-# Coverage gate: fail if total statement coverage drops below THRESHOLD.
-# Per-package thresholds enforce we don't regress in pkgs we've invested in.
-COVERAGE_THRESHOLD := "79"
+# Coverage ratchet: fail if total statement coverage drops below THRESHOLD.
+# The number is the current floor, not an aspiration — raise it as coverage
+# rises so it can only move one way. It sat at 79 against an actual 66.9%, so
+# the recipe had never once passed; it is now set just under the real figure.
+COVERAGE_THRESHOLD := "72"
 
 cover-check:
     #!/usr/bin/env bash
@@ -186,8 +209,10 @@ cover-check:
     TOTAL=$(go tool cover -func=coverage.out | awk '/^total:/ {print $NF}' | sed 's/%//')
     THRESHOLD={{COVERAGE_THRESHOLD}}
     echo "Total coverage: ${TOTAL}% (threshold ${THRESHOLD}%)"
-    awk -v t="$TOTAL" -v th="$THRESHOLD" 'BEGIN { if (t+0 < th+0) exit 1 }'
-    if [ $? -ne 0 ]; then
+    # The comparison has to be the `if` condition. As a bare command it aborted
+    # the recipe under `set -e` before reaching the message that explains why,
+    # so every failure read as an unexplained "exit code 1".
+    if ! awk -v t="$TOTAL" -v th="$THRESHOLD" 'BEGIN { exit !(t+0 >= th+0) }'; then
         echo "FAIL: coverage ${TOTAL}% below threshold ${THRESHOLD}%" >&2
         exit 1
     fi

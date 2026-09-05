@@ -24,15 +24,16 @@ type Config struct {
 
 // UserConfig holds user-configurable settings stored in config.yml.
 type UserConfig struct {
-	ParkedPaths []string `yaml:"parked_paths,omitempty" jsonschema:"description=Directories that 'srv park' watches for new sites."`
-	UpstreamDNS []string `yaml:"upstream_dns,omitempty" jsonschema:"description=Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty."`
+	ContainerEngine string   `jsonschema:"description=Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2.,enum=auto,enum=docker,enum=podman,enum=colima,enum=orbstack,enum=rancher-desktop" yaml:"container_engine,omitempty"`
+	ParkedPaths     []string `jsonschema:"description=Directories that 'srv park' watches for new sites."                                                                                                                                                                            yaml:"parked_paths,omitempty"`
+	UpstreamDNS     []string `jsonschema:"description=Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty."                                                                                                                            yaml:"upstream_dns,omitempty"`
 }
 
 var (
 	configMu     sync.Mutex
 	configLoaded bool
 	cachedConfig *Config
-	configErr    error
+	errConfig    error
 )
 
 // Load returns the srv configuration, creating directories as needed.
@@ -43,12 +44,12 @@ func Load() (*Config, error) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	if !configLoaded {
-		cachedConfig, configErr = load()
-		if configErr == nil {
+		cachedConfig, errConfig = load()
+		if errConfig == nil {
 			configLoaded = true
 		}
 	}
-	return cachedConfig, configErr
+	return cachedConfig, errConfig
 }
 
 func load() (*Config, error) {
@@ -68,7 +69,7 @@ func load() (*Config, error) {
 }
 
 // getSrvRoot returns the srv configuration directory.
-// Priority: SRV_ROOT env var > XDG_CONFIG_HOME/srv > ~/.config/srv
+// Priority: SRV_ROOT env var > XDG_CONFIG_HOME/srv > ~/.config/srv.
 func getSrvRoot() (string, error) {
 	// Check for environment variable override
 	if envRoot := os.Getenv(constants.EnvSrvRoot); envRoot != "" {
@@ -140,7 +141,7 @@ func ResetCache() {
 	defer configMu.Unlock()
 	configLoaded = false
 	cachedConfig = nil
-	configErr = nil
+	errConfig = nil
 }
 
 // ConfigPath returns the path to the config.yml file.

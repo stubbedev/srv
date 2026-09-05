@@ -70,8 +70,74 @@ Brew formula covers darwin/linux amd64+arm64; armv7 and 386 are install-script
 or manual-download only.
 
 **Runtime requirements:**
-- Docker
+- A container runtime with a Docker-compatible API — Docker, Podman, Colima, OrbStack or Rancher Desktop; srv detects which (see [Container runtimes](#container-runtimes))
 - [mkcert](https://github.com/FiloSottile/mkcert) — for local TLS. Install via `brew install mkcert`, `nix profile install nixpkgs#mkcert`, or your distro package manager. srv shells out to it; no embedded copy.
+
+## Container runtimes
+
+srv needs one thing from a container runtime: a **Docker-compatible API
+endpoint**. It uses that to create the shared network, inspect containers and
+pull images, and Traefik uses it to watch labels. Everything else — compose
+up/down, exec into a service — is a CLI call every supported runtime spells the
+same way.
+
+**You don't have to configure this.** With no `container_engine` key set, srv
+probes for a runtime that is actually usable here — its CLI on `$PATH` and its
+API socket present — in this order:
+
+| Runtime | CLI | Socket probed |
+|---|---|---|
+| `docker` | `docker` | `/var/run/docker.sock`, `~/.docker/run/docker.sock` |
+| `orbstack` | `docker` | `~/.orbstack/run/docker.sock` |
+| `colima` | `docker` | `~/.colima/default/docker.sock`, `~/.colima/docker.sock` |
+| `rancher-desktop` | `docker` | `~/.rd/docker.sock` |
+| `podman` | `podman` | `$XDG_RUNTIME_DIR/podman/podman.sock`, `/run/podman/podman.sock` |
+
+Docker is probed first, so a plain Docker install resolves exactly as it always
+did. If nothing is detectable, srv falls back to Docker so the failure reads the
+way it always has.
+
+Pin one instead of detecting, when you have several installed:
+
+```yaml
+# ~/.config/srv/config.yml
+container_engine: podman   # or auto (the default), docker, colima, orbstack, rancher-desktop
+```
+
+**`DOCKER_HOST` beats everything.** If it is already exported, srv uses that
+endpoint verbatim and never overwrites it — which is also how you reach anything
+not in the table: a remote daemon, a rootless socket in an unusual place, or a
+Docker-API shim in front of another runtime. srv names the runtime when it
+recognises the socket, so `podman compose` is still used for a Podman socket. A
+`tcp://` endpoint is passed straight through to Traefik's provider rather than
+bind-mounted.
+
+Otherwise srv exports `DOCKER_HOST` itself from whatever it resolved, so the
+Docker SDK client and Compose v2 both follow the same choice, and bind-mounts
+the socket into the Traefik container at the usual `/var/run/docker.sock`.
+
+**nerdctl and Finch are not supported.** They ship no Docker-compatible API —
+containerd's socket is a different protocol — so srv could not create a network
+or inspect a container through them. Put a Docker-API shim in front and point
+`DOCKER_HOST` at it if you have one.
+
+**Compose v2 is required.** srv finds a site's containers by their
+`com.docker.compose.*` labels, which only Docker Compose v2 (the Go binary)
+writes. `podman compose` delegates to it and is fine; `podman-compose` (the
+Python reimplementation) labels containers `io.podman.compose.*`, so every
+lookup silently returns nothing. `srv doctor` checks this and says so.
+
+**Rootful Podman is the supported Podman target.** Traefik binds :80 and :443
+and dnsmasq binds :53, all below the kernel's unprivileged port floor, so
+rootless Podman refuses them until the host lowers it:
+
+```bash
+sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
+```
+
+`srv doctor` reports which runtime it resolved and how (detected, configured, or
+from `DOCKER_HOST`), its endpoint, its compose implementation, and this port
+floor when it applies.
 
 ## Quick start
 
@@ -843,6 +909,7 @@ _Path: `~/.config/srv/config.yml`_
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `container_engine` | string | no | Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2. |
 | `parked_paths` | array<string> | no | Directories that 'srv park' watches for new sites. |
 | `upstream_dns` | array<string> | no | Upstream resolvers written into dnsmasq.conf. Defaults to Google DNS (8.8.8.8 8.8.4.4) when empty. |
 <!-- END:config -->
@@ -897,7 +964,7 @@ your project directories.
 
 | Path | Description |
 |------|-------------|
-| `~/.config/srv/config.yml` | Global configuration (parked paths) |
+| `~/.config/srv/config.yml` | Global configuration (container engine, parked paths, upstream DNS) |
 | `~/.config/srv/traefik/` | Traefik docker-compose and static config |
 | `~/.config/srv/traefik/conf/` | Dynamic Traefik routing configs |
 | `~/.config/srv/traefik/conf/site-<name>.yml` | Compose-site Traefik file-provider config |
