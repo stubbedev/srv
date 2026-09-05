@@ -29,6 +29,12 @@ jobs:
         engine: [docker, podman]
     env:
       SRV_CONTAINER_ENGINE: ${{ matrix.engine }}
+      # The podman leg targets the *rootful* socket, which is the deliverable;
+      # rootless needs a sysctl for the privileged ports Traefik binds and is
+      # tracked separately. Naming the endpoint outright is srv's documented
+      # escape hatch and removes any ambiguity about which podman is meant —
+      # the runner also carries a rootless socket path.
+      DOCKER_HOST: ${{ matrix.engine == 'podman' && 'unix:///run/podman/podman.sock' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,6 +74,9 @@ jobs:
           # rootless podman needs a sysctl for the privileged ports Traefik
           # binds and is tracked separately.
           sudo chmod 666 /run/podman/podman.sock
+          # Fail here rather than inside a test if the socket is not actually
+          # serving: this is the whole premise of the leg.
+          podman --remote --url unix:///run/podman/podman.sock info >/dev/null
           podman compose version
 
       - name: Run e2e tests

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,9 +112,13 @@ func TestDetectPicksTheRuntimeWhoseSocketExists(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(sock, nil, 0o600); err != nil {
-		t.Fatal(err)
+	// A real listener, not just a file: the probe dials, because a socket file
+	// outlives the daemon that made it.
+	ln, lnErr := net.Listen("unix", sock)
+	if lnErr != nil {
+		t.Skipf("cannot bind a unix socket here: %v", lnErr)
 	}
+	defer ln.Close()
 	// Only podman is "installed" — so even on a machine with a real
 	// /var/run/docker.sock, docker fails the binary half of the probe.
 	t.Cleanup(shell.SwapDefault(shelltest.New(map[string]shelltest.Response{
@@ -142,5 +147,85 @@ func TestDetectReportsNothingWhenNoRuntimeIsUsable(t *testing.T) {
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
 	if e, ok := Detect(); ok {
 		t.Errorf("Detect() = %+v, want no match", e)
+	}
+}
+
+// ─── socket probing ──────────────────────────────────────────────────────
+//
+// This is what CI caught: the GitHub runner had a podman socket *file* at the
+// rootless path with nothing behind it, and the live rootful socket further
+// down the candidate list. Existence-based probing picked the dead one and
+// every compose call failed with "Cannot connect to the Docker daemon".
+
+func TestFirstUsableSkipsAStaleSocketFile(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "stale.sock")
+	if err := os.WriteFile(stale, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	live := filepath.Join(dir, "live.sock")
+	ln, err := net.Listen("unix", live)
+	if err != nil {
+		t.Skipf("cannot bind a unix socket here: %v", err)
+	}
+	defer ln.Close()
+
+	got, ok := firstUsable([]string{stale, live})
+	if !ok {
+		t.Fatal("firstUsable() found nothing, want the live socket")
+	}
+	if got != live {
+		t.Errorf("firstUsable() = %q, want the live socket %q — a stale file must not win", got, live)
+	}
+}
+
+func TestFirstUsableIgnoresMissingAndEmptyPaths(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.sock")
+	ln, err := net.Listen("unix", live)
+	if err != nil {
+		t.Skipf("cannot bind a unix socket here: %v", err)
+	}
+	defer ln.Close()
+
+	got, ok := firstUsable([]string{"", filepath.Join(dir, "nope.sock"), live})
+	if !ok || got != live {
+		t.Errorf("firstUsable() = %q, %v; want the live socket", got, ok)
+	}
+}
+
+func TestFirstUsableReportsNothingWhenAllAreDead(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "stale.sock")
+	if err := os.WriteFile(stale, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := firstUsable([]string{stale, filepath.Join(dir, "absent.sock")}); ok {
+		t.Errorf("firstUsable() = %q, want no match", got)
+	}
+}
+
+// A regular file is not a socket; dialling it fails, which is the point.
+func TestDetectIgnoresARuntimeWithOnlyAStaleSocket(t *testing.T) {
+	clean(t)
+	dir := t.TempDir()
+	t.Setenv(constants.EnvXDGRuntimeDir, dir)
+	if os.Geteuid() == 0 {
+		t.Skip("running as root — podman's per-user socket does not apply")
+	}
+	sock := filepath.Join(dir, "podman", "podman.sock")
+	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(shell.SwapDefault(shelltest.New(map[string]shelltest.Response{
+		"podman": {Exists: true},
+	})))
+
+	if e, ok := Detect(); ok && e.Name == Podman {
+		t.Errorf("Detect() chose podman on a stale socket: %+v", e)
 	}
 }

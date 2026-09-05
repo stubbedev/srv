@@ -30,11 +30,14 @@
 package engine
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/shell"
@@ -67,6 +70,11 @@ const (
 // container, whichever runtime it came from. Only the host side of the bind
 // varies, which keeps providers.docker.endpoint constant for the socket case.
 const ContainerSocketPath = "/var/run/docker.sock"
+
+// socketProbeTimeout bounds the connect used to tell a live socket from a
+// stale file. Detection runs on the first engine call of every command, so it
+// has to stay imperceptible.
+const socketProbeTimeout = 250 * time.Millisecond
 
 // runtime is one entry in the table below: a CLI plus the places its
 // Docker-compatible API socket is conventionally found, best candidate first.
@@ -187,7 +195,7 @@ func For(name string) Engine {
 		}
 		candidates := r.sockets()
 		sock := candidates[0]
-		if found, ok := firstExisting(candidates); ok {
+		if found, ok := firstUsable(candidates); ok {
 			sock = found
 		}
 		return Engine{Name: r.name, Binary: r.binary, Endpoint: unixScheme + sock}
@@ -201,7 +209,7 @@ func For(name string) Engine {
 // the failure surfaces as the familiar "docker is not running".
 func Detect() (Engine, bool) {
 	for _, r := range runtimes {
-		sock, ok := firstExisting(r.sockets())
+		sock, ok := firstUsable(r.sockets())
 		if !ok || !shell.Exists(r.binary) {
 			continue
 		}
@@ -266,15 +274,31 @@ func home(parts ...string) string {
 	return filepath.Join(append([]string{dir}, parts...)...)
 }
 
-// firstExisting returns the first path that is present on this machine.
-func firstExisting(paths []string) (string, bool) {
+// firstUsable returns the first socket in paths that something is actually
+// listening on.
+//
+// Existence is not enough. A socket file outlives the daemon that made it —
+// a stopped Colima or OrbStack VM, a systemd user unit that was enabled and
+// then failed to start — and the stale file sorts ahead of a live socket
+// further down the list, so srv would resolve an endpoint that refuses every
+// connection. Dialling is what tells the two apart, and against a local unix
+// socket it costs microseconds.
+func firstUsable(paths []string) (string, bool) {
 	for _, p := range paths {
 		if p == "" {
 			continue
 		}
-		if _, err := os.Stat(p); err == nil {
-			return p, true
+		if _, err := os.Stat(p); err != nil {
+			continue
 		}
+		// Short: a local socket either answers immediately or is not there.
+		dialer := &net.Dialer{Timeout: socketProbeTimeout}
+		conn, err := dialer.DialContext(context.Background(), "unix", p)
+		if err != nil {
+			continue
+		}
+		_ = conn.Close()
+		return p, true
 	}
 	return "", false
 }
