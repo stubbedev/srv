@@ -42,6 +42,7 @@ Overkill when you have:
 ### Via Homebrew (macOS / Linux)
 
 ```bash
+brew tap stubbedev/tap
 brew install stubbedev/tap/srv
 ```
 
