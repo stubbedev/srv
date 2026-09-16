@@ -1,6 +1,6 @@
 #
 # Reference copy of the Homebrew formula pushed to
-# https://github.com/stubbedev/homebrew-srv on each tagged release.
+# https://github.com/stubbedev/homebrew-tap on each tagged release.
 #
 # This file is NOT consumed at install time — the bump-tap job in
 # .github/workflows/release.yml regenerates the tap's Formula/srv.rb from
