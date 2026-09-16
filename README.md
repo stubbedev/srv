@@ -42,7 +42,7 @@ Overkill when you have:
 ### Via Homebrew (macOS / Linux)
 
 ```bash
-brew install stubbedev/srv/srv
+brew install stubbedev/tap/srv
 ```
 
 This installs the binary, pulls in `mkcert` as a dependency, and registers a
