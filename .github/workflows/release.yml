@@ -172,7 +172,7 @@ jobs:
       - name: Check out homebrew tap
         uses: actions/checkout@v7
         with:
-          repository: stubbedev/homebrew-srv
+          repository: stubbedev/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
