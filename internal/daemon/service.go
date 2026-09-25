@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	sd "github.com/sergeymakinen/go-systemdconf/v2"
 	"howett.net/plist"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -96,64 +95,38 @@ func stopService() error {
 // Systemd (Linux)
 // =============================================================================
 
-// systemdUnitFile models srv-daemon.service. It is marshalled to systemd unit
-// syntax by go-systemdconf rather than built as a string, so section/key
-// structure and the repeated Environment= entries (which a struct-per-section
-// model with unique fields could not express) are handled by the library.
-// Field names map directly to systemd key names.
-type systemdUnitFile struct {
-	sd.File
-	Unit struct {
-		sd.Section
-		Description   sd.Value
-		Documentation sd.Value
-		After         sd.Value
-		Wants         sd.Value
-	}
-	Service struct {
-		sd.Section
-		Type        sd.Value
-		ExecStart   sd.Value
-		Restart     sd.Value
-		RestartSec  sd.Value
-		Environment sd.Value
-	}
-	Install struct {
-		sd.Section
-		WantedBy sd.Value
-	}
-}
-
-// renderSystemdUnit builds the srv-daemon.service unit. HOME and
-// XDG_CONFIG_HOME are pinned because a systemd service context may start with
-// an empty environment. SRV_ROOT and SRV_CONTAINER_ENGINE are carried over
-// when set: they are precedence-1 overrides (config, ops/engine), and a
-// daemon installed under one would otherwise silently point at the default
-// root/engine instead.
+// renderSystemdUnit builds the srv-daemon.service unit as text. The shape is
+// fixed and small; a writer beats a marshall-and-hope library for a file this
+// static. HOME and XDG_CONFIG_HOME are pinned because a systemd service
+// context may start with an empty environment. SRV_ROOT and
+// SRV_CONTAINER_ENGINE are carried over when set: they are precedence-1
+// overrides (config, ops/engine), and a daemon installed under one would
+// otherwise silently point at the default root/engine instead.
 func renderSystemdUnit(executable, homeDir string) (string, error) {
-	var u systemdUnitFile
-	u.Unit.Description = sd.Value{"srv daemon - Docker container network connector"}
-	u.Unit.Documentation = sd.Value{"https://github.com/stubbedev/srv"}
-	u.Unit.After = sd.Value{"docker.service"}
-	u.Unit.Wants = sd.Value{"docker.service"}
-	u.Service.Type = sd.Value{"simple"}
-	u.Service.ExecStart = sd.Value{executable + " daemon start --foreground"}
-	u.Service.Restart = sd.Value{"on-failure"}
-	u.Service.RestartSec = sd.Value{"5"}
-	env := sd.Value{"HOME=" + homeDir, "XDG_CONFIG_HOME=" + homeDir + "/.config"}
+	env := []string{"HOME=" + homeDir, "XDG_CONFIG_HOME=" + homeDir + "/.config"}
 	for _, key := range []string{"SRV_ROOT", "SRV_CONTAINER_ENGINE"} {
 		if val := os.Getenv(key); val != "" {
 			env = append(env, key+"="+val)
 		}
 	}
-	u.Service.Environment = env
-	u.Install.WantedBy = sd.Value{"default.target"}
 
-	data, err := sd.Marshal(&u)
-	if err != nil {
-		return "", fmt.Errorf("marshal systemd unit: %w", err)
+	var b strings.Builder
+	b.WriteString("[Unit]\n")
+	b.WriteString("Description=srv daemon - Docker container network connector\n")
+	b.WriteString("Documentation=https://github.com/stubbedev/srv\n")
+	b.WriteString("After=docker.service\n")
+	b.WriteString("Wants=docker.service\n")
+	b.WriteString("\n[Service]\n")
+	b.WriteString("Type=simple\n")
+	fmt.Fprintf(&b, "ExecStart=%s daemon start --foreground\n", executable)
+	b.WriteString("Restart=on-failure\n")
+	b.WriteString("RestartSec=5\n")
+	for _, e := range env {
+		fmt.Fprintf(&b, "Environment=%s\n", e)
 	}
-	return string(data), nil
+	b.WriteString("\n[Install]\n")
+	b.WriteString("WantedBy=default.target\n")
+	return b.String(), nil
 }
 
 func systemdServicePath() (string, error) {

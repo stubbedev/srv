@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	sd "github.com/sergeymakinen/go-systemdconf/v2"
-
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
@@ -159,29 +157,16 @@ func setupSystemdResolved() error {
 	return updateSystemdResolvedConfig(domains)
 }
 
-// resolvedConf models the resolved.conf.d drop-in, which is systemd
-// configuration syntax. Marshalling via go-systemdconf keeps the output
-// byte-identical to the previous hand-built form, so the change-detection that
-// avoids a disruptive systemd-resolved restart still fires on an unchanged
-// config. Field names map directly to systemd key names.
-type resolvedConf struct {
-	sd.File
-	Resolve struct {
-		sd.Section
-		DNS     sd.Value
-		Domains sd.Value
-	}
-}
-
 // renderResolvedConf builds the resolved.conf drop-in that routes the given
-// (already ~-prefixed) domains through dnsmasq on the loopback. The marshal
-// error is ignored: the struct is fixed-shape and cannot fail to encode.
+// (already ~-prefixed) domains through dnsmasq on the loopback. Written as
+// text: the ini shape is fixed and tiny, and the change-detection below
+// compares bytes, which a hand writer makes predictable.
 func renderResolvedConf(routingDomains []string) string {
-	var c resolvedConf
-	c.Resolve.DNS = sd.Value{constants.LocalhostIP}
-	c.Resolve.Domains = sd.Value{strings.Join(routingDomains, " ")}
-	data, _ := sd.Marshal(&c)
-	return string(data)
+	var b strings.Builder
+	b.WriteString("[Resolve]\n")
+	fmt.Fprintf(&b, "DNS=%s\n", constants.LocalhostIP)
+	fmt.Fprintf(&b, "Domains=%s\n", strings.Join(routingDomains, " "))
+	return b.String()
 }
 
 // updateSystemdResolvedConfig writes /etc/systemd/resolved.conf.d/srv-local.conf

@@ -10,7 +10,6 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/sergeymakinen/go-systemdconf/v2 v2.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/tufanbarisyildirim/gonginx v0.0.0-20260220081509-8e17ce617db3
