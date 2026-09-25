@@ -1,25 +1,16 @@
 package cmd
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/docker"
-	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/proxy"
-	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -120,281 +111,39 @@ func init() {
 }
 
 // =============================================================================
-// Proxy Input Validation
-// =============================================================================
-
-// proxyInput holds validated input for creating a proxy.
-type proxyInput struct {
-	name          string
-	domain        string
-	port          string
-	containerName string
-	containerPort string
-	isContainer   bool
-	wildcard      bool
-}
-
-// validateProxyInput validates and parses proxy add command inputs.
-func validateProxyInput() (*proxyInput, error) {
-	domain := proxyAddFlags.domain
-	port := proxyAddFlags.port
-	container := proxyAddFlags.container
-
-	// Validate that either port or container is provided, but not both
-	if port == "" && container == "" {
-		return nil, errors.New("either --port or --container must be specified")
-	}
-	if port != "" && container != "" {
-		return nil, errors.New("--port and --container are mutually exclusive")
-	}
-
-	// Validate domain
-	if err := ValidateDomain(domain); err != nil {
-		return nil, fmt.Errorf("invalid domain: %w", err)
-	}
-
-	input := &proxyInput{
-		domain:   domain,
-		wildcard: proxyAddFlags.wildcard,
-	}
-
-	// Parse container flag (format: container_name:port)
-	if container != "" {
-		parts := strings.SplitN(container, ":", 2)
-		if len(parts) != 2 {
-			return nil, errors.New("invalid container format. Use: container_name:port (e.g., myapp:3000)")
-		}
-		input.containerName = parts[0]
-		input.containerPort = parts[1]
-		input.isContainer = true
-
-		if err := ValidatePortString(input.containerPort); err != nil {
-			return nil, fmt.Errorf("invalid container port: %w", err)
-		}
-
-		// Check if container exists
-		if !docker.ContainerExists(input.containerName) {
-			return nil, fmt.Errorf("container '%s' does not exist", input.containerName)
-		}
-	} else {
-		// Validate localhost port
-		if err := ValidatePortString(port); err != nil {
-			return nil, fmt.Errorf("invalid port: %w", err)
-		}
-		input.port = port
-	}
-
-	// Derive name from domain if not provided
-	name := proxyAddFlags.name
-	if name == "" {
-		// Use SanitizeName for consistency with site add (dots become dashes)
-		name = site.SanitizeName(domain)
-	}
-
-	if err := ValidateProxyName(name); err != nil {
-		return nil, fmt.Errorf("invalid proxy name: %w", err)
-	}
-	input.name = name
-
-	return input, nil
-}
-
-// =============================================================================
-// Proxy Certificate Setup
-// =============================================================================
-
-// setupProxyCertificate ensures mkcert is installed and a cert exists for
-// the proxy's domain. Delegates to the shared helper used by `srv redirect`.
-func setupProxyCertificate(input *proxyInput) error {
-	return ensureLocalCertForResource(proxyCertSiteName(input.name), input.domain, input.wildcard)
-}
-
-// proxyCertSiteName is the synthetic site name under which a proxy's local
-// cert is stored. Prefixed so it never collides with a real site's certs.
-func proxyCertSiteName(name string) string { return "_proxy-" + name }
-
-// =============================================================================
-// Proxy Container Network Setup
-// =============================================================================
-
-// connectProxyContainer connects a container to the srv network.
-// Returns the target URL for the proxy.
-func connectProxyContainer(input *proxyInput, cfg *config.Config) (string, error) {
-	if !input.isContainer {
-		// Warn if nothing is listening on the port yet so the proxy isn't silently broken.
-		// Not a hard error: users often register a proxy before starting their dev server.
-		dialer := &net.Dialer{Timeout: 500 * time.Millisecond}
-		conn, dialErr := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", input.port))
-		if dialErr != nil {
-			ui.Warn("Nothing is listening on port %s — start your service before using the proxy", input.port)
-		} else {
-			_ = conn.Close()
-		}
-
-		// On Linux, Traefik uses network_mode: host, so it can reach localhost directly.
-		// Use "localhost" rather than "127.0.0.1" so that services bound only to the
-		// IPv6 loopback (::1) — e.g. Nuxt, Vite — are also reachable.
-		// On Mac/Windows, Traefik runs in bridge mode and needs host.docker.internal.
-		host := constants.DockerHostInternal
-		if platform.IsLinux() {
-			host = constants.LocalhostAlias
-		}
-		return fmt.Sprintf("http://%s:%s", host, input.port), nil
-	}
-
-	// Connect container to Traefik network so it can be reached.
-	// CreateNetwork is idempotent — treats "already exists" as success.
-	if err := docker.CreateNetwork(cfg.NetworkName); err != nil {
-		return "", fmt.Errorf("failed to create network: %w", err)
-	}
-
-	if err := docker.ConnectContainerToNetwork(input.containerName, cfg.NetworkName, ""); err != nil {
-		return "", fmt.Errorf("failed to connect container to network: %w", err)
-	}
-	ui.Dim("Connected container '%s' to %s network", input.containerName, cfg.NetworkName)
-
-	return fmt.Sprintf("http://%s:%s", input.containerName, input.containerPort), nil
-}
-
-// =============================================================================
 // Proxy Command Handlers
 // =============================================================================
 
+// runProxyAdd delegates entirely to internal/proxy.Add: validation, cert,
+// DNS, container networking, the --fallback sidecar, config, and metadata are
+// all shared with the MCP add_proxy tool, so the CLI is a thin flag mapper.
 func runProxyAdd(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	// The standard (no-fallback) flow is shared with the MCP add_proxy tool via
-	// internal/proxy.Add. The --fallback sidecar is a CLI-only feature handled
-	// inline below because it rewrites the target before the config is written.
-	if proxyAddFlags.fallbackURL == "" {
-		res, err := proxy.Add(cfg, proxy.AddSpec{
-			Name:      proxyAddFlags.name,
-			Domain:    proxyAddFlags.domain,
-			Port:      proxyAddFlags.port,
-			Container: proxyAddFlags.container,
-			Wildcard:  proxyAddFlags.wildcard,
-			Force:     proxyAddFlags.force,
-		})
-		if err != nil {
-			return err
-		}
-		for _, w := range res.Warnings {
-			ui.Warn("%s", w)
-		}
-		ui.Success("Proxy '%s' created", res.Name)
-		ui.Dim("https://%s -> %s", res.Domain, res.TargetURL)
-		return nil
-	}
-
-	// Validate input
-	input, err := validateProxyInput()
+	res, err := proxy.Add(cfg, proxy.AddSpec{
+		Name:            proxyAddFlags.name,
+		Domain:          proxyAddFlags.domain,
+		Port:            proxyAddFlags.port,
+		Container:       proxyAddFlags.container,
+		Wildcard:        proxyAddFlags.wildcard,
+		Force:           proxyAddFlags.force,
+		FallbackURL:     proxyAddFlags.fallbackURL,
+		FallbackTimeout: proxyAddFlags.fallbackTimeout,
+	})
 	if err != nil {
 		return err
 	}
-
-	// Check if proxy already exists
-	proxyFile := filepath.Join(cfg.TraefikConfDir(), constants.ProxyConfigPrefix+input.name+constants.ExtYAML)
-	if _, err := os.Stat(proxyFile); err == nil && !proxyAddFlags.force {
-		return fmt.Errorf("proxy '%s' already exists. Use --force to overwrite", input.name)
+	for _, note := range res.Notes {
+		ui.Dim("%s", note)
 	}
-
-	// Setup certificate
-	if err := setupProxyCertificate(input); err != nil {
-		return err
+	for _, w := range res.Warnings {
+		ui.Warn("%s", w)
 	}
-
-	// Register domain for local DNS
-	if err := traefik.RegisterLocalDomain(input.domain, input.wildcard); err != nil {
-		ui.Warn("Failed to register DNS for %s: %v", input.domain, err)
-	}
-
-	// Connect container if needed and get target URL
-	targetURL, err := connectProxyContainer(input, cfg)
-	if err != nil {
-		return err
-	}
-
-	// When --fallback is set we sit an nginx sidecar in front of the primary
-	// upstream so 5xx responses transparently re-proxy to the fallback URL.
-	// Traefik then routes to the sidecar instead of the original target.
-	if proxyAddFlags.fallbackURL != "" {
-		// The fallback sidecar must be able to reach the primary upstream the
-		// same way it would be reached without the sidecar — which depends on
-		// both the primary type and the platform.
-		spec := fallbackSpec{
-			Name:            input.name,
-			FallbackURL:     proxyAddFlags.fallbackURL,
-			FallbackTimeout: proxyAddFlags.fallbackTimeout,
-		}
-		switch {
-		case input.isContainer:
-			// Bridge sidecar on the srv network; reaches the primary by name.
-			spec.PrimaryHost = input.containerName
-			spec.PrimaryPort = input.containerPort
-		case platform.IsLinux():
-			// Localhost-port primary on Linux: a bridge container cannot reach
-			// a 127.0.0.1 host service, so the sidecar shares the host network
-			// namespace and dials the loopback directly.
-			spec.HostNetwork = true
-			spec.PrimaryHost = constants.LocalhostIP
-			spec.PrimaryPort = input.port
-		default:
-			// Docker Desktop: a bridge sidecar reaches the host via the alias.
-			spec.PrimaryHost = constants.DockerHostInternal
-			spec.PrimaryPort = input.port
-		}
-		sidecarURL, ferr := writeFallbackSidecar(cfg, spec)
-		if ferr != nil {
-			return ferr
-		}
-		targetURL = sidecarURL
-		ui.Dim("Fallback sidecar started (%s)", fallbackContainerName(input.name))
-	}
-
-	// Create proxy config file
-	if err := writeProxyConfig(cfg, input.name, input.domain, targetURL, input.containerName, input.wildcard); err != nil {
-		return err
-	}
-
-	// Persist a small metadata sidecar so `srv route add` can attach routes
-	// to this proxy later. Preserves existing routes if the user is
-	// overwriting an existing proxy via --force.
-	pmeta, _ := proxy.Read(input.name)
-	var existingRoutes []site.Route
-	if pmeta != nil {
-		existingRoutes = pmeta.Routes
-	}
-	if err := proxy.Write(proxy.Metadata{
-		Name:     input.name,
-		Domains:  []string{input.domain},
-		Wildcard: input.wildcard,
-		IsLocal:  true,
-		Routes:   existingRoutes,
-	}); err != nil {
-		ui.Warn("Failed to write proxy metadata sidecar: %v", err)
-	} else if len(existingRoutes) > 0 {
-		// Existing routes need their Traefik file regenerated since the host
-		// (or wildcard flag) may have changed.
-		if err := proxy.Reload(input.name); err != nil {
-			ui.Warn("Failed to refresh proxy routes: %v", err)
-		}
-	}
-
-	// Update Traefik dynamic config
-	if err := traefik.UpdateDynamicConfig(); err != nil {
-		ui.Warn("Failed to update Traefik config: %v", err)
-	}
-
-	ui.Success("Proxy '%s' created", input.name)
-	if input.isContainer {
-		ui.Dim("https://%s -> %s:%s (container)", input.domain, input.containerName, input.containerPort)
-	} else {
-		ui.Dim("https://%s -> localhost:%s", input.domain, input.port)
-		ui.Dim("Start your service on port %s to use this proxy", input.port)
-	}
+	ui.Success("Proxy '%s' created", res.Name)
+	ui.Dim("https://%s -> %s", res.Domain, res.TargetURL)
 	return nil
 }
 
@@ -406,12 +155,9 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Tear down the fallback sidecar (CLI-only feature) first, then delegate the
-	// shared removal (config, cert, DNS, routes, metadata) to internal/proxy so
-	// the CLI and the MCP remove_proxy tool stay in lockstep.
-	if err := removeFallbackSidecar(cfg, name); err != nil {
-		ui.Warn("Failed to remove fallback sidecar: %v", err)
-	}
+	// The shared removal (config, cert, DNS, routes, metadata, and the
+	// --fallback sidecar when one exists) lives in internal/proxy so the CLI
+	// and the MCP remove_proxy tool stay in lockstep.
 	warnings, err := proxy.RemoveProxy(cfg, name)
 	if err != nil {
 		return err
@@ -494,7 +240,7 @@ func runProxyList(cmd *cobra.Command, args []string) error {
 
 // plainProxySSLStatus mirrors getProxySSLStatus without colour codes for json.
 func plainProxySSLStatus(name, domain string) string {
-	return localCertStatus(proxyCertSiteName(name), domain)
+	return localCertStatus(proxy.CertSiteName(name), domain)
 }
 
 // =============================================================================
@@ -503,28 +249,11 @@ func plainProxySSLStatus(name, domain string) string {
 
 // getProxySSLStatus returns a formatted SSL status string for a proxy.
 func getProxySSLStatus(name, domain string) string {
-	return localCertStatusColored(proxyCertSiteName(name), domain)
+	return localCertStatusColored(proxy.CertSiteName(name), domain)
 }
 
 func getProxyNames() []string {
 	return scanConfigNames(constants.ProxyConfigPrefix)
-}
-
-// =============================================================================
-// Proxy Config File Operations
-// =============================================================================
-
-// writeProxyConfig renders the proxy's Traefik file config. The rendering lives
-// in internal/traefik (shared with the other dynamic-config writers); this
-// wrapper just builds the input struct.
-func writeProxyConfig(cfg *config.Config, name, domain, targetURL, containerName string, wildcard bool) error {
-	return traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{
-		Name:      name,
-		Domain:    domain,
-		TargetURL: targetURL,
-		Container: containerName,
-		Wildcard:  wildcard,
-	})
 }
 
 // proxyConfigInfo holds information read from a proxy config file.

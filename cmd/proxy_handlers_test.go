@@ -9,76 +9,8 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/mkcert"
+	"github.com/stubbedev/srv/internal/traefik"
 )
-
-func TestValidateProxyInputMissingFlags(t *testing.T) {
-	resetProxyAddFlags()
-	if _, err := validateProxyInput(); err == nil {
-		t.Error("expected err: missing --port and --container")
-	}
-}
-
-func TestValidateProxyInputBothFlags(t *testing.T) {
-	resetProxyAddFlags()
-	proxyAddFlags.port = "8080"
-	proxyAddFlags.container = "redis:6379"
-	if _, err := validateProxyInput(); err == nil {
-		t.Error("expected err: mutually exclusive")
-	}
-}
-
-func TestValidateProxyInputBadDomain(t *testing.T) {
-	resetProxyAddFlags()
-	proxyAddFlags.domain = "bad domain"
-	proxyAddFlags.port = "8080"
-	if _, err := validateProxyInput(); err == nil {
-		t.Error("expected err: invalid domain")
-	}
-}
-
-func TestValidateProxyInputBadPort(t *testing.T) {
-	resetProxyAddFlags()
-	proxyAddFlags.domain = "x.local"
-	proxyAddFlags.port = "notnum"
-	if _, err := validateProxyInput(); err == nil {
-		t.Error("expected err: invalid port")
-	}
-}
-
-func TestValidateProxyInputBadContainerFormat(t *testing.T) {
-	resetProxyAddFlags()
-	proxyAddFlags.domain = "x.local"
-	proxyAddFlags.container = "no-colon-format"
-	if _, err := validateProxyInput(); err == nil {
-		t.Error("expected err: bad container format")
-	}
-}
-
-func TestValidateProxyInputLocalhost(t *testing.T) {
-	resetProxyAddFlags()
-	proxyAddFlags.domain = "blog.local"
-	proxyAddFlags.port = "8080"
-	in, err := validateProxyInput()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in.isContainer {
-		t.Error("isContainer should be false")
-	}
-	if in.port != "8080" || in.domain != "blog.local" {
-		t.Errorf("got %+v", in)
-	}
-}
-
-func TestValidateProxyInputContainerMissing(t *testing.T) {
-	resetProxyAddFlags()
-	proxyAddFlags.domain = "x.local"
-	proxyAddFlags.container = "ghost:6379"
-	t.Cleanup(docker.SwapNewClientOK())
-	if _, err := validateProxyInput(); err == nil {
-		t.Error("expected err: container missing")
-	}
-}
 
 func TestRunProxyListEmpty(t *testing.T) {
 	setupSrvRoot(t)
@@ -97,7 +29,7 @@ func TestRunProxyRemoveMissing(t *testing.T) {
 func TestRunProxyRemoveExisting(t *testing.T) {
 	setupSrvRoot(t)
 	cfg, _ := config.Load()
-	if err := writeProxyConfig(cfg, "blog", "blog.local", "http://host.docker.internal:8080", "", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "blog", Domain: "blog.local", TargetURL: "http://host.docker.internal:8080"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runProxyRemove(nil, []string{"blog"}); err != nil {
@@ -136,15 +68,6 @@ func TestGetProxyNamesFinds(t *testing.T) {
 	}
 }
 
-func TestSetupProxyCertificate(t *testing.T) {
-	setupSrvRoot(t)
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
-	input := &proxyInput{name: "blog", domain: "blog.local", wildcard: false}
-	if err := setupProxyCertificate(input); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
 func resetProxyAddFlags() {
 	proxyAddFlags.domain = ""
 	proxyAddFlags.port = ""
@@ -154,37 +77,6 @@ func resetProxyAddFlags() {
 	proxyAddFlags.force = false
 	proxyAddFlags.fallbackURL = ""
 	proxyAddFlags.fallbackTimeout = ""
-}
-
-func TestConnectProxyContainerLocalhost(t *testing.T) {
-	setupSrvRoot(t)
-	cfg, _ := config.Load()
-	input := &proxyInput{port: "65432"} // nothing listening on this random port
-	got, err := connectProxyContainer(input, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == "" {
-		t.Error("expected URL")
-	}
-}
-
-func TestConnectProxyContainerContainer(t *testing.T) {
-	setupSrvRoot(t)
-	cfg, _ := config.Load()
-	t.Cleanup(docker.SwapNewClientOK())
-	input := &proxyInput{
-		isContainer:   true,
-		containerName: "redis",
-		containerPort: "6379",
-	}
-	got, err := connectProxyContainer(input, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "http://redis:6379" {
-		t.Errorf("got %q", got)
-	}
 }
 
 func TestRunProxyAddLocalhost(t *testing.T) {
@@ -213,7 +105,7 @@ func TestRunProxyAddBadInput(t *testing.T) {
 func TestRunProxyAddExisting(t *testing.T) {
 	setupSrvRoot(t)
 	cfg, _ := config.Load()
-	if err := writeProxyConfig(cfg, "blog", "blog.local", "http://x:8080", "", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "blog", Domain: "blog.local", TargetURL: "http://x:8080"}); err != nil {
 		t.Fatal(err)
 	}
 	resetProxyAddFlags()
@@ -277,7 +169,7 @@ func TestRunProxyAddFallback(t *testing.T) {
 func TestRunProxyAddForceOverwrite(t *testing.T) {
 	setupSrvRoot(t)
 	cfg, _ := config.Load()
-	if err := writeProxyConfig(cfg, "blog", "blog.local", "http://x:8080", "", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "blog", Domain: "blog.local", TargetURL: "http://x:8080"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(docker.SwapNewClientOK())
@@ -309,7 +201,7 @@ func TestRunRedirectAddHTTP(t *testing.T) {
 func TestRunProxyListWithProxies(t *testing.T) {
 	setupSrvRoot(t)
 	cfg, _ := config.Load()
-	if err := writeProxyConfig(cfg, "blog", "blog.local", "http://host.docker.internal:8080", "", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "blog", Domain: "blog.local", TargetURL: "http://host.docker.internal:8080"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(docker.SwapNewClientErr(errors.New("offline")))

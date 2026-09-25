@@ -37,6 +37,11 @@ type Metadata struct {
 	IsLocal bool `yaml:"is_local,omitempty"`
 	// Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`.
 	Routes []site.Route `yaml:"routes,omitempty"`
+	// Fallback sidecar (srv proxy add --fallback): the remote URL 5xx
+	// responses re-proxy to, and the connect timeout to the primary upstream.
+	// Empty when the proxy has no sidecar.
+	FallbackURL     string `yaml:"fallback_url,omitempty"`
+	FallbackTimeout string `yaml:"fallback_timeout,omitempty"`
 }
 
 const currentSchemaVersion = 1

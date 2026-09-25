@@ -252,20 +252,20 @@ func TestAddRemoveAddRoundTrip(t *testing.T) {
 	}
 }
 
-// ─── certSiteName ────────────────────────────────────────────────────────
+// ─── CertSiteName ────────────────────────────────────────────────────────
 
 // The synthetic cert site name keeps proxy certs from colliding with a real
 // site of the same name, and must stay path-safe since it is joined into the
 // certs directory.
 func TestCertSiteNameIsDistinctAndPathSafe(t *testing.T) {
-	got := certSiteName("app-test")
+	got := CertSiteName("app-test")
 	if got == "app-test" {
-		t.Error("certSiteName() must not collide with a real site name")
+		t.Error("CertSiteName() must not collide with a real site name")
 	}
 	if !strings.HasPrefix(got, "_proxy-") {
-		t.Errorf("certSiteName() = %q, want the _proxy- prefix", got)
+		t.Errorf("CertSiteName() = %q, want the _proxy- prefix", got)
 	}
 	if strings.ContainsAny(got, `/\`) || strings.Contains(got, "..") {
-		t.Errorf("certSiteName() = %q, want a path-safe name", got)
+		t.Errorf("CertSiteName() = %q, want a path-safe name", got)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/traefik"
 )
 
 func newCmdCfg(t *testing.T) *config.Config {
@@ -26,7 +27,7 @@ func newCmdCfg(t *testing.T) *config.Config {
 
 func TestWriteProxyConfigLocalhost(t *testing.T) {
 	cfg := newCmdCfg(t)
-	if err := writeProxyConfig(cfg, "blog", "blog.local", "http://host.docker.internal:8080", "", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "blog", Domain: "blog.local", TargetURL: "http://host.docker.internal:8080"}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(cfg.TraefikConfDir(), "proxy-blog.yml"))
@@ -47,7 +48,7 @@ func TestWriteProxyConfigLocalhost(t *testing.T) {
 
 func TestWriteProxyConfigContainer(t *testing.T) {
 	cfg := newCmdCfg(t)
-	if err := writeProxyConfig(cfg, "redis", "redis.local", "http://redis:6379", "redis", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "redis", Domain: "redis.local", TargetURL: "http://redis:6379", Container: "redis"}); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(cfg.TraefikConfDir(), "proxy-redis.yml"))
@@ -66,7 +67,7 @@ func TestReadProxyConfigMissing(t *testing.T) {
 
 func TestReadProxyConfigRoundtrip(t *testing.T) {
 	cfg := newCmdCfg(t)
-	if err := writeProxyConfig(cfg, "blog", "blog.local", "http://host.docker.internal:8080", "", false); err != nil {
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{Name: "blog", Domain: "blog.local", TargetURL: "http://host.docker.internal:8080"}); err != nil {
 		t.Fatal(err)
 	}
 	info := readProxyConfig(cfg, "blog")

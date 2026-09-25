@@ -913,6 +913,8 @@ _Path: `~/.config/srv/proxies/proxy-<name>.yml`_
 | `wildcard` | boolean | no | Match apex + one-level subdomains (*.example.com); local proxies only. |
 | `is_local` | boolean | no | Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt. |
 | `routes` | array<object> | no | Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`. |
+| `fallback_url` | string | no | Fallback sidecar (srv proxy add --fallback): the remote URL 5xx responses re-proxy to, and the connect timeout to the primary upstream. Empty when the proxy has no sidecar. |
+| `fallback_timeout` | string | no |  |
 
 #### DNS-only redirect
 

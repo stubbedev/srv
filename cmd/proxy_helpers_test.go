@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-func TestFallbackContainerName(t *testing.T) {
-	if got := fallbackContainerName("blog"); got != "srv-proxy-blog-fallback" {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestExtractContainerFromURL(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -27,15 +21,5 @@ func TestExtractContainerFromURL(t *testing.T) {
 		if got := extractContainerFromURL(c.in); got != c.want {
 			t.Errorf("extractContainerFromURL(%q) = %q, want %q", c.in, got, c.want)
 		}
-	}
-}
-
-func TestFindFreeLoopbackPort(t *testing.T) {
-	port, err := findFreeLoopbackPort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if port <= 0 || port > 65535 {
-		t.Errorf("port out of range: %d", port)
 	}
 }

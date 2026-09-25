@@ -1,8 +1,7 @@
 // Package proxy — orchestrate.go holds the headless add/remove flow shared by
-// the `srv proxy` CLI and the MCP add_proxy/remove_proxy tools. It does NOT
-// cover the CLI-only `--fallback` sidecar; callers that need that compose it on
-// top (see cmd/proxy.go). Keeping the core here means both surfaces validate,
-// issue certs, register DNS, and write config identically.
+// the `srv proxy` CLI and the MCP add_proxy/remove_proxy tools — including
+// the `--fallback` sidecar. Keeping the core here means both surfaces
+// validate, issue certs, register DNS, and write config identically.
 package proxy
 
 import (
@@ -23,27 +22,35 @@ import (
 	"github.com/stubbedev/srv/internal/validate"
 )
 
-// certSiteName is the synthetic site name a proxy's local cert is stored under,
-// kept distinct from real sites so cert files never collide.
-func certSiteName(name string) string { return "_proxy-" + name }
+// CertSiteName is the synthetic site name a proxy's local cert is stored
+// under, kept distinct from real sites so cert files never collide.
+func CertSiteName(name string) string { return "_proxy-" + name }
 
-// AddSpec describes a proxy to create. Exactly one of Port or Container must be
-// set. Container is "name:port".
+// AddSpec describes a proxy to create. Exactly one of Port or Container must
+// be set. Container is "name:port". When FallbackURL is set, an nginx sidecar
+// is placed in front of the primary upstream and 5xx responses transparently
+// re-proxy to it.
 type AddSpec struct {
-	Name      string // optional; derived from Domain when empty
-	Domain    string
-	Port      string
-	Container string
-	Wildcard  bool
-	Force     bool
+	Name            string // optional; derived from Domain when empty
+	Domain          string
+	Port            string
+	Container       string
+	Wildcard        bool
+	Force           bool
+	FallbackURL     string // optional; e.g. https://prod.example.com
+	FallbackTimeout string // optional connect timeout to the primary (default 2s)
 }
 
 // AddResult reports what Add produced.
 type AddResult struct {
-	Name      string   `json:"name"`
-	Domain    string   `json:"domain"`
-	TargetURL string   `json:"target_url"`
-	Warnings  []string `json:"warnings,omitempty"`
+	Name      string `json:"name"`
+	Domain    string `json:"domain"`
+	TargetURL string `json:"target_url"`
+	// FallbackEnabled is true when a fallback sidecar was placed in front of
+	// the primary upstream; TargetURL then points at the sidecar.
+	FallbackEnabled bool     `json:"fallback_enabled,omitempty"`
+	Notes           []string `json:"notes,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
 }
 
 // Add validates the spec, issues a local cert, registers DNS, connects a
@@ -63,7 +70,7 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		}
 	}
 
-	if _, err := traefik.EnsureResourceCert(certSiteName(name), spec.Domain, spec.Wildcard); err != nil {
+	if _, err := traefik.EnsureResourceCert(CertSiteName(name), spec.Domain, spec.Wildcard); err != nil {
 		return nil, err
 	}
 
@@ -73,9 +80,50 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("register DNS for %s: %v", spec.Domain, err))
 	}
 
-	targetURL, err := resolveTarget(cfg, isContainer, containerName, containerPort, spec.Port)
+	targetURL, warn, err := resolveTarget(cfg, isContainer, containerName, containerPort, spec.Port)
 	if err != nil {
 		return nil, err
+	}
+	if warn != "" {
+		res.Warnings = append(res.Warnings, warn)
+	}
+	if isContainer {
+		res.Notes = append(res.Notes, fmt.Sprintf("Connected container '%s' to %s network", containerName, cfg.NetworkName))
+	}
+
+	// When a fallback is requested, sit the nginx sidecar in front of the
+	// primary upstream so 5xx responses transparently re-proxy to it. Traefik
+	// routes to the sidecar instead of the original target.
+	if spec.FallbackURL != "" {
+		sidecar := FallbackSpec{
+			Name:            name,
+			FallbackURL:     spec.FallbackURL,
+			FallbackTimeout: spec.FallbackTimeout,
+		}
+		switch {
+		case isContainer:
+			// Bridge sidecar on the srv network; reaches the primary by name.
+			sidecar.PrimaryHost = containerName
+			sidecar.PrimaryPort = containerPort
+		case platform.IsLinux():
+			// Localhost-port primary on Linux: a bridge container cannot reach
+			// a 127.0.0.1 host service, so the sidecar shares the host network
+			// namespace and dials the loopback directly.
+			sidecar.HostNetwork = true
+			sidecar.PrimaryHost = constants.LocalhostIP
+			sidecar.PrimaryPort = spec.Port
+		default:
+			// Docker Desktop: a bridge sidecar reaches the host via the alias.
+			sidecar.PrimaryHost = constants.DockerHostInternal
+			sidecar.PrimaryPort = spec.Port
+		}
+		sidecarURL, ferr := EnsureFallbackSidecar(cfg, sidecar)
+		if ferr != nil {
+			return nil, ferr
+		}
+		targetURL = sidecarURL
+		res.FallbackEnabled = true
+		res.Notes = append(res.Notes, fmt.Sprintf("Fallback sidecar started (%s)", FallbackContainerName(name)))
 	}
 	res.TargetURL = targetURL
 
@@ -89,17 +137,19 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		return nil, err
 	}
 
-	// Preserve any existing routes when overwriting via Force.
+	// Preserve any existing routes (and fallback record) when overwriting via Force.
 	var existingRoutes []site.Route
 	if pmeta, _ := Read(name); pmeta != nil {
 		existingRoutes = pmeta.Routes
 	}
 	if err := Write(Metadata{
-		Name:     name,
-		Domains:  []string{spec.Domain},
-		Wildcard: spec.Wildcard,
-		IsLocal:  true,
-		Routes:   existingRoutes,
+		Name:            name,
+		Domains:         []string{spec.Domain},
+		Wildcard:        spec.Wildcard,
+		IsLocal:         true,
+		Routes:          existingRoutes,
+		FallbackURL:     spec.FallbackURL,
+		FallbackTimeout: spec.FallbackTimeout,
 	}); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("write proxy metadata: %v", err))
 	} else if len(existingRoutes) > 0 {
@@ -115,18 +165,34 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 }
 
 // RemoveProxy removes a proxy's Traefik config, local cert, DNS registration,
-// routes config, and metadata sidecar, then refreshes the dynamic config. It
-// does NOT tear down a `--fallback` sidecar (CLI-only); cmd handles that.
-// Returns an error only when the proxy does not exist; per-step failures are
-// returned as warnings.
+// routes config, fallback sidecar (when one was recorded or left behind by an
+// older CLI-only add), and metadata sidecar, then refreshes the dynamic
+// config. Returns an error only when the proxy does not exist; per-step
+// failures are returned as warnings.
 func RemoveProxy(cfg *config.Config, name string) (warnings []string, err error) {
 	proxyFile := filepath.Join(cfg.TraefikConfDir(), constants.ProxyConfigPrefix+name+constants.ExtYAML)
 
 	// Domain is needed to remove the matching cert + DNS registration. Prefer
 	// the metadata sidecar; it is the canonical record of the proxy's domain.
 	var domain string
-	if pmeta, _ := Read(name); pmeta != nil && len(pmeta.Domains) > 0 {
-		domain = pmeta.Domains[0]
+	var hasFallback bool
+	if pmeta, _ := Read(name); pmeta != nil {
+		if len(pmeta.Domains) > 0 {
+			domain = pmeta.Domains[0]
+		}
+		hasFallback = pmeta.FallbackURL != ""
+	}
+	// Older adds recorded the fallback only as a sidecar directory; tear that
+	// down too so no proxy ever leaves its sidecar orphaned.
+	if !hasFallback {
+		if _, statErr := os.Stat(FallbackDir(cfg, name)); statErr == nil {
+			hasFallback = true
+		}
+	}
+	if hasFallback {
+		if fbErr := RemoveFallbackSidecar(cfg, name); fbErr != nil {
+			warnings = append(warnings, fmt.Sprintf("remove fallback sidecar: %v", fbErr))
+		}
 	}
 
 	if rmErr := os.Remove(proxyFile); rmErr != nil {
@@ -137,7 +203,7 @@ func RemoveProxy(cfg *config.Config, name string) (warnings []string, err error)
 	}
 
 	if domain != "" {
-		if err := traefik.RemoveLocalCerts(certSiteName(name), domain); err != nil {
+		if err := traefik.RemoveLocalCerts(CertSiteName(name), domain); err != nil {
 			warnings = append(warnings, fmt.Sprintf("remove certificate: %v", err))
 		}
 		if err := traefik.UnregisterLocalDomain(domain); err != nil {
@@ -195,28 +261,38 @@ func validateAddSpec(spec AddSpec) (name, containerName, containerPort string, i
 }
 
 // resolveTarget connects a container to the srv network (when applicable) and
-// returns the upstream URL Traefik should route to.
-func resolveTarget(cfg *config.Config, isContainer bool, containerName, containerPort, port string) (string, error) {
+// returns the upstream URL Traefik should route to. For a localhost-port
+// target with nothing listening yet it returns a non-empty warning — users
+// often register the proxy before starting their dev server, so it is not an
+// error, but it must not be silent.
+func resolveTarget(cfg *config.Config, isContainer bool, containerName, containerPort, port string) (url string, warn string, err error) {
 	if !isContainer {
 		// Best-effort liveness check; not fatal — proxies are often added before
 		// the dev server starts.
 		dialer := &net.Dialer{Timeout: 500 * time.Millisecond}
 		if conn, dialErr := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", port)); dialErr == nil {
 			_ = conn.Close()
+		} else {
+			warn = fmt.Sprintf("nothing is listening on port %s — start your service before using the proxy", port)
 		}
+		// On Linux, Traefik uses network_mode: host, so it can reach localhost
+		// directly. Use "localhost" rather than "127.0.0.1" so that services
+		// bound only to the IPv6 loopback (::1) — e.g. Nuxt, Vite — are also
+		// reachable. On Mac/Windows, Traefik runs in bridge mode and needs
+		// host.docker.internal.
 		host := constants.DockerHostInternal
 		if platform.IsLinux() {
 			host = constants.LocalhostAlias
 		}
-		return fmt.Sprintf("http://%s:%s", host, port), nil
+		return fmt.Sprintf("http://%s:%s", host, port), warn, nil
 	}
 	if err := docker.CreateNetwork(cfg.NetworkName); err != nil {
-		return "", fmt.Errorf("create network: %w", err)
+		return "", "", fmt.Errorf("create network: %w", err)
 	}
 	if err := docker.ConnectContainerToNetwork(containerName, cfg.NetworkName, ""); err != nil {
-		return "", fmt.Errorf("connect container to network: %w", err)
+		return "", "", fmt.Errorf("connect container to network: %w", err)
 	}
-	return fmt.Sprintf("http://%s:%s", containerName, containerPort), nil
+	return fmt.Sprintf("http://%s:%s", containerName, containerPort), "", nil
 }
 
 func splitContainer(s string) (host, port string, ok bool) {

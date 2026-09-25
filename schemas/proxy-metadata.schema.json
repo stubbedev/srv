@@ -103,6 +103,13 @@
       },
       "type": "array",
       "description": "Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`."
+    },
+    "fallback_url": {
+      "type": "string",
+      "description": "Fallback sidecar (srv proxy add --fallback): the remote URL 5xx\nresponses re-proxy to, and the connect timeout to the primary upstream.\nEmpty when the proxy has no sidecar."
+    },
+    "fallback_timeout": {
+      "type": "string"
     }
   },
   "additionalProperties": false,
