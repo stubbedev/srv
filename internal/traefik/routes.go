@@ -153,12 +153,7 @@ func RemoveRoutesConfig(cfg *config.Config, name string) error {
 	return nil
 }
 
-// HasRoutesConfig reports whether a routes-<name>.yml file is present.
-func HasRoutesConfig(cfg *config.Config, name string) bool {
-	_, err := os.Stat(routesConfigPath(cfg, name))
-	return err == nil
-}
-
+// routesConfigPath returns the path of a site's extra-routes Traefik file.
 func routesConfigPath(cfg *config.Config, name string) string {
 	return filepath.Join(cfg.TraefikConfDir(), constants.RoutesConfigPrefix+name+constants.ExtYAML)
 }

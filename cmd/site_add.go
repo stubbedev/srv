@@ -59,7 +59,6 @@ SSL certificates:
 Examples:
   srv add /path/to/site --domain example.com          # Production with Let's Encrypt
   srv add /path/to/site --domain myapp.test --local   # Local dev with mkcert
-  srv add . --domain example.com --start              # Add and start immediately
   srv add /path/to/static --domain site.test --local  # Static files with nginx`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -94,7 +93,9 @@ func init() {
 	addCmd.Flags().BoolVar(&addFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test); local sites only")
 	addCmd.Flags().BoolVar(&addFlags.internalHTTP, "internal-http", false, "Expose the site on the internal plain-HTTP entrypoint (port 88) in addition to HTTPS")
 	addCmd.Flags().BoolVarP(&addFlags.force, "force", "f", false, "Overwrite existing configuration")
-	addCmd.Flags().BoolVar(&addFlags.skipValidation, "skip-validation", false, "Skip compose file validation")
+	addCmd.Flags().BoolVar(&addFlags.skipValidation, "skip-validation", false, "Skip compose file validation (validation is always on now)")
+	_ = addCmd.Flags().MarkHidden("skip-validation")
+	_ = addCmd.Flags().MarkDeprecated("skip-validation", "compose validation can no longer be skipped")
 	// Static site options
 	addCmd.Flags().BoolVar(&addFlags.spa, "spa", true, "Enable SPA mode (fallback to index.html)")
 	addCmd.Flags().BoolVar(&addFlags.cache, "cache", true, "Enable caching headers for static assets")

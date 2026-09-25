@@ -8,6 +8,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/redirect"
 	"github.com/stubbedev/srv/internal/traefik"
 )
 
@@ -290,8 +291,8 @@ func TestWriteRedirectConfig_HTTP(t *testing.T) {
 		permanent: true,
 		wildcard:  false,
 	}
-	if err := writeRedirectConfig(cfg, input); err != nil {
-		t.Fatalf("writeRedirectConfig: %v", err)
+	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: input.name, Domain: input.domain, To: input.to, Permanent: input.permanent, Wildcard: input.wildcard}); err != nil {
+		t.Fatalf("WriteRedirectConfig: %v", err)
 	}
 
 	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
@@ -331,8 +332,8 @@ func TestWriteRedirectConfig_HTTPWildcardAndTemporary(t *testing.T) {
 		permanent: false, // 302
 		wildcard:  true,
 	}
-	if err := writeRedirectConfig(cfg, input); err != nil {
-		t.Fatalf("writeRedirectConfig: %v", err)
+	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: input.name, Domain: input.domain, To: input.to, Permanent: input.permanent, Wildcard: input.wildcard}); err != nil {
+		t.Fatalf("WriteRedirectConfig: %v", err)
 	}
 
 	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
@@ -348,7 +349,7 @@ func TestWriteRedirectConfig_HTTPWildcardAndTemporary(t *testing.T) {
 }
 
 // =============================================================================
-// writeRedirectDNSConfig (DNS-only)
+// redirect.WriteDNSConfig (DNS-only)
 // =============================================================================
 
 func TestWriteRedirectDNSConfig(t *testing.T) {
@@ -360,8 +361,8 @@ func TestWriteRedirectDNSConfig(t *testing.T) {
 		to:      "new.example.com",
 		dnsOnly: true,
 	}
-	if err := writeRedirectDNSConfig(cfg, input); err != nil {
-		t.Fatalf("writeRedirectDNSConfig: %v", err)
+	if err := redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to); err != nil {
+		t.Fatalf("WriteDNSConfig: %v", err)
 	}
 
 	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
@@ -407,8 +408,8 @@ func TestReadRedirectConfig_HTTPRoundTrip(t *testing.T) {
 		to:        "https://new.test",
 		permanent: true,
 	}
-	if err := writeRedirectConfig(cfg, input); err != nil {
-		t.Fatalf("writeRedirectConfig: %v", err)
+	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: input.name, Domain: input.domain, To: input.to, Permanent: input.permanent, Wildcard: input.wildcard}); err != nil {
+		t.Fatalf("WriteRedirectConfig: %v", err)
 	}
 	info := readRedirectConfig(cfg, input.name)
 
@@ -435,8 +436,8 @@ func TestReadRedirectConfig_DNSRoundTrip(t *testing.T) {
 		to:      "new.example.com",
 		dnsOnly: true,
 	}
-	if err := writeRedirectDNSConfig(cfg, input); err != nil {
-		t.Fatalf("writeRedirectDNSConfig: %v", err)
+	if err := redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to); err != nil {
+		t.Fatalf("WriteDNSConfig: %v", err)
 	}
 	info := readRedirectConfig(cfg, input.name)
 
@@ -464,7 +465,7 @@ func TestReadRedirectConfig_MissingFile(t *testing.T) {
 // =============================================================================
 
 // TestDNSContractAcrossPackages enforces the schema contract between the
-// cmd-side writer (writeRedirectDNSConfig) and the traefik-side scanner
+// internal/redirect writer (WriteDNSConfig) and the traefik-side scanner
 // (ScanRedirectAliases). Renaming `source` or `target` on one side without
 // updating the other would silently break the dnsmasq regen pipeline; this
 // test makes the regression loud.
@@ -477,8 +478,8 @@ func TestDNSContractAcrossPackages(t *testing.T) {
 		to:      "new.example.com",
 		dnsOnly: true,
 	}
-	if err := writeRedirectDNSConfig(cfg, input); err != nil {
-		t.Fatalf("writeRedirectDNSConfig: %v", err)
+	if err := redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to); err != nil {
+		t.Fatalf("WriteDNSConfig: %v", err)
 	}
 
 	aliases, err := traefik.ScanRedirectAliases()
@@ -498,10 +499,10 @@ func TestGetRedirectNames(t *testing.T) {
 
 	// Write a mix of HTTP, DNS, and unrelated files. Only redirect-*.yml
 	// should be discovered, regardless of which schema is inside.
-	if err := writeRedirectConfig(cfg, &redirectInput{name: "alpha", domain: "alpha.test", to: "https://x.test", permanent: true}); err != nil {
+	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: "alpha", Domain: "alpha.test", To: "https://x.test", Permanent: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeRedirectDNSConfig(cfg, &redirectInput{name: "beta", domain: "beta.test", to: "y.test", dnsOnly: true}); err != nil {
+	if err := redirect.WriteDNSConfig(cfg, "beta", "beta.test", "y.test"); err != nil {
 		t.Fatal(err)
 	}
 	// Decoy files that must be ignored.

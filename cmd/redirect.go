@@ -211,13 +211,6 @@ func validateRedirectInput() (*redirectInput, error) {
 // Redirect Certificate Setup
 // =============================================================================
 
-// setupRedirectCertificate ensures mkcert is installed and a cert exists for
-// the redirect's source domain. Delegates to the shared helper used by `srv
-// proxy`.
-func setupRedirectCertificate(input *redirectInput) error {
-	return ensureLocalCertForResource(redirectSiteName(input.name), input.domain, input.wildcard)
-}
-
 // redirectSiteName is the synthetic site name under which a redirect's local
 // cert is stored. Prefixed with underscore so it sorts apart from real sites
 // and never collides with a user-named site of the same string.
@@ -434,25 +427,12 @@ func getRedirectSSLStatus(name, domain string) string {
 	return localCertStatusColored(redirectSiteName(name), domain)
 }
 
-func getRedirectNames() []string {
-	return scanConfigNames(constants.RedirectConfigPrefix)
-}
-
 // =============================================================================
 // Redirect Config File Operations
 // =============================================================================
 
-// writeRedirectConfig renders the HTTP redirect's Traefik file config. The
-// rendering lives in internal/traefik (shared with the other dynamic-config
-// writers); this wrapper just builds the input struct.
-func writeRedirectConfig(cfg *config.Config, input *redirectInput) error {
-	return traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{
-		Name:      input.name,
-		Domain:    input.domain,
-		To:        input.to,
-		Permanent: input.permanent,
-		Wildcard:  input.wildcard,
-	})
+func getRedirectNames() []string {
+	return scanConfigNames(constants.RedirectConfigPrefix)
 }
 
 type redirectConfigInfo struct {
@@ -520,11 +500,4 @@ func readRedirectConfig(cfg *config.Config, name string) redirectConfigInfo {
 		}
 	}
 	return info
-}
-
-// writeRedirectDNSConfig writes a DNS-only redirect yaml. The rendering lives in
-// internal/redirect (shared with the MCP add_redirect tool); this wrapper keeps
-// the cmd-side call site and tests stable.
-func writeRedirectDNSConfig(cfg *config.Config, input *redirectInput) error {
-	return redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to)
 }

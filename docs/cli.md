@@ -101,7 +101,6 @@ SSL certificates:
 Examples:
   srv add /path/to/site --domain example.com          # Production with Let's Encrypt
   srv add /path/to/site --domain myapp.test --local   # Local dev with mkcert
-  srv add . --domain example.com --start              # Add and start immediately
   srv add /path/to/static --domain site.test --local  # Static files with nginx
 ```
 
@@ -124,7 +123,6 @@ srv add PATH [flags]
 | `--port`, `-p` | `80` | Container port |
 | `--profile` | — | Docker Compose profile (required when the selected service declares multiple) |
 | `--service` | — | Container name to route to |
-| `--skip-validation` | `false` | Skip compose file validation |
 | `--spa` | `true` | Enable SPA mode (fallback to index.html) |
 | `--type` | — | Force site type: dockerfile, static, compose |
 | `--volume` | `[]` | Extra bind-mount in HOST:CONTAINER[:ro] form; repeatable |

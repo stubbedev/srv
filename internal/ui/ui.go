@@ -47,7 +47,6 @@ var (
 	dimC     = color.New(color.FgHiBlack).SprintFunc()
 	boldC    = color.New(color.Bold).SprintFunc()
 	cyanC    = color.New(color.FgCyan).SprintFunc()
-	purpleC  = color.New(color.FgMagenta).SprintFunc()
 )
 
 // outStdout / outStderr are the destinations for diagnostic / result output.
@@ -295,7 +294,6 @@ func ErrorText(s string) string   { return errorC(s) }
 func WarnText(s string) string    { return warnC(s) }
 func InfoText(s string) string    { return infoC(s) }
 func DimText(s string) string     { return dimC(s) }
-func AccentText(s string) string  { return purpleC(s) }
 
 // =============================================================================
 // Table output — plain ASCII, no lipgloss

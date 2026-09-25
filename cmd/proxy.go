@@ -534,10 +534,6 @@ type proxyConfigInfo struct {
 	Container string
 }
 
-// traefikRouteConfig is an alias for the shared type in the traefik package.
-// It exists here for backward compatibility within this file.
-type traefikRouteConfig = traefik.RouteConfig
-
 // extractContainerFromURL extracts the container name from a target URL.
 // Returns empty string if the target resolves to the host machine (localhost,
 // 127.0.0.1, ::1, or host.docker.internal) rather than a named container.
@@ -568,7 +564,7 @@ func readProxyConfig(cfg *config.Config, name string) proxyConfigInfo {
 	info := proxyConfigInfo{Target: "unknown"}
 
 	// Parse the YAML structure
-	var config traefikRouteConfig
+	var config traefik.RouteConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return info
 	}

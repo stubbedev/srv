@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -51,15 +50,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get executable path early so we can show it in the prompt.
-	// Keep the original path (pre-EvalSymlinks) for removal so that we remove
-	// the symlink itself rather than the resolved target it points to.
+	// The original path (pre-EvalSymlinks) is used for removal so that we
+	// remove the symlink itself rather than the resolved target it points to.
 	executable, execErr := os.Executable()
-	if execErr == nil {
-		// Resolve only for display; removal uses the original path below.
-		if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-			_ = resolved // resolved path available for display if needed
-		}
-	}
 
 	// Confirmation gate. Without --force the command refuses to run so a
 	// script that fat-fingers `srv uninstall` can't accidentally torch

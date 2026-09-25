@@ -280,7 +280,6 @@ srv add PATH [flags]
 | `--cors` | | `false` | Static only: emit permissive CORS headers |
 | `--volume` | | | Extra bind-mount in `HOST:CONTAINER[:ro]` form (repeatable) |
 | `--type` | | auto | Force site type: `static`, `dockerfile`, or `compose` |
-| `--skip-validation` | | `false` | Skip compose file validation |
 
 ### Examples
 

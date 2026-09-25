@@ -226,15 +226,6 @@ func TestRunProxyAddExisting(t *testing.T) {
 	}
 }
 
-func TestSetupRedirectCertificate(t *testing.T) {
-	setupSrvRoot(t)
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
-	input := &redirectInput{name: "alias", domain: "old.local"}
-	if err := setupRedirectCertificate(input); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
 func TestRunProxyAddContainer(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())

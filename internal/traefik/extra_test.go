@@ -217,20 +217,6 @@ func TestWriteRoutesConfigBadMatcher(t *testing.T) {
 	}
 }
 
-func TestHasRoutesConfig(t *testing.T) {
-	cfg := newTraefikCfg(t)
-	if HasRoutesConfig(cfg, "x") {
-		t.Error("should be false initially")
-	}
-	path := routesConfigPath(cfg, "x")
-	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !HasRoutesConfig(cfg, "x") {
-		t.Error("should be true after write")
-	}
-}
-
 func TestRemoveRoutesConfig(t *testing.T) {
 	cfg := newTraefikCfg(t)
 	path := routesConfigPath(cfg, "x")
