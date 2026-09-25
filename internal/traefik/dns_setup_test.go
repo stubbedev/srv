@@ -123,6 +123,38 @@ func TestUpdateSystemdResolvedConfigSystemctlErr(t *testing.T) {
 	}
 }
 
+func TestUpdateSystemdResolvedConfigRemovesLegacyShadow(t *testing.T) {
+	// Older srv wrote /etc/systemd/resolved.conf.d/srv.conf, which sorts
+	// AFTER srv-local.conf and therefore overrides its DNS= when left
+	// behind. The update must remove it even when the current file's
+	// content already matches.
+	legacy := filepath.Join(t.TempDir(), "srv.conf")
+	if err := os.WriteFile(legacy, []byte("[Resolve]\nDNS=127.0.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := legacyResolvedConfigPath
+	legacyResolvedConfigPath = legacy
+	t.Cleanup(func() { legacyResolvedConfigPath = old })
+
+	fake := shelltest.New(nil)
+	swapShell(t, fake)
+	if err := updateSystemdResolvedConfig(nil); err != nil {
+		t.Fatal(err)
+	}
+	var sawRemove, sawRestart bool
+	for _, c := range fake.Snapshot() {
+		if c.Method == "SudoRemove" {
+			sawRemove = true
+		}
+		if c.Method == "SudoSystemctl" {
+			sawRestart = true
+		}
+	}
+	if !sawRemove || !sawRestart {
+		t.Errorf("legacy removal must trigger SudoRemove and a resolved restart: remove=%v restart=%v", sawRemove, sawRestart)
+	}
+}
+
 func TestUpdateNetworkManagerConfigWrites(t *testing.T) {
 	fake := shelltest.New(nil)
 	swapShell(t, fake)

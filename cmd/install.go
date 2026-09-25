@@ -196,6 +196,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		ui.Dim("DNS pre-warm skipped: %v", err)
 	}
 
+	// Point the system resolver at srv's embedded DNS server. This is the
+	// one interactive moment guaranteed to have working sudo — the daemon
+	// retries the same update on every start but cannot prompt for a
+	// password, so an upgrade whose resolver config predates a srv change
+	// (e.g. the embedded DNS port) is repaired here.
+	if err := traefik.SetupDNS(); err != nil {
+		ui.Warn("DNS routing not updated (%v) — run 'srv dns setup' to fix local hostname resolution", err)
+	}
+
 	// Step 4: Set up dashboard HTTPS proxy (traefik.local)
 	steps.Next("Setting up dashboard proxy (%s)", traefik.DashboardLocalURL())
 	if err := traefik.CheckMkcert(); err != nil {

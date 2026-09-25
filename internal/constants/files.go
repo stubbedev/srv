@@ -151,8 +151,17 @@ const (
 const (
 	// SystemdResolvedConfigPath is the systemd-resolved config file path for srv.
 	SystemdResolvedConfigPath = "/etc/systemd/resolved.conf.d/srv-local.conf"
+	// LegacySystemdResolvedConfigPath is the drop-in name older srv versions
+	// wrote. Drop-ins apply in lexicographic order and this name sorts after
+	// SystemdResolvedConfigPath, so a leftover file overrides the current one
+	// and must be removed on setup.
+	LegacySystemdResolvedConfigPath = "/etc/systemd/resolved.conf.d/srv.conf"
 	// NetworkManagerConfigPath is the NetworkManager dnsmasq config file path for srv.
 	NetworkManagerConfigPath = "/etc/NetworkManager/dnsmasq.d/srv-local.conf"
+	// LegacyNetworkManagerConfigPath is the NetworkManager dnsmasq config name
+	// older srv versions wrote; dnsmasq accumulates server= lines across all
+	// conf.d files, so a stale file keeps an old routing alive.
+	LegacyNetworkManagerConfigPath = "/etc/NetworkManager/dnsmasq.d/srv.conf"
 	// MacOSResolverDir is the macOS resolver directory.
 	MacOSResolverDir = "/etc/resolver"
 )

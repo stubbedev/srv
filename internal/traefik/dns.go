@@ -203,9 +203,19 @@ func updateSystemdResolvedConfig(domains []string) error {
 
 	content := renderResolvedConf(routingDomains)
 
+	// Drop-in files apply in lexicographic order, and the legacy srv.conf
+	// sorts after srv-local.conf — a leftover from an older srv (with a
+	// port-less DNS=) would override this file entirely. Remove it; the
+	// removal counts as a change and forces the restart below.
+	legacyChanged, err := removeLegacyResolverConfig(legacyResolvedConfigPath)
+	if err != nil {
+		return err
+	}
+
 	// Nothing to do — and crucially, no system-wide DNS restart — when the
-	// routing config has not actually changed.
-	if existing, err := os.ReadFile(configFile); err == nil && string(existing) == content {
+	// routing config has not actually changed and no stale override was
+	// removed.
+	if existing, statErr := os.ReadFile(configFile); statErr == nil && string(existing) == content && !legacyChanged {
 		return nil
 	}
 
@@ -219,6 +229,29 @@ func updateSystemdResolvedConfig(domains []string) error {
 		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
 	}
 	return nil
+}
+
+// legacyResolvedConfigPath and legacyNetworkManagerConfigPath are vars so
+// tests can point the cleanup at scratch files; production uses the constants.
+var (
+	legacyResolvedConfigPath       = constants.LegacySystemdResolvedConfigPath
+	legacyNetworkManagerConfigPath = constants.LegacyNetworkManagerConfigPath
+)
+
+// removeLegacyResolverConfig deletes path when it exists: older srv versions
+// wrote resolver drop-ins under a name that sorts after the current file and
+// would silently override it. Reports whether anything was removed.
+func removeLegacyResolverConfig(path string) (bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := shell.SudoRemove(path); err != nil {
+		return false, fmt.Errorf("remove legacy resolver config %s: %w", path, err)
+	}
+	return true, nil
 }
 
 // FlushDNSCache flushes the system DNS cache using the appropriate mechanism
@@ -352,7 +385,15 @@ func updateNetworkManagerConfig(domains []string) error {
 		fmt.Fprintf(&content, "server=/%s/%s#%s\n", bare, constants.LocalhostIP, constants.PortDNSStr)
 	}
 
-	if existing, err := os.ReadFile(configFile); err == nil && string(existing) == content.String() {
+	// dnsmasq accumulates server= lines across every conf.d file, so a
+	// leftover config from an older srv keeps an old routing alive alongside
+	// this one. Remove it; its removal forces the restart below.
+	legacyChanged, err := removeLegacyResolverConfig(legacyNetworkManagerConfigPath)
+	if err != nil {
+		return err
+	}
+
+	if existing, statErr := os.ReadFile(configFile); statErr == nil && string(existing) == content.String() && !legacyChanged {
 		return nil
 	}
 
