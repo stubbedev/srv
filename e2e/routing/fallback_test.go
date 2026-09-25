@@ -43,7 +43,7 @@ func TestFallbackFailoverThroughTraefik(t *testing.T) {
 
 	primaryPort := portOf(t, primary.URL)
 
-	out := harness.RunSrv(t, root, "proxy", "add", "app.test",
+	out := harness.RunSrv(t, root, "proxy", "add", "--domain", "app.test",
 		"--port", fmt.Sprint(primaryPort),
 		"--fallback", fallback.URL)
 	t.Logf("proxy add: %s", out)
