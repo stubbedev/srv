@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	sd "github.com/sergeymakinen/go-systemdconf/v2"
@@ -513,6 +514,16 @@ func SaveLocalDomains(domains []string) error {
 	return os.WriteFile(path, []byte(content), constants.FilePermDefault)
 }
 
+// dnsConfigMu serializes every writer of the shared DNS state: the
+// local-domains registry, dnsmasq.conf, the hostsdir file, and the system
+// resolver routing config. These are read-modify-write cycles over files
+// shared by all sites, so concurrent site operations (a batch start racing
+// the daemon's reload timers) used to each read the registry, append their
+// entry, and write their own copy back — silently losing the other's
+// registration. Reads stay lock-free: writers publish via atomic rename, so
+// a reader sees either the old or the new file, never a torn one.
+var dnsConfigMu sync.Mutex
+
 // RegisterLocalDomain adds a domain to the local DNS registry and updates dnsmasq.
 // Automatically configures system DNS when the first local domain is added.
 // When wildcard is true, the entry is stored as "*.<domain>" so that dnsmasq
@@ -520,6 +531,9 @@ func SaveLocalDomains(domains []string) error {
 // Registering the same bare domain with a different wildcard setting upgrades
 // or downgrades the existing entry.
 func RegisterLocalDomain(domain string, wildcard bool) error {
+	dnsConfigMu.Lock()
+	defer dnsConfigMu.Unlock()
+
 	domains, err := LoadLocalDomains()
 	if err != nil {
 		return err
@@ -554,7 +568,7 @@ func RegisterLocalDomain(domain string, wildcard bool) error {
 		return err
 	}
 
-	if err := UpdateDnsmasqConfig(); err != nil {
+	if err := updateDnsmasqConfigLocked(); err != nil {
 		return err
 	}
 
@@ -576,6 +590,9 @@ func RegisterLocalDomain(domain string, wildcard bool) error {
 // Matches both the bare and the wildcard form ("*.<domain>") so callers don't
 // need to know how the entry was originally registered.
 func UnregisterLocalDomain(domain string) error {
+	dnsConfigMu.Lock()
+	defer dnsConfigMu.Unlock()
+
 	domains, err := LoadLocalDomains()
 	if err != nil {
 		return err
@@ -600,7 +617,7 @@ func UnregisterLocalDomain(domain string) error {
 		return err
 	}
 
-	if err := UpdateDnsmasqConfig(); err != nil {
+	if err := updateDnsmasqConfigLocked(); err != nil {
 		return err
 	}
 
@@ -690,8 +707,17 @@ func fileContentDiffers(path, want string) bool {
 // SIGHUP; wildcard domains and upstream servers go into dnsmasq.conf and need
 // a container restart. The container is only restarted when dnsmasq.conf
 // actually changed, so adding or removing an ordinary site no longer
-// interrupts DNS.
+// interrupts DNS. Safe to call concurrently: the write cycle is serialized
+// against the register/unregister paths by dnsConfigMu.
 func UpdateDnsmasqConfig() error {
+	dnsConfigMu.Lock()
+	defer dnsConfigMu.Unlock()
+	return updateDnsmasqConfigLocked()
+}
+
+// updateDnsmasqConfigLocked is UpdateDnsmasqConfig's body; the caller must
+// hold dnsConfigMu.
+func updateDnsmasqConfigLocked() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err

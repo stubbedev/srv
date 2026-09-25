@@ -1,8 +1,10 @@
 package traefik
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -76,6 +78,36 @@ func TestRegisterLocalDomainWildcardUpgradesApex(t *testing.T) {
 	domains, _ := LoadLocalDomains()
 	if len(domains) != 1 || domains[0] != "*.foo.com" {
 		t.Errorf("expected upgrade to wildcard, got %v", domains)
+	}
+}
+
+// TestRegisterLocalDomainConcurrent pins the single-writer rule: concurrent
+// registrations (a batch start racing the daemon) must all land in the
+// registry instead of each writing back their own read-modify-write copy.
+func TestRegisterLocalDomainConcurrent(t *testing.T) {
+	setupDNSTest(t)
+	swapShell(t, shelltest.New(nil))
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Go(func() {
+			errs[i] = RegisterLocalDomain(fmt.Sprintf("site%02d.test", i), false)
+		})
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("register %d: %v", i, err)
+		}
+	}
+	domains, err := LoadLocalDomains()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(domains) != n {
+		t.Errorf("lost updates: got %d entries, want %d: %v", len(domains), n, domains)
 	}
 }
 

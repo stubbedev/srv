@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -18,6 +19,13 @@ import (
 	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/validate"
 )
+
+// dynamicConfigMu serializes regeneration of traefik-dynamic.yml: it is a
+// scan-all-sites-then-write cycle over a file shared by every site, so
+// concurrent reloads would interleave one site's scan with another's cert
+// issuance and publish a stale cert list. Unique temp names keep the file
+// itself intact; the lock keeps the rendered content fresh.
+var dynamicConfigMu sync.Mutex
 
 // CheckMkcert verifies mkcert is available on $PATH.
 func CheckMkcert() error {
@@ -245,6 +253,9 @@ func certCoversDomains(siteName, primary string, domains []string, wildcard bool
 // UpdateDynamicConfig regenerates the Traefik dynamic config with all local domain certs.
 // It scans all site directories for certificates.
 func UpdateDynamicConfig() error {
+	dynamicConfigMu.Lock()
+	defer dynamicConfigMu.Unlock()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
