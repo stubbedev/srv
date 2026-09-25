@@ -17,6 +17,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/fallbackd"
 	"github.com/stubbedev/srv/internal/nginx"
 )
 
@@ -65,6 +66,17 @@ func findFreeLoopbackPort() (int, error) {
 		return 0, fmt.Errorf("unexpected listener address type %T", l.Addr())
 	}
 	return addr.Port, nil
+}
+
+// existingOrNewFallbackPort returns the daemon-hosted fallback port recorded
+// in the proxy's metadata, allocating a fresh one when the proxy is new (or
+// predates persisted ports). Reusing the recorded port on a --force
+// regeneration keeps the Traefik route's target URL stable.
+func existingOrNewFallbackPort(name string) (int, error) {
+	if pmeta, _ := Read(name); pmeta != nil && pmeta.FallbackPort > 0 {
+		return pmeta.FallbackPort, nil
+	}
+	return fallbackd.AllocatePort()
 }
 
 // EnsureFallbackSidecar renders the nginx.conf + docker-compose.yml for a

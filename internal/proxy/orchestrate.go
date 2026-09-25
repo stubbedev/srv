@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -91,39 +92,52 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		res.Notes = append(res.Notes, fmt.Sprintf("Connected container '%s' to %s network", containerName, cfg.NetworkName))
 	}
 
-	// When a fallback is requested, sit the nginx sidecar in front of the
+	// When a fallback is requested, put a failover proxy in front of the
 	// primary upstream so 5xx responses transparently re-proxy to it. Traefik
-	// routes to the sidecar instead of the original target.
+	// routes to the failover proxy instead of the original target.
+	var fallbackPort int
 	if spec.FallbackURL != "" {
-		sidecar := FallbackSpec{
-			Name:            name,
-			FallbackURL:     spec.FallbackURL,
-			FallbackTimeout: spec.FallbackTimeout,
-		}
 		switch {
 		case isContainer:
-			// Bridge sidecar on the srv network; reaches the primary by name.
-			sidecar.PrimaryHost = containerName
-			sidecar.PrimaryPort = containerPort
-		case platform.IsLinux():
-			// Localhost-port primary on Linux: a bridge container cannot reach
-			// a 127.0.0.1 host service, so the sidecar shares the host network
-			// namespace and dials the loopback directly.
-			sidecar.HostNetwork = true
-			sidecar.PrimaryHost = constants.LocalhostIP
-			sidecar.PrimaryPort = spec.Port
+			// Container primary: the failover proxy must sit on the srv network
+			// to reach it by name, so it stays a container sidecar next to the
+			// primary (the daemon cannot dial a container's network alias from
+			// the host). The sidecar image is nginx:alpine, already srv's
+			// static-site runtime.
+			sidecar := FallbackSpec{
+				Name:            name,
+				PrimaryHost:     containerName,
+				PrimaryPort:     containerPort,
+				FallbackURL:     spec.FallbackURL,
+				FallbackTimeout: spec.FallbackTimeout,
+			}
+			sidecarURL, ferr := EnsureFallbackSidecar(cfg, sidecar)
+			if ferr != nil {
+				return nil, ferr
+			}
+			targetURL = sidecarURL
+			res.Notes = append(res.Notes, fmt.Sprintf("Fallback sidecar started (%s)", FallbackContainerName(name)))
 		default:
-			// Docker Desktop: a bridge sidecar reaches the host via the alias.
-			sidecar.PrimaryHost = constants.DockerHostInternal
-			sidecar.PrimaryPort = spec.Port
+			// Localhost-port primary: the srv daemon hosts the failover proxy
+			// in-process on a loopback port (no container, no image). The port
+			// is allocated here and persisted so the Traefik route and the
+			// daemon's listener agree across restarts; the daemon binds it
+			// within a moment of this metadata write (and on its next start).
+			port, perr := existingOrNewFallbackPort(name)
+			if perr != nil {
+				return nil, perr
+			}
+			fallbackPort = port
+			host := constants.DockerHostInternal
+			if platform.IsLinux() {
+				// Traefik is host-networked on Linux: it dials the daemon's
+				// loopback listener directly.
+				host = constants.LocalhostIP
+			}
+			targetURL = fmt.Sprintf("http://%s:%d", host, port)
+			res.Notes = append(res.Notes, fmt.Sprintf("Fallback proxy hosted by the srv daemon on %s (starts when the daemon picks up this metadata)", targetURL))
 		}
-		sidecarURL, ferr := EnsureFallbackSidecar(cfg, sidecar)
-		if ferr != nil {
-			return nil, ferr
-		}
-		targetURL = sidecarURL
 		res.FallbackEnabled = true
-		res.Notes = append(res.Notes, fmt.Sprintf("Fallback sidecar started (%s)", FallbackContainerName(name)))
 	}
 	res.TargetURL = targetURL
 
@@ -142,14 +156,19 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 	if pmeta, _ := Read(name); pmeta != nil {
 		existingRoutes = pmeta.Routes
 	}
+	// The primary upstream port is recorded so the daemon's embedded fallback
+	// proxy can dial it; a container-primary proxy has no numeric port here.
+	primaryPort, _ := strconv.Atoi(spec.Port)
 	if err := Write(Metadata{
 		Name:            name,
 		Domains:         []string{spec.Domain},
 		Wildcard:        spec.Wildcard,
 		IsLocal:         true,
+		Port:            primaryPort,
 		Routes:          existingRoutes,
 		FallbackURL:     spec.FallbackURL,
 		FallbackTimeout: spec.FallbackTimeout,
+		FallbackPort:    fallbackPort,
 	}); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("write proxy metadata: %v", err))
 	} else if len(existingRoutes) > 0 {

@@ -9,15 +9,21 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/dnsd"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/fallbackd"
 	"github.com/stubbedev/srv/internal/ops"
+	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -42,6 +48,9 @@ type Daemon struct {
 	// WatchMetadata controls whether the daemon also watches site metadata.yml
 	// files and hot-reloads them. Set via `srv daemon start --no-watch=false`.
 	WatchMetadata bool
+	// fallbacks hosts the daemon's embedded fallback proxies. Created in
+	// startFallbackProxies; nil before that.
+	fallbacks *fallbackd.Manager
 }
 
 // New creates a new daemon instance.
@@ -132,8 +141,136 @@ func (d *Daemon) Run() error {
 	// the port it still holds frees up for this server.
 	d.startEmbeddedDNS()
 
+	// Embedded fallback proxies: one in-process listener per proxy created
+	// with --fallback (metadata records its port). Reconciled from disk now
+	// and on every proxies-dir change, so `srv proxy add/remove` from any
+	// terminal converges without an RPC channel.
+	d.startFallbackProxies()
+
 	// Watch Docker events
 	return d.watchEvents()
+}
+
+// startFallbackProxies owns the daemon's embedded fallback proxies. Like the
+// embedded DNS server it never fails the daemon: a bind failure for one
+// proxy's port is logged, and the next reconcile retries.
+func (d *Daemon) startFallbackProxies() {
+	d.fallbacks = fallbackd.NewManager()
+	if err := d.reconcileFallbackProxies(); err != nil {
+		d.log("Warning: fallback proxy reconcile: %v", err)
+	}
+
+	proxiesDir := filepath.Join(d.cfg.Root, constants.ProxiesSubdir)
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		d.log("Fallback proxy watcher disabled: %v", err)
+		return
+	}
+	if err := w.Add(proxiesDir); err != nil {
+		_ = w.Close()
+		d.log("Fallback proxy watcher disabled (no proxies dir yet): %v", err)
+		return
+	}
+	_ = w.Add(d.cfg.SitesDir + "/../proxies") // tolerate either path shape
+
+	go func() {
+		defer w.Close()
+		debounce := time.NewTimer(time.Hour)
+		if !debounce.Stop() {
+			<-debounce.C
+		}
+		pending := false
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case event, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				if !strings.HasSuffix(event.Name, ".yml") {
+					continue
+				}
+				if !pending {
+					pending = true
+					debounce.Reset(300 * time.Millisecond)
+				}
+			case err, ok := <-w.Errors:
+				if !ok {
+					return
+				}
+				d.log("Fallback proxy watch error: %v", err)
+			case <-debounce.C:
+				if pending {
+					pending = false
+					if err := d.reconcileFallbackProxies(); err != nil {
+						d.log("Fallback proxy reconcile: %v", err)
+					}
+				}
+			}
+		}
+	}()
+}
+
+// reconcileFallbackProxies syncs the daemon's embedded fallback listeners
+// with the proxies directory: metadata with a fallback port gets a listener,
+// and listeners whose metadata is gone (or lost its port) are stopped.
+func (d *Daemon) reconcileFallbackProxies() error {
+	entries, err := os.ReadDir(filepath.Join(d.cfg.Root, constants.ProxiesSubdir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	wanted := map[string]bool{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		meta, err := proxy.Read(strings.TrimSuffix(name, ".yml"))
+		if err != nil || meta == nil || meta.FallbackURL == "" || meta.FallbackPort <= 0 {
+			continue
+		}
+		wanted[meta.Name] = true
+		primary := fallbackPrimaryFor(meta)
+		addr, err := d.fallbacks.Ensure(fallbackd.Spec{
+			Name:        meta.Name,
+			PrimaryURL:  primary,
+			FallbackURL: meta.FallbackURL,
+			Timeout:     fallbackTimeoutOrDefault(meta.FallbackTimeout),
+			ListenPort:  meta.FallbackPort,
+		})
+		if err != nil {
+			d.log("Fallback proxy %s: %v", meta.Name, err)
+			continue
+		}
+		d.log("Fallback proxy %s serving on %s -> %s (fallback %s)", meta.Name, addr, primary, meta.FallbackURL)
+	}
+	for _, name := range d.fallbacks.Active() {
+		if !wanted[name] {
+			d.fallbacks.Remove(name)
+			d.log("Fallback proxy %s removed", name)
+		}
+	}
+	return nil
+}
+
+// fallbackPrimaryFor reconstructs the primary upstream URL from the proxy's
+// metadata. Metadata records the port the proxy fronts; a localhost primary
+// is the only kind that gets a daemon-hosted listener.
+func fallbackPrimaryFor(meta *proxy.Metadata) string {
+	return "http://127.0.0.1:" + strconv.Itoa(meta.Port)
+}
+
+func fallbackTimeoutOrDefault(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 2 * time.Second
+	}
+	return d
 }
 
 // startEmbeddedDNS binds 127.0.0.1:53 and serves the local-domain zones. It

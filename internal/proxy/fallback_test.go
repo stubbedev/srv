@@ -195,10 +195,11 @@ func TestRenderFallbackNginx_BadURL(t *testing.T) {
 	}
 }
 
-// TestAddFallbackSidecarLifecycle pins the rule that removed the orphaned
-// sidecar: Add with a FallbackURL records it in metadata and starts the
-// sidecar, and RemoveProxy tears the sidecar down — including for legacy
-// proxies whose metadata never recorded the fallback.
+// TestAddFallbackSidecarLifecycle pins the localhost-primary fallback
+// contract: Add with a FallbackURL records the fallback and a persisted
+// daemon-hosted listener port in metadata (no sidecar container — the daemon
+// hosts that proxy now), and RemoveProxy drops the metadata (the daemon's
+// watcher then retires the listener).
 func TestAddFallbackSidecarLifecycle(t *testing.T) {
 	cfg := addEnv(t)
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
@@ -210,8 +211,8 @@ func TestAddFallbackSidecarLifecycle(t *testing.T) {
 	if !res.FallbackEnabled {
 		t.Error("FallbackEnabled = false, want true")
 	}
-	if !strings.Contains(res.TargetURL, FallbackContainerName("app-test")) && !strings.HasPrefix(res.TargetURL, "http://127.0.0.1:") {
-		t.Errorf("target should be the sidecar, got %q", res.TargetURL)
+	if !strings.Contains(res.TargetURL, "127.0.0.1:") && !strings.Contains(res.TargetURL, "host.docker.internal:") {
+		t.Errorf("target should be the daemon-hosted listener, got %q", res.TargetURL)
 	}
 	meta, err := Read("app-test")
 	if err != nil || meta == nil {
@@ -220,15 +221,21 @@ func TestAddFallbackSidecarLifecycle(t *testing.T) {
 	if meta.FallbackURL != "https://prod.example.com" || meta.FallbackTimeout != "3s" {
 		t.Errorf("fallback not recorded in metadata: %+v", meta)
 	}
-	if _, err := os.Stat(FallbackDir(cfg, "app-test")); err != nil {
-		t.Errorf("sidecar dir missing: %v", err)
+	if meta.FallbackPort <= 0 {
+		t.Errorf("FallbackPort = %d, want an allocated loopback port", meta.FallbackPort)
+	}
+	if meta.Port != 8080 {
+		t.Errorf("primary Port = %d, want 8080", meta.Port)
+	}
+	if _, err := os.Stat(FallbackDir(cfg, "app-test")); !os.IsNotExist(err) {
+		t.Errorf("daemon-hosted fallback must not create a sidecar dir: %v", err)
 	}
 
 	if _, err := RemoveProxy(cfg, "app-test"); err != nil {
 		t.Fatalf("RemoveProxy() = %v", err)
 	}
-	if _, err := os.Stat(FallbackDir(cfg, "app-test")); !os.IsNotExist(err) {
-		t.Errorf("sidecar dir should be gone after remove: %v", err)
+	if meta2, _ := Read("app-test"); meta2 != nil {
+		t.Error("metadata should be gone after RemoveProxy")
 	}
 }
 

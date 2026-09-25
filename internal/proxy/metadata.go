@@ -35,13 +35,21 @@ type Metadata struct {
 	Wildcard bool `yaml:"wildcard,omitempty"`
 	// Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt.
 	IsLocal bool `yaml:"is_local,omitempty"`
+	// Port of the primary upstream (a localhost service the daemon's embedded
+	// components dial); 0 for container-primary proxies.
+	Port int `yaml:"port,omitempty"`
 	// Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`.
 	Routes []site.Route `yaml:"routes,omitempty"`
-	// Fallback sidecar (srv proxy add --fallback): the remote URL 5xx
-	// responses re-proxy to, and the connect timeout to the primary upstream.
-	// Empty when the proxy has no sidecar.
+	// Fallback (srv proxy add --fallback): the remote URL 5xx responses
+	// re-proxy to, and the connect timeout to the primary upstream. Empty
+	// when the proxy has no fallback. FallbackPort is set only when the
+	// fallback is hosted by the srv daemon (localhost-primary proxies): the
+	// daemon serves the failover proxy on that 127.0.0.1 port, and the port
+	// is persisted so the Traefik route survives daemon restarts. A fallback
+	// for a container primary still uses a container sidecar and has no port.
 	FallbackURL     string `yaml:"fallback_url,omitempty"`
 	FallbackTimeout string `yaml:"fallback_timeout,omitempty"`
+	FallbackPort    int    `yaml:"fallback_port,omitempty"`
 }
 
 const currentSchemaVersion = 1
