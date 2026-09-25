@@ -6,7 +6,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -429,7 +429,7 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 	wg.Wait()
 
 	if len(failed) > 0 {
-		sort.Strings(failed)
+		slices.Sort(failed)
 		return fmt.Errorf("failed to %s: %s", opName, strings.Join(failed, ", "))
 	}
 	return nil

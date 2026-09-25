@@ -3,7 +3,10 @@ package shell
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -13,8 +16,9 @@ func TestIsPortInUseError(t *testing.T) {
 		want bool
 	}{
 		{nil, false},
-		{errors.New("listen tcp :80: bind: address already in use"), true},
-		{errors.New("dial tcp: address already in use"), true},
+		// The shapes net.ListenConfig.Listen actually produces on a taken port.
+		{fmt.Errorf("listen tcp :80: bind: %w", syscall.EADDRINUSE), true},
+		{fmt.Errorf("http proxy: %w", &net.OpError{Op: "listen", Net: "tcp", Err: syscall.EADDRINUSE}), true},
 		{errors.New("permission denied"), false},
 	}
 	for _, tt := range tests {

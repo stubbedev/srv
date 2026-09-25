@@ -26,11 +26,11 @@ func setupColoredHelp() {
 		for _, line := range splitLines(s) {
 			if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
 				// This is a flag line, color the flag name
-				colored := colorFlagLine(line, red)
-				lines.WriteString(colored + "\n")
+				lines.WriteString(colorFlagLine(line, red))
 			} else {
-				lines.WriteString(line + "\n")
+				lines.WriteString(line)
 			}
+			lines.WriteByte('\n')
 		}
 		return lines.String()
 	})

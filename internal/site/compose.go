@@ -130,8 +130,8 @@ func (e *composeNotFoundError) Error() string {
 // returned by FindComposeFile. It returns false for real I/O errors such as
 // permission denied.
 func IsNotFoundError(err error) bool {
-	var nfe *composeNotFoundError
-	return errors.As(err, &nfe)
+	_, ok := errors.AsType[*composeNotFoundError](err)
+	return ok
 }
 
 // FindComposeFile finds the docker-compose file in a directory.

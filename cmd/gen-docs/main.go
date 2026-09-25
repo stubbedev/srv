@@ -9,7 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -182,7 +182,7 @@ func visibleChildren(c *cobra.Command) []*cobra.Command {
 		}
 		out = append(out, k)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
+	slices.SortStableFunc(out, func(a, b *cobra.Command) int { return strings.Compare(a.Name(), b.Name()) })
 	return out
 }
 
@@ -194,7 +194,7 @@ func visibleFlags(fs *pflag.FlagSet) []*pflag.Flag {
 		}
 		out = append(out, f)
 	})
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortStableFunc(out, func(a, b *pflag.Flag) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 

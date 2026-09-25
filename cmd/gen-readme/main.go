@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/invopop/jsonschema"
@@ -242,7 +242,7 @@ func visibleChildren(c *cobra.Command) []*cobra.Command {
 		}
 		out = append(out, k)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
+	slices.SortStableFunc(out, func(a, b *cobra.Command) int { return strings.Compare(a.Name(), b.Name()) })
 	return out
 }
 

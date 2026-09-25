@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
+	"strings"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -90,11 +92,11 @@ func ToolManifest(ctx context.Context) ([]ToolDoc, error) {
 		docs = append(docs, d)
 	}
 
-	sort.SliceStable(docs, func(i, j int) bool {
-		if ri, rj := tierRank[docs[i].Tier], tierRank[docs[j].Tier]; ri != rj {
-			return ri < rj
+	slices.SortStableFunc(docs, func(a, b ToolDoc) int {
+		if c := cmp.Compare(tierRank[a.Tier], tierRank[b.Tier]); c != 0 {
+			return c
 		}
-		return docs[i].Name < docs[j].Name
+		return strings.Compare(a.Name, b.Name)
 	})
 	return docs, nil
 }

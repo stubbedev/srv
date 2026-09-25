@@ -4,7 +4,8 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -59,7 +60,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	sort.Slice(sites, func(i, j int) bool { return sites[i].Name < sites[j].Name })
+	slices.SortFunc(sites, func(a, b site.Site) int { return strings.Compare(a.Name, b.Name) })
 
 	if jsonOutput() {
 		out := make([]listSiteRow, 0, len(sites))

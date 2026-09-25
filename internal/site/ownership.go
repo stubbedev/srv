@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 
@@ -50,7 +50,7 @@ func saveGeneratedHashes(siteDir string, hashes map[string]string) {
 	for k := range hashes {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	out := make(map[string]string, len(hashes))
 	for _, k := range keys {
 		out[k] = hashes[k]

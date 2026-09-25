@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -220,7 +219,7 @@ func AttachNetwork(siteName, network string) (changed bool, warnings []string, e
 		return false, nil, nil
 	}
 	meta.ExtraNetworks = append(meta.ExtraNetworks, network)
-	sort.Strings(meta.ExtraNetworks)
+	slices.Sort(meta.ExtraNetworks)
 	if err := WriteSiteMetadata(siteName, *meta); err != nil {
 		return false, nil, fmt.Errorf("write metadata: %w", err)
 	}

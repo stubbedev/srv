@@ -97,8 +97,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 	c.Stderr = os.Stderr
 	if err := c.Run(); err != nil {
 		// Exit code != 0 from the shell is normal (user typed exit N), don't wrap it as an error.
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() != 0 {
 			return nil
 		}
 		return fmt.Errorf("%s exec failed: %w", ops.EngineName(), err)

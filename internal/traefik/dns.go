@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -496,7 +495,7 @@ func SaveLocalDomains(domains []string) error {
 	}
 
 	// Sort and deduplicate
-	sort.Strings(domains)
+	slices.Sort(domains)
 	unique := make([]string, 0, len(domains))
 	seen := make(map[string]bool)
 	for _, d := range domains {

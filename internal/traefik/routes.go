@@ -112,8 +112,7 @@ func WriteRoutesConfig(cfg *config.Config, set SiteRouteSet) error {
 		preserve := r.PreserveHost
 		var preservePtr *bool
 		if !preserve {
-			f := false
-			preservePtr = &f
+			preservePtr = new(false)
 		}
 		lb := dynLoadBalancer{
 			Servers:        []dynServer{{URL: r.UpstreamURL}},

@@ -7,10 +7,12 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -338,13 +340,12 @@ func parseLsofProcessName(output string) string {
 }
 
 // isPortInUseError checks if the error indicates the port is already in use.
+// isPortInUseError checks if the error indicates the port is already in use.
+// The listen path yields a *net.OpError wrapping EADDRINUSE, which errors.Is
+// unwraps portably (WSAEADDRINUSE on Windows) — no string sniffing, so a
+// translated message cannot defeat the check.
 func isPortInUseError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "address already in use") ||
-		strings.Contains(errStr, "bind: address already in use")
+	return errors.Is(err, syscall.EADDRINUSE)
 }
 
 // extractProcessName parses the process name out of an ss users field.

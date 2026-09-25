@@ -8,7 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/hashicorp/go-envparse"
@@ -233,7 +233,7 @@ func writeEnvFile(path string, envMap map[string]string) error {
 	for k := range envMap {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	var content strings.Builder
 	for _, k := range keys {
