@@ -3,6 +3,7 @@ package firewall
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -229,12 +230,16 @@ func openIPTablesPorts() error {
 }
 
 // persistIPTablesRules attempts to persist iptables rules.
-// This is a best-effort operation - failure is not critical as rules are already applied.
+// This is a best-effort operation - failure is not critical as rules are already
+// applied, but every failure is surfaced on stderr: rules that vanish on reboot
+// are exactly the kind of silent loss a user cannot diagnose later.
 func persistIPTablesRules() {
+	const warn = "warning: could not persist iptables rules; they will be lost on reboot (%v)\n"
 	// Try iptables-save (Debian/Ubuntu with iptables-persistent)
 	if shell.Exists("netfilter-persistent") {
-		// Best effort - rules are already applied, persistence is optional
-		_ = shell.SudoRun("netfilter-persistent", "save")
+		if err := shell.SudoRun("netfilter-persistent", "save"); err != nil {
+			fmt.Fprintf(os.Stderr, warn, err)
+		}
 		return
 	}
 
@@ -243,17 +248,22 @@ func persistIPTablesRules() {
 	// the read and the write are privileged. The previous sh -c redirect ran
 	// the > as the unprivileged user and silently failed.
 	if shell.Exists("iptables-save") {
-		// Best effort - rules are already applied, persistence is optional
 		out, err := shell.SudoRunQuiet("iptables-save")
-		if err == nil {
-			_ = shell.RunWithStdin(string(out), "sudo", "tee", "/etc/iptables/rules.v4")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, warn, err)
+			return
+		}
+		if err := shell.RunWithStdin(string(out), "sudo", "tee", "/etc/iptables/rules.v4"); err != nil {
+			fmt.Fprintf(os.Stderr, warn, err)
 		}
 		return
 	}
 
 	// Try service iptables save (RHEL/CentOS without firewalld)
 	// Best effort - rules are already applied, persistence is optional
-	_ = shell.SudoRun("service", "iptables", "save")
+	if err := shell.SudoRun("service", "iptables", "save"); err != nil {
+		fmt.Fprintf(os.Stderr, warn, err)
+	}
 }
 
 // IsActive returns true if any firewall is detected and active.

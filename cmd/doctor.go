@@ -584,7 +584,11 @@ func checkSiteEnvHostLoopback() int {
 		if s.Type == site.SiteTypeStatic {
 			continue
 		}
-		hits := scanEnvForHostLoopback(filepath.Join(s.Dir, ".env"))
+		hits, scanErr := scanEnvForHostLoopback(filepath.Join(s.Dir, ".env"))
+		if scanErr != nil {
+			ui.IndentedWarn(1, "%s: could not scan .env: %v", s.Name, scanErr)
+			continue
+		}
 		if len(hits) == 0 {
 			continue
 		}
@@ -624,10 +628,10 @@ func plural(n int, singular, pluralForm string) string {
 // values. Anchored to start-of-line so commented entries (#…) skip.
 var envLoopbackPattern = regexp.MustCompile(`(?i)^\s*([A-Z][A-Z0-9_]*?)(_HOST|_HOSTS|_ENDPOINT|_URL|_DSN|_URI)\s*=\s*[\"']?[^\"'\n]*127\.0\.0\.1`)
 
-func scanEnvForHostLoopback(path string) []string {
+func scanEnvForHostLoopback(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer f.Close()
 
@@ -643,7 +647,12 @@ func scanEnvForHostLoopback(path string) []string {
 			hits = append(hits, trimmed)
 		}
 	}
-	return hits
+	// A read error or an over-long line would otherwise end the scan as if it
+	// had finished cleanly, hiding env entries the check exists to find.
+	if err := scanner.Err(); err != nil {
+		return hits, fmt.Errorf("scanning %s: %w", path, err)
+	}
+	return hits, nil
 }
 
 // checkConfigDirOwnership walks ~/.config/srv looking for root-owned files

@@ -25,7 +25,10 @@ func TestParseDockerfileExposePort(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := parseDockerfileExposePort(strings.NewReader(c.in))
+			got, err := parseDockerfileExposePort(strings.NewReader(c.in))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got != c.want {
 				t.Errorf("got %d, want %d", got, c.want)
 			}

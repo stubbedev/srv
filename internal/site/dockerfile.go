@@ -36,7 +36,10 @@ func DetectDockerfileSite(dir string) (*DockerfileSiteInfo, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	port := parseDockerfileExposePort(f)
+	port, err := parseDockerfileExposePort(f)
+	if err != nil {
+		return nil, err
+	}
 	if port == 0 {
 		port = constants.DockerfileDefaultPort
 	}
@@ -44,8 +47,10 @@ func DetectDockerfileSite(dir string) (*DockerfileSiteInfo, error) {
 }
 
 // parseDockerfileExposePort scans a Dockerfile for the first EXPOSE directive
-// and returns the port. Returns 0 if no EXPOSE is found.
-func parseDockerfileExposePort(f io.Reader) int {
+// and returns the port. Returns 0 with a nil error if no EXPOSE is found; a
+// non-nil error means the Dockerfile could not be read in full, which must not
+// silently downgrade the site to the default port.
+func parseDockerfileExposePort(f io.Reader) (int, error) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -58,10 +63,13 @@ func parseDockerfileExposePort(f io.Reader) int {
 		}
 		portStr, _, _ := strings.Cut(parts[1], "/")
 		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
-			return p
+			return p, nil
 		}
 	}
-	return 0
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("scanning Dockerfile for EXPOSE: %w", err)
+	}
+	return 0, nil
 }
 
 // WriteDockerfileSiteConfig writes the per-site docker-compose.yml that

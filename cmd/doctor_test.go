@@ -215,7 +215,10 @@ DATABASE_URL=mysql://root@127.0.0.1:3306/db
 	if err := os.WriteFile(envPath, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hits := scanEnvForHostLoopback(envPath)
+	hits, err := scanEnvForHostLoopback(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(hits) != 5 {
 		t.Fatalf("expected 5 hits, got %d: %v", len(hits), hits)
 	}
@@ -228,8 +231,8 @@ DATABASE_URL=mysql://root@127.0.0.1:3306/db
 }
 
 func TestScanEnvForHostLoopbackMissingFile(t *testing.T) {
-	if hits := scanEnvForHostLoopback("/nonexistent/.env"); hits != nil {
-		t.Errorf("missing file should return nil, got %v", hits)
+	if hits, err := scanEnvForHostLoopback("/nonexistent/.env"); hits != nil || err == nil {
+		t.Errorf("missing file should return nil hits and an error, got %v, %v", hits, err)
 	}
 }
 

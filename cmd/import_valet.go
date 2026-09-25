@@ -156,7 +156,9 @@ func runImportValet(cmd *cobra.Command, args []string) error {
 		sub.Stdout = os.Stdout
 		sub.Stderr = os.Stderr
 		if err := sub.Run(); err != nil {
-			_ = saveImportDecisions(decisions)
+			if saveErr := saveImportDecisions(decisions); saveErr != nil {
+				ui.Dim("Could not persist import decisions: %v", saveErr)
+			}
 			return fmt.Errorf("step %d (%s) failed: %w", i+1, step.line, err)
 		}
 		executed++
