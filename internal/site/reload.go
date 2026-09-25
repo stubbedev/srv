@@ -146,8 +146,14 @@ func reload(name string, force bool) (*ReloadResult, error) {
 
 	// Always refresh the per-site extra-routes Traefik file (or remove it
 	// when meta has no routes). Picked up by Traefik's file provider with
-	// no container restart.
-	if err := traefik.WriteRoutesConfig(cfg, buildRouteSet(name, meta)); err != nil {
+	// no container restart. A compile failure is fatal: validation has
+	// already rejected malformed upstreams, so this is a bug, not a reason
+	// to silently drop good routes alongside it.
+	routes, err := CompileRoutes(name, meta.Domains, meta.Wildcard, meta.IsLocal, meta.Routes)
+	if err != nil {
+		return res, err
+	}
+	if err := traefik.WriteRoutesConfig(cfg, routes); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("routes: %v", err))
 	}
 
@@ -281,27 +287,26 @@ func ValidateMetadata(meta *SiteMetadata) error {
 
 var routeIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// buildRouteSet compiles metadata.Routes into the Traefik-facing RouteSpec
-// list. Validation already happened in ValidateMetadata so errors here are
-// programmer bugs and surface via WriteRoutesConfig.
-func buildRouteSet(siteName string, meta *SiteMetadata) traefik.SiteRouteSet {
+// CompileRoutes compiles metadata routes into the Traefik-facing route set.
+// It is the one route compiler, shared with internal/proxy's reload so both
+// surfaces translate identically. Upstream resolution errors are fatal: the
+// shared ValidateMetadata has already rejected malformed upstreams at the
+// boundary, so an error here is a bug, not something to skip silently.
+func CompileRoutes(siteName string, domains []string, wildcard, isLocal bool, routes []Route) (traefik.SiteRouteSet, error) {
 	set := traefik.SiteRouteSet{
 		SiteName: siteName,
-		Domains:  meta.Domains,
-		Wildcard: meta.Wildcard,
-		IsLocal:  meta.IsLocal,
+		Domains:  domains,
+		Wildcard: wildcard,
+		IsLocal:  isLocal,
 	}
-	for _, r := range meta.Routes {
+	for _, r := range routes {
 		preserve := true
 		if r.PreserveHost != nil {
 			preserve = *r.PreserveHost
 		}
 		upstreamURL, err := traefik.ResolveUpstreamURL(r.Upstream.Kind, r.Upstream.Container, r.Upstream.URL, r.Upstream.Port)
 		if err != nil {
-			// Skip malformed entries; ValidateMetadata covers the common cases
-			// and structural errors surface there. Silent skip avoids tearing
-			// down good routes when one entry is bad.
-			continue
+			return set, fmt.Errorf("route %q: %w", r.ID, err)
 		}
 		set.Routes = append(set.Routes, traefik.RouteSpec{
 			ID:                 r.ID,
@@ -314,5 +319,5 @@ func buildRouteSet(siteName string, meta *SiteMetadata) traefik.SiteRouteSet {
 			InsecureSkipVerify: r.Upstream.InsecureSkipVerify,
 		})
 	}
-	return set
+	return set, nil
 }

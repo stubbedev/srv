@@ -166,31 +166,9 @@ func Reload(name string) error {
 		return err
 	}
 
-	set := traefik.SiteRouteSet{
-		SiteName: name,
-		Domains:  meta.Domains,
-		Wildcard: meta.Wildcard,
-		IsLocal:  meta.IsLocal,
-	}
-	for _, r := range meta.Routes {
-		upstream, uerr := traefik.ResolveUpstreamURL(r.Upstream.Kind, r.Upstream.Container, r.Upstream.URL, r.Upstream.Port)
-		if uerr != nil {
-			return fmt.Errorf("route %q: %w", r.ID, uerr)
-		}
-		preserve := true
-		if r.PreserveHost != nil {
-			preserve = *r.PreserveHost
-		}
-		set.Routes = append(set.Routes, traefik.RouteSpec{
-			ID:                 r.ID,
-			Path:               r.Path,
-			PathRegex:          r.PathRegex,
-			Rewrite:            r.Rewrite,
-			UpstreamURL:        upstream,
-			PreserveHost:       preserve,
-			Priority:           r.Priority,
-			InsecureSkipVerify: r.Upstream.InsecureSkipVerify,
-		})
+	set, err := site.CompileRoutes(name, meta.Domains, meta.Wildcard, meta.IsLocal, meta.Routes)
+	if err != nil {
+		return err
 	}
 	if err := traefik.WriteRoutesConfig(cfg, set); err != nil {
 		return err

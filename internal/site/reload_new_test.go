@@ -105,7 +105,10 @@ func TestReloadComposeWritesRouteConfig(t *testing.T) {
 
 func TestBuildRouteSetEmpty(t *testing.T) {
 	meta := &SiteMetadata{Domains: []string{"x.local"}, Wildcard: false, IsLocal: true}
-	set := buildRouteSet("x", meta)
+	set, err := CompileRoutes("x", meta.Domains, meta.Wildcard, meta.IsLocal, meta.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if set.SiteName != "x" {
 		t.Errorf("SiteName = %q", set.SiteName)
 	}
@@ -129,7 +132,10 @@ func TestBuildRouteSetWithRoutes(t *testing.T) {
 			},
 		},
 	}
-	set := buildRouteSet("api", meta)
+	set, err := CompileRoutes("api", meta.Domains, meta.Wildcard, meta.IsLocal, meta.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(set.Routes) != 1 {
 		t.Fatalf("expected 1 route, got %d", len(set.Routes))
 	}
@@ -149,23 +155,27 @@ func TestBuildRouteSetDefaultsPreserveHostTrue(t *testing.T) {
 			{ID: "r1", Path: "/api", Upstream: Upstream{Kind: "localhost", Port: 80}},
 		},
 	}
-	set := buildRouteSet("api", meta)
+	set, err := CompileRoutes("api", meta.Domains, meta.Wildcard, meta.IsLocal, meta.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !set.Routes[0].PreserveHost {
 		t.Error("PreserveHost should default to true when unset")
 	}
 }
 
-func TestBuildRouteSetSkipsMalformed(t *testing.T) {
+// The compiler fails loudly on a malformed upstream rather than skipping it:
+// validation rejects those at the boundary, so a failure here is a bug and a
+// silent skip would tear down good routes alongside the bad one.
+func TestBuildRouteSetRejectsMalformedUpstream(t *testing.T) {
 	meta := &SiteMetadata{
 		Domains: []string{"api.local"},
 		Routes: []Route{
 			{ID: "bad", Path: "/api", Upstream: Upstream{Kind: "unknown"}},
-			{ID: "good", Path: "/x", Upstream: Upstream{Kind: "localhost", Port: 80}},
 		},
 	}
-	set := buildRouteSet("api", meta)
-	if len(set.Routes) != 1 || set.Routes[0].ID != "good" {
-		t.Errorf("expected only 'good', got %v", set.Routes)
+	if _, err := CompileRoutes("api", meta.Domains, meta.Wildcard, meta.IsLocal, meta.Routes); err == nil {
+		t.Error("expected error for unknown upstream kind")
 	}
 }
 
