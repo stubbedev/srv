@@ -112,75 +112,12 @@ func newMiniClient() (*miniClient, error) {
 	return &miniClient{client: &http.Client{Transport: transport}, host: authority}, nil
 }
 
-// do performs one API call. A 409 is returned as *conflictError; other
-// non-2xx responses become errors carrying the daemon's message.
-func (m *miniClient) do(ctx context.Context, method, path string, query url.Values, body any, out any) error {
-	var reader io.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("encode request: %w", err)
-		}
-		reader = strings.NewReader(string(encoded))
-	}
-	u := url.URL{Scheme: "http", Host: m.host, Path: path}
-	if query != nil {
-		u.RawQuery = query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
-	if err != nil {
-		return err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	switch {
-	case resp.StatusCode == http.StatusConflict:
-		return &conflictError{op: method + " " + path}
-	case resp.StatusCode >= 300:
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg)))
-	}
-	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return fmt.Errorf("decode %s %s: %w", method, path, err)
-		}
-	}
-	return nil
-}
-
-// stream performs one call whose body is a long-lived stream; the caller
-// consumes and closes it.
-func (m *miniClient) stream(ctx context.Context, path string, query url.Values) (io.ReadCloser, error) {
-	u := url.URL{Scheme: "http", Host: m.host, Path: path}
-	if query != nil {
-		u.RawQuery = query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("GET %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(msg)))
-	}
-	return resp.Body, nil
-}
-
 // encodeFilters marshals the Docker filter query format: {"name":["x"]}.
 func encodeFilters(filters map[string][]string) string {
-	encoded, _ := json.Marshal(filters)
+	encoded, err := json.Marshal(filters)
+	if err != nil {
+		return "{}"
+	}
 	return string(encoded)
 }
 
@@ -309,6 +246,72 @@ func (m *miniClient) Events(ctx context.Context, filters map[string][]string) (<
 // Close releases the client's resources. The underlying transport holds the
 // socket connections, which die with the process; nothing to close early.
 func (m *miniClient) Close() error { return nil }
+
+// do performs one API call. A 409 is returned as *conflictError; other
+// non-2xx responses become errors carrying the daemon's message.
+func (m *miniClient) do(ctx context.Context, method, path string, query url.Values, body any, out any) error {
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode request: %w", err)
+		}
+		reader = strings.NewReader(string(encoded))
+	}
+	u := url.URL{Scheme: "http", Host: m.host, Path: path}
+	if query != nil {
+		u.RawQuery = query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch {
+	case resp.StatusCode == http.StatusConflict:
+		return &conflictError{op: method + " " + path}
+	case resp.StatusCode >= 300:
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("decode %s %s: %w", method, path, err)
+		}
+	}
+	return nil
+}
+
+// stream performs one call whose body is a long-lived stream; the caller
+// consumes and closes it.
+func (m *miniClient) stream(ctx context.Context, path string, query url.Values) (io.ReadCloser, error) {
+	u := url.URL{Scheme: "http", Host: m.host, Path: path}
+	if query != nil {
+		u.RawQuery = query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("GET %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return resp.Body, nil
+}
 
 // WatchEvents streams container start events until ctx is done. Resolving the
 // engine exports DOCKER_HOST, which the client endpoint reads.

@@ -20,15 +20,15 @@ import (
 // Exactly one of Port / Container / URL must be set; exactly one of Path /
 // PathRegex must be set.
 type RouteInput struct {
-	ID               string
-	Path             string
-	PathRegex        string
-	Rewrite          string
-	Port             int    // localhost upstream
-	Container        string // "name:port" upstream
-	URL              string // raw URL upstream
-	PreserveHost     *bool  // nil → true
-	Priority         int
+	ID           string
+	Path         string
+	PathRegex    string
+	Rewrite      string
+	Port         int    // localhost upstream
+	Container    string // "name:port" upstream
+	URL          string // raw URL upstream
+	PreserveHost *bool  // nil → true
+	Priority     int
 	// InsecureSkipVerify skips TLS verification on an https url upstream.
 	InsecureSkipVerify bool
 }

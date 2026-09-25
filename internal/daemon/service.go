@@ -102,7 +102,7 @@ func stopService() error {
 // SRV_CONTAINER_ENGINE are carried over when set: they are precedence-1
 // overrides (config, ops/engine), and a daemon installed under one would
 // otherwise silently point at the default root/engine instead.
-func renderSystemdUnit(executable, homeDir string) (string, error) {
+func renderSystemdUnit(executable, homeDir string) string {
 	env := []string{"HOME=" + homeDir, "XDG_CONFIG_HOME=" + homeDir + "/.config"}
 	for _, key := range []string{"SRV_ROOT", "SRV_CONTAINER_ENGINE"} {
 		if val := os.Getenv(key); val != "" {
@@ -126,7 +126,7 @@ func renderSystemdUnit(executable, homeDir string) (string, error) {
 	}
 	b.WriteString("\n[Install]\n")
 	b.WriteString("WantedBy=default.target\n")
-	return b.String(), nil
+	return b.String()
 }
 
 func systemdServicePath() (string, error) {
@@ -177,10 +177,7 @@ func installSystemd() error {
 		return fmt.Errorf("failed to determine home directory: %w", err)
 	}
 
-	serviceContent, err := renderSystemdUnit(executable, homeDir)
-	if err != nil {
-		return err
-	}
+	serviceContent := renderSystemdUnit(executable, homeDir)
 
 	if err := os.WriteFile(servicePath, []byte(serviceContent), constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
@@ -265,7 +262,7 @@ func GetSystemdStatus() (string, error) {
 // includes the binary's own dir plus the usual Homebrew/system locations. As
 // with the systemd unit, SRV_ROOT and SRV_CONTAINER_ENGINE are carried over
 // when set so the daemon honours the overrides its installer ran under.
-func renderLaunchdPlist(executable, logPath string) (string, error) {
+func renderLaunchdPlist(executable, logPath string) string {
 	env := map[string]string{
 		"PATH": filepath.Dir(executable) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
 	}
@@ -302,7 +299,7 @@ func renderLaunchdPlist(executable, logPath string) (string, error) {
 	key("StandardErrorPath", logPath)
 	key("StandardOutPath", logPath)
 	w("</dict>\n</plist>\n")
-	return b.String(), nil
+	return b.String()
 }
 
 // plistEscape escapes the five XML entities for attribute/element text.
@@ -365,10 +362,7 @@ func installLaunchd() error {
 
 	logPath := LogPath(cfg)
 
-	plistContent, err := renderLaunchdPlist(executable, logPath)
-	if err != nil {
-		return err
-	}
+	plistContent := renderLaunchdPlist(executable, logPath)
 
 	// Write plist before unloading so a write failure leaves the old service intact.
 	if err := os.WriteFile(plistPath, []byte(plistContent), constants.FilePermACME); err != nil {

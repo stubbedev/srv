@@ -203,7 +203,7 @@ func AddVolume(siteName string, mount VolumeMount) (warnings []string, err error
 		return nil, err
 	}
 	if meta.Type == SiteTypeCompose {
-		return nil, fmt.Errorf("compose sites own their docker-compose.yml — add the volume there directly so it survives container restarts")
+		return nil, errors.New("compose sites own their docker-compose.yml — add the volume there directly so it survives container restarts")
 	}
 	if err := validateVolumeMount(mount, true); err != nil {
 		return nil, err
@@ -241,7 +241,7 @@ func AttachNetwork(siteName, network string) (changed bool, warnings []string, e
 		return false, nil, err
 	}
 	if meta.Type == SiteTypeCompose {
-		return false, nil, fmt.Errorf("compose sites own their docker-compose.yml — attach the network there directly")
+		return false, nil, errors.New("compose sites own their docker-compose.yml — attach the network there directly")
 	}
 	if !docker.NetworkExists(network) {
 		return false, nil, fmt.Errorf("docker network %q does not exist — create it first (or check the name)", network)

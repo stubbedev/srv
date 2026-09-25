@@ -218,21 +218,22 @@ func StampSrvLabels(labels map[string]string, siteName, siteType string) {
 // Extra bind-mounts and networks from metadata are rendered so `srv volume add`
 // and `srv network attach` have an effect on srv-managed sites.
 func buildStaticComposeConfig(project, containerName, projectPath, nginxConfPath, networkName string, labels map[string]string, volumes []VolumeMount, extraNetworks []string) composeFile {
-	vols := []composeVolume{
-		{
+	vols := make([]composeVolume, 0, 2+len(volumes))
+	vols = append(vols,
+		composeVolume{
 			Type:        "bind",
 			Source:      projectPath,
 			Target:      constants.NginxHTMLPath,
 			ReadOnly:    true,
 			Consistency: volumeConsistencyForHost(),
 		},
-		{
+		composeVolume{
 			Type:     "bind",
 			Source:   nginxConfPath,
 			Target:   constants.NginxDefaultConfPath,
 			ReadOnly: true,
 		},
-	}
+	)
 	for _, v := range volumes {
 		vols = append(vols, composeVolume{
 			Type:     "bind",

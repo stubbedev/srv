@@ -849,6 +849,7 @@ func (noopSDK) ContainerList(context.Context, bool, string) ([]containerSummary,
 func (noopSDK) ImagePull(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
+
 func (noopSDK) Events(context.Context, map[string][]string) (<-chan Event, <-chan error) {
 	eventCh := make(chan Event)
 	errCh := make(chan error, 1)

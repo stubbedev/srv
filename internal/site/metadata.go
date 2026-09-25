@@ -46,13 +46,13 @@ type Upstream struct {
 // Route attaches an extra Traefik router to a site, used for path-prefix splits
 // (e.g. /app → WebSocket on :6001) or regex rewrites (e.g. /videos/...).
 type Route struct {
-	ID               string   `jsonschema:"description=Stable handle for the route used by 'srv route' CLI."    yaml:"id"`
-	Path             string   `jsonschema:"description=PathPrefix to match (e.g. /api)."                        yaml:"path,omitempty"`
-	PathRegex        string   `jsonschema:"description=Regex pattern to match (Traefik PathRegexp)."            yaml:"path_regex,omitempty"`
-	Rewrite          string   `jsonschema:"description=ReplacePathRegex replacement (e.g. /v1/$1)."             yaml:"rewrite,omitempty"`
-	Upstream         Upstream `yaml:"upstream"`
-	PreserveHost     *bool    `jsonschema:"description=Whether to preserve the Host header (default true)."     yaml:"preserve_host,omitempty"`
-	Priority         int      `jsonschema:"description=Traefik router priority override."                       yaml:"priority,omitempty"`
+	ID           string   `jsonschema:"description=Stable handle for the route used by 'srv route' CLI." yaml:"id"`
+	Path         string   `jsonschema:"description=PathPrefix to match (e.g. /api)."                     yaml:"path,omitempty"`
+	PathRegex    string   `jsonschema:"description=Regex pattern to match (Traefik PathRegexp)."         yaml:"path_regex,omitempty"`
+	Rewrite      string   `jsonschema:"description=ReplacePathRegex replacement (e.g. /v1/$1)."          yaml:"rewrite,omitempty"`
+	Upstream     Upstream `yaml:"upstream"`
+	PreserveHost *bool    `jsonschema:"description=Whether to preserve the Host header (default true)."  yaml:"preserve_host,omitempty"`
+	Priority     int      `jsonschema:"description=Traefik router priority override."                    yaml:"priority,omitempty"`
 }
 
 // VolumeMount is an extra bind-mount the user added to a site so its container

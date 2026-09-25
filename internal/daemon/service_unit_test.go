@@ -6,10 +6,7 @@ import (
 )
 
 func TestRenderSystemdUnitGolden(t *testing.T) {
-	unit, err := renderSystemdUnit("/usr/bin/srv", "/home/u")
-	if err != nil {
-		t.Fatal(err)
-	}
+	unit := renderSystemdUnit("/usr/bin/srv", "/home/u")
 	want := strings.Join([]string{
 		"[Unit]",
 		"Description=srv daemon - Docker container network connector",
@@ -36,10 +33,7 @@ func TestRenderSystemdUnitGolden(t *testing.T) {
 
 func TestRenderLaunchdPlistIsValid(t *testing.T) {
 	t.Setenv("SRV_ROOT", "/custom/root")
-	plist, err := renderLaunchdPlist("/usr/bin/srv", "/tmp/srv.log")
-	if err != nil {
-		t.Fatal(err)
-	}
+	plist := renderLaunchdPlist("/usr/bin/srv", "/tmp/srv.log")
 	for _, want := range []string{
 		"<key>Label</key>", "<string>dev.stubbe.srv-daemon</string>",
 		"<key>RunAtLoad</key>", "<true/>",
@@ -52,10 +46,7 @@ func TestRenderLaunchdPlistIsValid(t *testing.T) {
 		}
 	}
 	// An executable path with XML-special characters must not break the file.
-	escaped, err := renderLaunchdPlist("/opt/a b&c<d>/srv", "/tmp/x")
-	if err != nil {
-		t.Fatal(err)
-	}
+	escaped := renderLaunchdPlist("/opt/a b&c<d>/srv", "/tmp/x")
 	if !strings.Contains(escaped, "a b&amp;c&lt;d&gt;") {
 		t.Errorf("XML escaping missing:\n%s", escaped)
 	}

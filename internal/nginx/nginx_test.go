@@ -144,4 +144,3 @@ func TestHashComments(t *testing.T) {
 		}
 	}
 }
-

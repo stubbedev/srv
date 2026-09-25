@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
 )
 
 func swap(t *testing.T, f *fakeSDK) {

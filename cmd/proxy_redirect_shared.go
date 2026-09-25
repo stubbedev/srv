@@ -6,7 +6,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -38,32 +37,6 @@ func scanConfigNames(prefix string) []string {
 		}
 	}
 	return names
-}
-
-// ensureLocalCertForResource verifies mkcert is on $PATH, installs the local
-// CA if needed, and issues / renews a cert for siteName + domain (+ wildcard).
-// Used by proxy and redirect add — each picks a different siteName prefix so
-// the cert files don't collide with real sites' certs.
-func ensureLocalCertForResource(siteName, domain string, wildcard bool) error {
-	if err := traefik.CheckMkcert(); err != nil {
-		return err
-	}
-	if !traefik.IsCAInstalled() {
-		ui.Dim("Installing mkcert CA...")
-		res, err := traefik.InstallCA()
-		if err != nil {
-			return fmt.Errorf("failed to install mkcert CA: %w", err)
-		}
-		reportCAInstall(res, false)
-	}
-	renewed, err := traefik.EnsureLocalCert(siteName, []string{domain}, wildcard)
-	if err != nil {
-		return fmt.Errorf("failed to generate certificate: %w", err)
-	}
-	if renewed {
-		ui.Dim("Generated SSL certificate for %s", domain)
-	}
-	return nil
 }
 
 // localCertStatus returns one of "corrupt" / "missing" / "expired" /
