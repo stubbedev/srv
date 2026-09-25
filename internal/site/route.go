@@ -28,7 +28,6 @@ type RouteInput struct {
 	Container        string // "name:port" upstream
 	URL              string // raw URL upstream
 	PreserveHost     *bool  // nil → true
-	PassRangeHeaders bool
 	Priority         int
 	// InsecureSkipVerify skips TLS verification on an https url upstream.
 	InsecureSkipVerify bool
@@ -73,14 +72,13 @@ func BuildRoute(in RouteInput) (Route, error) {
 		preserve = *in.PreserveHost
 	}
 	return Route{
-		ID:               id,
-		Path:             in.Path,
-		PathRegex:        in.PathRegex,
-		Rewrite:          in.Rewrite,
-		Upstream:         upstream,
-		PreserveHost:     &preserve,
-		PassRangeHeaders: in.PassRangeHeaders,
-		Priority:         in.Priority,
+		ID:           id,
+		Path:         in.Path,
+		PathRegex:    in.PathRegex,
+		Rewrite:      in.Rewrite,
+		Upstream:     upstream,
+		PreserveHost: &preserve,
+		Priority:     in.Priority,
 	}, nil
 }
 

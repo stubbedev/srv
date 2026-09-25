@@ -21,7 +21,6 @@ var routeAddFlags struct {
 	container          string
 	url                string
 	preserveHost       bool
-	rangeHeaders       bool
 	priority           int
 	insecureSkipVerify bool
 }
@@ -87,7 +86,6 @@ func init() {
 	routeAddCmd.Flags().StringVar(&routeAddFlags.container, "container", "", "Upstream container (container[:port])")
 	routeAddCmd.Flags().StringVar(&routeAddFlags.url, "url", "", "Upstream URL (http:// or https://)")
 	routeAddCmd.Flags().BoolVar(&routeAddFlags.preserveHost, "preserve-host", true, "Forward the Host header unchanged to the upstream")
-	routeAddCmd.Flags().BoolVar(&routeAddFlags.rangeHeaders, "pass-range-headers", false, "Documentation-only; Traefik forwards Range headers by default")
 	routeAddCmd.Flags().IntVar(&routeAddFlags.priority, "priority", 0, "Override the auto-computed Traefik router priority")
 	routeAddCmd.Flags().BoolVar(&routeAddFlags.insecureSkipVerify, "insecure-skip-verify", false, "Skip TLS cert verification for an https --url upstream (self-signed / mismatched cert)")
 
@@ -193,7 +191,6 @@ func buildRouteFromFlags() (site.Route, error) {
 		Container:          routeAddFlags.container,
 		URL:                routeAddFlags.url,
 		PreserveHost:       &preserve,
-		PassRangeHeaders:   routeAddFlags.rangeHeaders,
 		Priority:           routeAddFlags.priority,
 		InsecureSkipVerify: routeAddFlags.insecureSkipVerify,
 	})

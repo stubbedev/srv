@@ -49,7 +49,6 @@ type addRouteIn struct {
 	Container          string `json:"container,omitempty"            jsonschema:"container upstream as name:port"`
 	URL                string `json:"url,omitempty"                  jsonschema:"raw upstream URL"`
 	PreserveHost       *bool  `json:"preserve_host,omitempty"        jsonschema:"forward the Host header unchanged (default true)"`
-	PassRangeHeaders   bool   `json:"pass_range_headers,omitempty"`
 	Priority           int    `json:"priority,omitempty"             jsonschema:"override the auto-computed Traefik router priority"`
 	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty" jsonschema:"skip TLS verification for an https url upstream (self-signed / mismatched cert)"`
 }
@@ -75,7 +74,6 @@ func addRouteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRouteIn) (
 		Container:          in.Container,
 		URL:                in.URL,
 		PreserveHost:       in.PreserveHost,
-		PassRangeHeaders:   in.PassRangeHeaders,
 		Priority:           in.Priority,
 		InsecureSkipVerify: in.InsecureSkipVerify,
 	})

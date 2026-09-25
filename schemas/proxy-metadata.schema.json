@@ -27,10 +27,6 @@
           "type": "boolean",
           "description": "Whether to preserve the Host header (default true)."
         },
-        "pass_range_headers": {
-          "type": "boolean",
-          "description": "Forward Range/If-Range headers for byte-range requests."
-        },
         "priority": {
           "type": "integer",
           "description": "Traefik router priority override."

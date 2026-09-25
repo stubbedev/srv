@@ -252,6 +252,5 @@ func resetRouteFlags() {
 	routeAddFlags.container = ""
 	routeAddFlags.url = ""
 	routeAddFlags.preserveHost = true
-	routeAddFlags.rangeHeaders = false
 	routeAddFlags.priority = 0
 }

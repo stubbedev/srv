@@ -52,7 +52,6 @@ type Route struct {
 	Rewrite          string   `jsonschema:"description=ReplacePathRegex replacement (e.g. /v1/$1)."             yaml:"rewrite,omitempty"`
 	Upstream         Upstream `yaml:"upstream"`
 	PreserveHost     *bool    `jsonschema:"description=Whether to preserve the Host header (default true)."     yaml:"preserve_host,omitempty"`
-	PassRangeHeaders bool     `jsonschema:"description=Forward Range/If-Range headers for byte-range requests." yaml:"pass_range_headers,omitempty"`
 	Priority         int      `jsonschema:"description=Traefik router priority override."                       yaml:"priority,omitempty"`
 }
 
