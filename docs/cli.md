@@ -856,7 +856,6 @@ srv redirect add [flags]
 | `--domain`, `-d` | — | Domain to redirect (e.g., old.test) |
 | `--force`, `-f` | `false` | Overwrite existing redirect configuration |
 | `--name`, `-n` | — | Redirect name (default: derived from domain) |
-| `--permanent` | `true` | Use 301 permanent redirect (default) |
 | `--temporary` | `false` | Use 302 temporary redirect (overrides --permanent) |
 | `--to` | — | Target URL (e.g., https://new.example.com) |
 | `--wildcard` | `false` | Also match one-level subdomains (e.g. *.foo.test) |

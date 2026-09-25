@@ -92,6 +92,25 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 	}
 	StampSrvLabels(labels, name, string(meta.Type))
 
+	// Extra bind-mounts and networks from metadata are rendered so `srv
+	// volume add` and `srv network attach` have an effect on dockerfile sites.
+	vols := make([]composeVolume, 0, len(meta.Volumes))
+	for _, v := range meta.Volumes {
+		vols = append(vols, composeVolume{
+			Type:     "bind",
+			Source:   v.Source,
+			Target:   v.Target,
+			ReadOnly: v.ReadOnly,
+		})
+	}
+	networks := append([]string{constants.TraefikSubdir}, meta.ExtraNetworks...)
+	composeNetworks := map[string]composeNetwork{
+		constants.TraefikSubdir: {Name: meta.NetworkName, External: true},
+	}
+	for _, n := range meta.ExtraNetworks {
+		composeNetworks[n] = composeNetwork{Name: n, External: true}
+	}
+
 	cf := composeFile{
 		Name: constants.ComposeProjectFor(name),
 		Services: map[string]composeService{
@@ -101,14 +120,13 @@ func WriteDockerfileSiteConfig(name string, meta SiteMetadata, info *DockerfileS
 					Context:    meta.ProjectPath,
 					Dockerfile: constants.DockerfileFile,
 				},
+				Volumes:  vols,
 				Labels:   labels,
-				Networks: []string{constants.TraefikSubdir},
+				Networks: networks,
 				Restart:  constants.RestartUnlessStopped,
 			},
 		},
-		Networks: map[string]composeNetwork{
-			constants.TraefikSubdir: {Name: meta.NetworkName, External: true},
-		},
+		Networks: composeNetworks,
 	}
 
 	data, err := yaml.Marshal(&cf)

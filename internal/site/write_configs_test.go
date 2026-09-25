@@ -63,6 +63,37 @@ func TestWriteStaticSiteConfigForceFalsePreserves(t *testing.T) {
 	}
 }
 
+// Extra volumes and networks from metadata must be rendered into srv-managed
+// compose files — writable from three surfaces but previously rendered by
+// nothing, so the UI's "takes effect on next restart" promise was false.
+func TestWriteStaticSiteConfigRendersVolumesAndNetworks(t *testing.T) {
+	root := withSRVRoot(t)
+	meta := SiteMetadata{
+		Type:          SiteTypeStatic,
+		Domains:       []string{"blog.local"},
+		ProjectPath:   "/srv/blog",
+		Port:          80,
+		IsLocal:       true,
+		NetworkName:   "tnet",
+		ExtraNetworks: []string{"mysql01"},
+		Volumes:       []VolumeMount{{Source: "/nix", Target: "/nix", ReadOnly: true}},
+	}
+	if _, err := WriteStaticSiteConfig("blog", meta, true); err != nil {
+		t.Fatal(err)
+	}
+	compose, err := os.ReadFile(filepath.Join(root, "sites", "blog", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Long-syntax compose volumes render as source/target keys, not :ro shorthand.
+	if !strings.Contains(string(compose), "source: /nix") {
+		t.Errorf("extra volume not rendered:\n%s", compose)
+	}
+	if !strings.Contains(string(compose), "mysql01") {
+		t.Errorf("extra network not rendered:\n%s", compose)
+	}
+}
+
 func TestWriteDockerfileSiteConfig(t *testing.T) {
 	root := withSRVRoot(t)
 	meta := SiteMetadata{

@@ -7,6 +7,8 @@ package site
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -169,11 +171,41 @@ func SetInternalListener(siteName string, enable bool) (changed bool, warnings [
 	return true, warnings, nil
 }
 
+// validateVolumeMount checks a bind-mount semantically. checkExists adds the
+// attach-time requirement that the host source exists; metadata validation
+// passes false so a since-deleted source degrades to a broken mount instead of
+// failing every reload.
+func validateVolumeMount(m VolumeMount, checkExists bool) error {
+	if m.Source == "" || m.Target == "" {
+		return errors.New("volume source and target are required")
+	}
+	if !filepath.IsAbs(m.Source) {
+		return fmt.Errorf("volume source %q must be an absolute host path (use ~/… or /…)", m.Source)
+	}
+	if !filepath.IsAbs(m.Target) {
+		return fmt.Errorf("volume target %q must be an absolute container path", m.Target)
+	}
+	if checkExists {
+		if _, err := os.Stat(m.Source); err != nil {
+			return fmt.Errorf("volume source %q does not exist on host", m.Source)
+		}
+	}
+	return nil
+}
+
 // AddVolume attaches an extra bind-mount to a site's container. Rejects a target
 // that collides with an existing mount or overlaps the project bind at /app.
+// Compose-type sites are rejected: they own their docker-compose.yml, and the
+// volume belongs there so it survives regenerations the user controls.
 func AddVolume(siteName string, mount VolumeMount) (warnings []string, err error) {
 	meta, err := requireMeta(siteName)
 	if err != nil {
+		return nil, err
+	}
+	if meta.Type == SiteTypeCompose {
+		return nil, fmt.Errorf("compose sites own their docker-compose.yml — add the volume there directly so it survives container restarts")
+	}
+	if err := validateVolumeMount(mount, true); err != nil {
 		return nil, err
 	}
 	for _, existing := range meta.Volumes {
@@ -197,7 +229,8 @@ func AddVolume(siteName string, mount VolumeMount) (warnings []string, err error
 // AttachNetwork adds an extra Docker network to a site so its container can
 // reach services on that network. Returns changed=false (no error) when already
 // attached. Errors if the network does not exist or is the site's primary
-// traefik network.
+// traefik network. Compose-type sites are rejected: they own their
+// docker-compose.yml, and the network belongs there.
 func AttachNetwork(siteName, network string) (changed bool, warnings []string, err error) {
 	network = strings.TrimSpace(network)
 	if network == "" {
@@ -206,6 +239,9 @@ func AttachNetwork(siteName, network string) (changed bool, warnings []string, e
 	meta, err := requireMeta(siteName)
 	if err != nil {
 		return false, nil, err
+	}
+	if meta.Type == SiteTypeCompose {
+		return false, nil, fmt.Errorf("compose sites own their docker-compose.yml — attach the network there directly")
 	}
 	if !docker.NetworkExists(network) {
 		return false, nil, fmt.Errorf("docker network %q does not exist — create it first (or check the name)", network)

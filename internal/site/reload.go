@@ -282,6 +282,19 @@ func ValidateMetadata(meta *SiteMetadata) error {
 			}
 		}
 	}
+	// Extra bind-mounts and networks flow into generated compose files and
+	// docker network attaches; keep hand-edited values well-formed even
+	// though the YAML encoding itself is injection-safe.
+	for _, v := range meta.Volumes {
+		if err := validateVolumeMount(v, false); err != nil {
+			return err
+		}
+	}
+	for _, n := range meta.ExtraNetworks {
+		if err := validate.ContainerName(n); err != nil {
+			return fmt.Errorf("extra network: %w", err)
+		}
+	}
 	return nil
 }
 

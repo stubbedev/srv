@@ -291,4 +291,18 @@ func (d *Daemon) handleContainerStart(event dockerevents.Message) {
 	} else {
 		d.log("Successfully connected %s to network %s", containerName, d.networkName)
 	}
+
+	// Connect any extra networks the site's metadata lists, best-effort: a
+	// missing external network logs but must not stop the primary connect
+	// from having happened.
+	if meta, err := site.ReadSiteMetadata(siteName); err == nil && meta != nil {
+		for _, extra := range meta.ExtraNetworks {
+			if extra == d.networkName {
+				continue
+			}
+			if err := docker.ConnectContainerToNetwork(containerName, extra, containerName); err != nil && !cerrdefs.IsConflict(err) {
+				d.log("Failed to connect %s to extra network %s: %v", containerName, extra, err)
+			}
+		}
+	}
 }

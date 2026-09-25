@@ -215,39 +215,57 @@ func StampSrvLabels(labels map[string]string, siteName, siteType string) {
 }
 
 // buildStaticComposeConfig builds the docker-compose configuration for a static site.
-func buildStaticComposeConfig(project, containerName, projectPath, nginxConfPath, networkName string, labels map[string]string) composeFile {
+// Extra bind-mounts and networks from metadata are rendered so `srv volume add`
+// and `srv network attach` have an effect on srv-managed sites.
+func buildStaticComposeConfig(project, containerName, projectPath, nginxConfPath, networkName string, labels map[string]string, volumes []VolumeMount, extraNetworks []string) composeFile {
+	vols := []composeVolume{
+		{
+			Type:        "bind",
+			Source:      projectPath,
+			Target:      constants.NginxHTMLPath,
+			ReadOnly:    true,
+			Consistency: volumeConsistencyForHost(),
+		},
+		{
+			Type:     "bind",
+			Source:   nginxConfPath,
+			Target:   constants.NginxDefaultConfPath,
+			ReadOnly: true,
+		},
+	}
+	for _, v := range volumes {
+		vols = append(vols, composeVolume{
+			Type:     "bind",
+			Source:   v.Source,
+			Target:   v.Target,
+			ReadOnly: v.ReadOnly,
+		})
+	}
+
+	networks := append([]string{constants.TraefikSubdir}, extraNetworks...)
+	composeNetworks := map[string]composeNetwork{
+		constants.TraefikSubdir: {
+			Name:     networkName,
+			External: true,
+		},
+	}
+	for _, n := range extraNetworks {
+		composeNetworks[n] = composeNetwork{Name: n, External: true}
+	}
+
 	return composeFile{
 		Name: project,
 		Services: map[string]composeService{
 			"web": {
 				ContainerName: containerName,
 				Image:         constants.ImageNginxAlpine,
-				Volumes: []composeVolume{
-					{
-						Type:        "bind",
-						Source:      projectPath,
-						Target:      constants.NginxHTMLPath,
-						ReadOnly:    true,
-						Consistency: volumeConsistencyForHost(),
-					},
-					{
-						Type:     "bind",
-						Source:   nginxConfPath,
-						Target:   constants.NginxDefaultConfPath,
-						ReadOnly: true,
-					},
-				},
-				Labels:   labels,
-				Networks: []string{constants.TraefikSubdir},
-				Restart:  constants.RestartUnlessStopped,
+				Volumes:       vols,
+				Labels:        labels,
+				Networks:      networks,
+				Restart:       constants.RestartUnlessStopped,
 			},
 		},
-		Networks: map[string]composeNetwork{
-			constants.TraefikSubdir: {
-				Name:     networkName,
-				External: true,
-			},
-		},
+		Networks: composeNetworks,
 	}
 }
 
@@ -302,7 +320,7 @@ func WriteStaticSiteConfig(name string, meta SiteMetadata, force bool) (warnings
 		addInternalListenerLabels(labels, name, meta.Domains, meta.Wildcard)
 	}
 	StampSrvLabels(labels, name, string(meta.Type))
-	composeConfig := buildStaticComposeConfig(constants.ComposeProjectFor(name), containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels)
+	composeConfig := buildStaticComposeConfig(constants.ComposeProjectFor(name), containerName, meta.ProjectPath, nginxConfPath, meta.NetworkName, labels, meta.Volumes, meta.ExtraNetworks)
 
 	data, err := yaml.Marshal(&composeConfig)
 	if err != nil {

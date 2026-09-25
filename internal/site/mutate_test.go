@@ -135,3 +135,45 @@ func TestAddRemoveVolume(t *testing.T) {
 		t.Error("expected error removing absent volume")
 	}
 }
+
+// Attach-time validation comes from the shared checker, not the CLI spec
+// parser the MCP path bypasses: relative sources and missing host paths are
+// rejected on every surface.
+func TestAddVolumeRejectsInvalidMount(t *testing.T) {
+	withSRVRoot(t)
+	seedSite(t, "blog", []string{"blog.test"})
+
+	if _, err := AddVolume("blog", VolumeMount{Source: "relative/path", Target: "/data"}); err == nil {
+		t.Error("expected error for relative source")
+	}
+	if _, err := AddVolume("blog", VolumeMount{Source: "/no/such/dir", Target: "/data"}); err == nil {
+		t.Error("expected error for missing source")
+	}
+	if _, err := AddVolume("blog", VolumeMount{Source: "/tmp", Target: "data"}); err == nil {
+		t.Error("expected error for relative target")
+	}
+}
+
+// Compose sites own their compose file: the mutation surfaces must refuse
+// instead of persisting volumes/networks nothing will ever render.
+func TestVolumeAndNetworkMutationsRejectComposeSites(t *testing.T) {
+	withSRVRoot(t)
+	if err := WriteSiteMetadata("app", SiteMetadata{
+		Type:        SiteTypeCompose,
+		Domains:     []string{"app.test"},
+		ProjectPath: "/tmp",
+		Port:        3000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddVolume("app", VolumeMount{Source: "/tmp", Target: "/data"}); err == nil {
+		t.Error("expected rejection for compose site volume")
+	}
+	changed, _, err := AttachNetwork("app", "traefik")
+	if err == nil {
+		t.Error("expected rejection for compose site network")
+	}
+	if changed {
+		t.Error("nothing should be attached")
+	}
+}

@@ -54,6 +54,18 @@ func StartSite(name string, build bool) error {
 			return fmt.Errorf("connect service to network: %w", err)
 		}
 	}
+	// Compose-type sites are rejected at attach time (they own their compose
+	// file, which already carries the extras), so only srv-managed sites need
+	// their metadata-listed extra networks connected here, after the single
+	// container exists. Errors are best-effort: the next start retries, and a
+	// missing extra network must not leave the site unstartable.
+	if s.Type != SiteTypeCompose {
+		for _, extra := range s.ExtraNetworks {
+			if err := docker.ConnectContainerToNetwork(s.ServiceName, extra, s.ServiceName); err != nil {
+				return fmt.Errorf("connect %s to network %s: %w", s.ServiceName, extra, err)
+			}
+		}
+	}
 	return nil
 }
 

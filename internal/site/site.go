@@ -41,6 +41,7 @@ type Site struct {
 	Profile            string   // Docker Compose profile (if service uses profiles)
 	Port               int      // Port (for compose sites)
 	ComposeDir         string   // Directory containing docker-compose.yml (may differ from Dir for static sites)
+	ExtraNetworks      []string // Additional external Docker networks the site joins
 }
 
 // Domain returns the canonical (first) hostname for the site, or "" if none.
@@ -75,6 +76,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	s.Profile = meta.Profile
 	s.Port = meta.Port
 	s.Dir = meta.ProjectPath
+	s.ExtraNetworks = append([]string(nil), meta.ExtraNetworks...)
 
 	// Fallback: if ComposeServiceName is empty, use ServiceName (backward compatibility)
 	if s.ComposeServiceName == "" && s.ServiceName != "" {

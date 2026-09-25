@@ -164,6 +164,14 @@ func resolveAddSetup(opts AddOptions) (*addSetup, error) {
 	if err := validate.SiteName(s.siteName); err != nil {
 		return nil, err
 	}
+	// Volumes from every surface (CLI spec strings, MCP JSON) funnel through
+	// here, so the attach-time checks live beside the type instead of in the
+	// string-spec parser the MCP path never sees.
+	for _, v := range opts.Volumes {
+		if err := validateVolumeMount(v, true); err != nil {
+			return nil, err
+		}
+	}
 	if Exists(s.siteName) && !opts.Force {
 		return nil, fmt.Errorf("site %q already exists (set force to overwrite)", s.siteName)
 	}
