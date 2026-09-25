@@ -7,7 +7,7 @@
 // travels Traefik -> listener -> primary returns the primary's body until
 // the primary dies — then the same request returns the fallback's, with no
 // Traefik reload in between.
-package fallback_test
+package routing_test
 
 import (
 	"fmt"

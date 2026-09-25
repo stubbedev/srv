@@ -3,7 +3,7 @@
 // End-to-end coverage for the site leg: `srv add` on a static project writes
 // the Traefik route + mkcert cert, Traefik's file provider hot-loads them,
 // and a request matched by Host rule returns the site's index.
-package site_test
+package routing_test
 
 import (
 	"net/http"

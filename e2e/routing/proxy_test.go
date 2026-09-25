@@ -1,6 +1,6 @@
 //go:build e2e
 
-package proxy_test
+package routing_test
 
 import (
 	"fmt"

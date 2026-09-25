@@ -30,12 +30,17 @@ available.
 
 ## Coverage
 
-| Suite | What it asserts |
+The Traefik-booting suites live in one directory (`e2e/routing`, one test
+package) on purpose: `go test` runs packages in parallel, and every one of
+these boots Traefik with the same fixed container name and host ports —
+parallel packages would race. Within the package, tests run sequentially.
+
+| Suite | What the package asserts |
 |---|---|
-| `proxy/` | `srv proxy add` → Traefik file-provider hot-loads the router + mkcert cert → a request to the websecure entrypoint (matched by Host rule) is forwarded to a localhost upstream and returns its body. |
-| `site/` | `srv add` on a static project → same chain, site leg. |
-| `dns/` | `srv dnsd` (the embedded server the daemon hosts) answers registered domains from the generated zone files — exact, wildcard at every depth — and live-reloads on a zone-file rewrite, no signal or restart. |
-| `fallback/` | `srv proxy add --fallback` → Traefik routes through the daemon-hosted failover listener to the primary; when the primary dies, the same request returns the fallback's body with no Traefik reload. |
+| `routing/proxy` | `srv proxy add` → Traefik file-provider hot-loads the router + mkcert cert → a request to the websecure entrypoint (matched by Host rule) is forwarded to a localhost upstream and returns its body. |
+| `routing/site` | `srv add` on a static project → same chain, site leg. |
+| `routing/fallback` | `srv proxy add --fallback` → Traefik routes through the daemon-hosted failover listener to the primary; when the primary dies, the same request returns the fallback's body with no Traefik reload. |
+| `dns/` | `srv dnsd` (the embedded server the daemon hosts) answers registered domains from the generated zone files — exact, wildcard at every depth — and live-reloads on a zone-file rewrite, no signal or restart. Container-free, safe to run in parallel with anything. |
 
 ## Harness
 
@@ -44,9 +49,8 @@ available.
 - `SkipIfNoEngine` / `SkipIfNoMkcert` / `SkipIfPortsBusy` — environment guards.
 - `BuildSrv` — compiles the `srv` binary once per run.
 - `NewRoot` — a throwaway `SRV_ROOT`.
-- `TraefikUp` — writes config via `traefik.EnsureConfig` and starts only the
-  `traefik` service (the compose file also defines an unneeded `dns`
-  service), with teardown registered via `t.Cleanup`.
+- `TraefikUp` — writes config via `traefik.EnsureConfig` and starts the
+  `traefik` service, with teardown registered via `t.Cleanup`.
 - `RunSrv` — runs the built binary with `SRV_ROOT` pinned.
 - `GetHTTPS` / `WaitForHTTPS` — drive Traefik's websecure entrypoint by Host
   rule without DNS (custom dialer to `127.0.0.1:443`, `InsecureSkipVerify`
