@@ -61,6 +61,14 @@ func TestRunRemoveMissingSite(t *testing.T) {
 	}
 }
 
+// The confirmation gate refuses without --yes, even for an existing site.
+func TestRunRemoveRequiresYes(t *testing.T) {
+	setupSrvRoot(t)
+	if err := runRemove(nil, []string{"anything"}); err == nil {
+		t.Error("expected refusal without --yes")
+	}
+}
+
 func TestRunRemoveCompleteFlow(t *testing.T) {
 	root := setupSrvRoot(t)
 	projectDir := filepath.Join(root, "p")
@@ -76,6 +84,8 @@ func TestRunRemoveCompleteFlow(t *testing.T) {
 		NetworkName: "n",
 	})
 	// Stub docker compose so removal doesn't error.
+	removeFlags.yes = true
+	defer func() { removeFlags.yes = false }()
 	if err := runRemove(nil, []string{"blog"}); err != nil {
 		t.Errorf("err: %v", err)
 	}

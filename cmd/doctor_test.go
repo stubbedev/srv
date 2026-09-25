@@ -75,9 +75,11 @@ func TestRunDoctorSmoke(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientErr(errors.New("offline")))
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
-	// Runs all checks; returns nil regardless of issue count.
-	if err := runDoctor(nil, nil); err != nil {
-		t.Errorf("err: %v", err)
+	// The offline-runtime sandbox yields issues, so runDoctor must exit
+	// nonzero; the important property is that it runs every check without
+	// erroring out.
+	if err := runDoctor(nil, nil); err == nil {
+		t.Error("expected nonzero exit when issues are found")
 	}
 }
 

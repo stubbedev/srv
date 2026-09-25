@@ -36,15 +36,15 @@ For compose sites the first service container is used; pass --service to
 pick a different one.
 
 Examples:
-  srv site shell mysite
-  srv site shell mysite --service api`,
+  srv shell mysite
+  srv shell mysite --service api`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			_ = cmd.Help()
-			return ui.UsageError("srv site shell SITE", "a site name is required")
+			return ui.UsageError("srv shell SITE", "a site name is required")
 		}
 		if len(args) > 1 {
-			return ui.UsageError("srv site shell SITE", "too many arguments — expected a single site name, got %d", len(args))
+			return ui.UsageError("srv shell SITE", "too many arguments — expected a single site name, got %d", len(args))
 		}
 		return nil
 	},
@@ -128,10 +128,10 @@ var openCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			_ = cmd.Help()
-			return ui.UsageError("srv site open SITE", "a site name is required")
+			return ui.UsageError("srv open SITE", "a site name is required")
 		}
 		if len(args) > 1 {
-			return ui.UsageError("srv site open SITE", "too many arguments — expected a single site name, got %d", len(args))
+			return ui.UsageError("srv open SITE", "too many arguments — expected a single site name, got %d", len(args))
 		}
 		return nil
 	},

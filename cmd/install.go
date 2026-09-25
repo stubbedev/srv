@@ -49,7 +49,22 @@ func init() {
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	// Handle fresh flag - reset everything
+	// Handle fresh flag - reset everything. This deletes the whole srv config
+	// root, so it is gated like uninstall: without --yes the command refuses
+	// and shows what would be removed.
+	if installFlags.fresh && !installFlags.yes {
+		cfg, cfgErr := config.Load()
+		ui.Warn("--fresh removes the entire srv configuration:")
+		ui.Blank()
+		ui.Print("  - Stop and remove Traefik and DNS containers")
+		if cfgErr == nil {
+			ui.Print("  - Delete the config directory: %s", cfg.Root)
+		}
+		ui.Print("  - Forget every registered site, certificate, and DNS entry")
+		ui.Blank()
+		ui.Dim("Site project directories on disk are NOT removed.")
+		return ui.UsageError("srv install --fresh --yes", "refusing to wipe existing configuration without --yes")
+	}
 	if installFlags.fresh {
 		ui.Warn("Removing existing configuration...")
 		if err := traefik.Reset(); err != nil {

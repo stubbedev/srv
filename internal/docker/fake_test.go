@@ -86,7 +86,12 @@ func (f *fakeSDK) ImagePull(ctx context.Context, ref string, opts image.PullOpti
 	if f.pullReader != nil {
 		return f.pullReader, nil
 	}
-	return io.NopCloser(strings.NewReader("pull progress\n")), nil
+	// Default to a minimal but well-formed pull JSON stream.
+	return io.NopCloser(strings.NewReader(
+		`{"status":"Pulling from library/nginx","id":""}` + "\n" +
+			`{"status":"Downloading","id":"abc123","progress":"[===>]  1kB/2kB"}` + "\n" +
+			`{"status":"Download complete","id":"abc123"}` + "\n" +
+			`{"status":"Status: Downloaded newer image"}` + "\n")), nil
 }
 
 func (f *fakeSDK) Close() error {

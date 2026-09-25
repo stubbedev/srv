@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -113,7 +112,7 @@ func runAliasList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+		return siteNotFoundError(siteName)
 	}
 	if len(meta.Domains) == 0 {
 		ui.Dim("Site %s has no domains configured", siteName)

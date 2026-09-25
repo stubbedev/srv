@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -69,7 +68,7 @@ func validateOne(name string) error {
 		return err
 	}
 	if meta == nil {
-		return errors.New("site not found")
+		return siteNotFoundError(name)
 	}
 	return site.ValidateMetadata(meta)
 }

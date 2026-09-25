@@ -3,6 +3,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -643,17 +644,20 @@ func IsContainerRunning(name string) bool {
 	return info.State != nil && info.State.Running
 }
 
-// Pull pulls a Docker image, streaming progress to stdout.
-func Pull(imageName string) error {
+// Pull pulls a Docker image. Progress updates from the pull stream are
+// reported through onProgress (one short line per layer status change); pass
+// nil to pull silently. The raw JSON stream is never dumped anywhere —
+// callers render it for humans.
+func Pull(imageName string, onProgress func(update string)) error {
 	cli, err := newClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer func() { _ = cli.Close() }()
 
-	// ImagePull returns a reader that must be consumed to drive the transfer.
-	// Copy it to stdout so the user sees progress, then discard cleanly.
-	// Use ComposeTimeout so a stalled daemon or network issue doesn't hang forever.
+	// ImagePull returns a JSON stream that must be consumed to drive the
+	// transfer. Use ComposeTimeout so a stalled daemon or network issue
+	// doesn't hang forever.
 	ctx, cancel := context.WithTimeout(context.Background(), ComposeTimeout)
 	defer cancel()
 	reader, err := cli.ImagePull(ctx, imageName, image.PullOptions{})
@@ -662,8 +666,33 @@ func Pull(imageName string) error {
 	}
 	defer func() { _ = reader.Close() }()
 
-	_, err = io.Copy(os.Stdout, reader)
-	return err
+	decoder := json.NewDecoder(reader)
+	last := make(map[string]string)
+	for {
+		var ev struct {
+			Status   string `json:"status"`
+			ID       string `json:"id"`
+			Progress string `json:"progress"`
+		}
+		if err := decoder.Decode(&ev); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("reading pull progress for %s: %w", imageName, err)
+		}
+		if onProgress == nil || ev.ID == "" || ev.Status == "" {
+			continue
+		}
+		update := ev.Status
+		if ev.Progress != "" {
+			update = fmt.Sprintf("%s %s", ev.Status, ev.Progress)
+		}
+		if last[ev.ID] == update {
+			continue
+		}
+		last[ev.ID] = update
+		onProgress(fmt.Sprintf("%s: %s", ev.ID, update))
+	}
 }
 
 // ErrServiceNotRunning indicates a compose service is not currently running.

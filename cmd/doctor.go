@@ -99,6 +99,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 	ui.Blank()
 
+	// Exit nonzero so scripts and CI can act on a failing diagnosis.
+	if issues > 0 {
+		return fmt.Errorf("doctor found %d issue(s), listed above", issues)
+	}
 	return nil
 }
 
@@ -782,12 +786,14 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Pull both images
+	// Pull both images. Layer detail goes to verbose diagnostics; the
+	// non-verbose default shows one line per image, not Docker's JSON stream.
 	ui.Info("Pulling latest images...")
-	if err := docker.Pull(docker.ImageTraefik); err != nil {
+	progress := func(update string) { ui.VerboseLog("pull: %s", update) }
+	if err := docker.Pull(docker.ImageTraefik, progress); err != nil {
 		return fmt.Errorf("failed to pull Traefik image: %w", err)
 	}
-	if err := docker.Pull(docker.ImageDNS); err != nil {
+	if err := docker.Pull(docker.ImageDNS, progress); err != nil {
 		return fmt.Errorf("failed to pull DNS image: %w", err)
 	}
 

@@ -5,7 +5,6 @@
 package cmd
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -119,7 +118,7 @@ func runNetworkList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if meta == nil {
-		return fmt.Errorf("site not found: %s", siteName)
+		return siteNotFoundError(siteName)
 	}
 	if jsonOutput() {
 		return ui.PrintJSON(networkListOut{

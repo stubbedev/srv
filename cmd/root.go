@@ -4,8 +4,10 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -65,11 +67,13 @@ func Execute() error {
 	return RootCmd.Execute()
 }
 
-// SetVersion sets version information for the CLI.
+// SetVersion sets version information for the CLI and arms `srv --version`.
 func SetVersion(version, commit, buildDate string) {
 	Version = version
 	Commit = commit
 	BuildDate = buildDate
+	RootCmd.Version = version
+	RootCmd.SetVersionTemplate("srv version {{.Version}}\n")
 }
 
 // =============================================================================
@@ -97,6 +101,25 @@ func GetSiteNames() []string {
 		names = append(names, s.Name)
 	}
 	return names
+}
+
+// siteNotFoundError is the one "site not found" error every command shares:
+// it names the site, points at `srv list`, and — when a registered name is a
+// prefix or substring match — suggests the closest candidate.
+func siteNotFoundError(name string) error {
+	suggestion := ""
+	lower := strings.ToLower(name)
+	for _, candidate := range GetSiteNames() {
+		cl := strings.ToLower(candidate)
+		if strings.HasPrefix(cl, lower) || strings.Contains(cl, lower) {
+			suggestion = candidate
+			break
+		}
+	}
+	if suggestion != "" {
+		return fmt.Errorf("site %q not found — run 'srv list'; did you mean %q?", name, suggestion)
+	}
+	return fmt.Errorf("site %q not found — run 'srv list' to see registered sites", name)
 }
 
 // GetSiteRouteIDs returns the route IDs configured for a site or proxy with

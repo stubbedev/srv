@@ -351,21 +351,40 @@ func TestGetContainerImageVersionClientErr(t *testing.T) {
 
 func TestPullSuccess(t *testing.T) {
 	swap(t, &fakeSDK{})
-	if err := Pull("nginx:latest"); err != nil {
+	if err := Pull("nginx:latest", nil); err != nil {
 		t.Errorf("err: %v", err)
+	}
+}
+
+// Progress callbacks see one deduplicated line per layer status change and
+// nothing for the id-less summary events.
+func TestPullProgressCallback(t *testing.T) {
+	swap(t, &fakeSDK{})
+	var updates []string
+	if err := Pull("nginx:latest", func(update string) { updates = append(updates, update) }); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 layer updates, got %v", updates)
+	}
+	if !strings.HasPrefix(updates[0], "abc123: Downloading") || !strings.Contains(updates[0], "1kB/2kB") {
+		t.Errorf("unexpected first update: %q", updates[0])
+	}
+	if updates[1] != "abc123: Download complete" {
+		t.Errorf("unexpected second update: %q", updates[1])
 	}
 }
 
 func TestPullErr(t *testing.T) {
 	swap(t, &fakeSDK{pullErr: errors.New("network")})
-	if err := Pull("nginx:latest"); err == nil {
+	if err := Pull("nginx:latest", nil); err == nil {
 		t.Error("expected err")
 	}
 }
 
 func TestPullClientErr(t *testing.T) {
 	swapErr(t, errors.New("x"))
-	if err := Pull("nginx:latest"); err == nil {
+	if err := Pull("nginx:latest", nil); err == nil {
 		t.Error("expected err")
 	}
 }

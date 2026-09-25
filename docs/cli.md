@@ -936,13 +936,24 @@ Remove a site
 
 ```
 Stop a site's containers and remove it from srv.
+
+This stops the site's containers, removes its Traefik routing, local
+certificate, and DNS registrations, and deletes its srv config directory
+(metadata and generated compose file). Your project directory on disk is
+NOT touched.
+
+Pass --yes to skip the confirmation gate (required for non-interactive runs).
 ```
 
 Usage:
 
 ```
-srv remove SITE
+srv remove SITE [flags]
 ```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--yes`, `-y` | `false` | Skip the confirmation gate (required for non-interactive runs) |
 
 ## `srv restart`
 
@@ -1047,8 +1058,8 @@ For compose sites the first service container is used; pass --service to
 pick a different one.
 
 Examples:
-  srv site shell mysite
-  srv site shell mysite --service api
+  srv shell mysite
+  srv shell mysite --service api
 ```
 
 Usage:
