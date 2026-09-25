@@ -67,10 +67,23 @@ type inspectConfig struct {
 	Image string `json:"Image"`
 }
 
+// inspectPortBinding is one host binding of a container port.
+type inspectPortBinding struct {
+	HostIP   string `json:"HostIp"`
+	HostPort string `json:"HostPort"`
+}
+
+// inspectNetworkSettings carries the published-port map of a container.
+type inspectNetworkSettings struct {
+	// Ports is keyed by "<containerPort>/<proto>", e.g. "3000/tcp".
+	Ports map[string][]inspectPortBinding `json:"Ports"`
+}
+
 // inspectResponse is the subset of GET /containers/{id}/json srv reads.
 type inspectResponse struct {
-	State  *inspectState  `json:"State"`
-	Config *inspectConfig `json:"Config"`
+	State           *inspectState           `json:"State"`
+	Config          *inspectConfig          `json:"Config"`
+	NetworkSettings *inspectNetworkSettings `json:"NetworkSettings"`
 }
 
 // EventActor is the event's actor: named attributes, of which srv reads

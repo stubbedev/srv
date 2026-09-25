@@ -1,7 +1,7 @@
 // Package proxy — orchestrate.go holds the headless add/remove flow shared by
 // the `srv proxy` CLI and the MCP add_proxy/remove_proxy tools — including
-// the `--fallback` sidecar. Keeping the core here means both surfaces
-// validate, issue certs, register DNS, and write config identically.
+// the `--fallback` native Traefik failover. Keeping the core here means both
+// surfaces validate, issue certs, register DNS, and write config identically.
 package proxy
 
 import (
@@ -28,9 +28,8 @@ import (
 func CertSiteName(name string) string { return constants.ProxyCertSitePrefix + name }
 
 // AddSpec describes a proxy to create. Exactly one of Port or Container must
-// be set. Container is "name:port". When FallbackURL is set, an nginx sidecar
-// is placed in front of the primary upstream and 5xx responses transparently
-// re-proxy to it.
+// be set. Container is "name:port". When FallbackURL is set, Traefik's native
+// failover service re-serves 5xx responses and connection errors from that URL.
 //
 // The json/jsonschema tags are the wire contract of the MCP add_proxy tool,
 // which reflects its input schema from this struct; commas in a description
@@ -52,8 +51,9 @@ type AddResult struct {
 	Name      string `json:"name"`
 	Domain    string `json:"domain"`
 	TargetURL string `json:"target_url"`
-	// FallbackEnabled is true when a fallback sidecar was placed in front of
-	// the primary upstream; TargetURL then points at the sidecar.
+	// FallbackEnabled is true when the proxy has a fallback configured; the
+	// Traefik service is then a native failover pair and TargetURL is the
+	// primary upstream.
 	FallbackEnabled bool     `json:"fallback_enabled,omitempty"`
 	Notes           []string `json:"notes,omitempty"`
 	Warnings        []string `json:"warnings,omitempty"`
@@ -97,72 +97,41 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		res.Notes = append(res.Notes, fmt.Sprintf("Connected container '%s' to %s network", containerName, cfg.NetworkName))
 	}
 
-	// When a fallback is requested, put a failover proxy in front of the
-	// primary upstream so 5xx responses transparently re-proxy to it. Traefik
-	// routes to the failover proxy instead of the original target.
-	var fallbackPort int
+	// A fallback turns the Traefik service into its native failover shape:
+	// Traefik itself re-serves 5xx responses (and dial failures, which surface
+	// as 502) from the fallback URL. No extra proxy, container, or image —
+	// the hop that used to sit in front of the primary is gone entirely.
 	if spec.FallbackURL != "" {
-		switch {
-		case isContainer:
-			// Container primary: the failover proxy must sit on the srv network
-			// to reach it by name, so it stays a container sidecar next to the
-			// primary (the daemon cannot dial a container's network alias from
-			// the host). The sidecar image is nginx:alpine, already srv's
-			// static-site runtime.
-			sidecar := FallbackSpec{
-				Name:            name,
-				PrimaryHost:     containerName,
-				PrimaryPort:     containerPort,
-				FallbackURL:     spec.FallbackURL,
-				FallbackTimeout: spec.FallbackTimeout,
-			}
-			sidecarURL, ferr := EnsureFallbackSidecar(cfg, sidecar)
-			if ferr != nil {
-				return nil, ferr
-			}
-			targetURL = sidecarURL
-			res.Notes = append(res.Notes, fmt.Sprintf("Fallback sidecar started (%s)", FallbackContainerName(name)))
-		default:
-			// Localhost-port primary: the srv daemon hosts the failover proxy
-			// in-process on a loopback port (no container, no image). The port
-			// is allocated here and persisted so the Traefik route and the
-			// daemon's listener agree across restarts; the daemon binds it
-			// within a moment of this metadata write (and on its next start).
-			port, perr := existingOrNewFallbackPort(name)
-			if perr != nil {
-				return nil, perr
-			}
-			fallbackPort = port
-			host := constants.DockerHostInternal
-			if platform.IsLinux() {
-				// Traefik is host-networked on Linux: it dials the daemon's
-				// loopback listener directly.
-				host = constants.LocalhostIP
-			}
-			targetURL = fmt.Sprintf("http://%s:%d", host, port)
-			res.Notes = append(res.Notes, fmt.Sprintf("Fallback proxy hosted by the srv daemon on %s (starts when the daemon picks up this metadata)", targetURL))
+		if err := validateFallbackURL(spec.FallbackURL); err != nil {
+			return nil, err
+		}
+		if err := ensureTraefikSupportsFailover(); err != nil {
+			return nil, err
 		}
 		res.FallbackEnabled = true
+		res.Notes = append(res.Notes, "Failover is handled natively by Traefik: 5xx and connection errors re-proxy to "+spec.FallbackURL)
 	}
 	res.TargetURL = targetURL
 
 	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{
-		Name:      name,
-		Domain:    spec.Domain,
-		TargetURL: targetURL,
-		Container: containerName,
-		Wildcard:  spec.Wildcard,
+		Name:         name,
+		Domain:       spec.Domain,
+		TargetURL:    targetURL,
+		Container:    containerName,
+		Wildcard:     spec.Wildcard,
+		FallbackURL:  spec.FallbackURL,
+		FallbackDial: spec.FallbackTimeout,
 	}); err != nil {
 		return nil, err
 	}
 
-	// Preserve any existing routes (and fallback record) when overwriting via Force.
+	// Preserve any existing routes when overwriting via Force.
 	var existingRoutes []site.Route
 	if pmeta, _ := Read(name); pmeta != nil {
 		existingRoutes = pmeta.Routes
 	}
-	// The primary upstream port is recorded so the daemon's embedded fallback
-	// proxy can dial it; a container-primary proxy has no numeric port here.
+	// Port records the primary upstream so migrations and doctor checks can
+	// reason about the proxy without Docker; a container primary has none.
 	primaryPort, _ := strconv.Atoi(spec.Port)
 	if err := Write(Metadata{
 		Name:            name,
@@ -173,7 +142,6 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		Routes:          existingRoutes,
 		FallbackURL:     spec.FallbackURL,
 		FallbackTimeout: spec.FallbackTimeout,
-		FallbackPort:    fallbackPort,
 	}); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("write proxy metadata: %v", err))
 	} else if len(existingRoutes) > 0 {
@@ -214,8 +182,8 @@ func RemoveProxy(cfg *config.Config, name string) (warnings []string, err error)
 		}
 	}
 	if hasFallback {
-		if fbErr := RemoveFallbackSidecar(cfg, name); fbErr != nil {
-			warnings = append(warnings, fmt.Sprintf("remove fallback sidecar: %v", fbErr))
+		if fbErr := RemoveLegacySidecar(cfg, name); fbErr != nil {
+			warnings = append(warnings, fmt.Sprintf("remove retired fallback sidecar: %v", fbErr))
 		}
 	}
 
@@ -316,6 +284,21 @@ func resolveTarget(cfg *config.Config, isContainer bool, containerName, containe
 	if err := docker.ConnectContainerToNetwork(containerName, cfg.NetworkName, ""); err != nil {
 		return "", "", fmt.Errorf("connect container to network: %w", err)
 	}
+	if platform.IsLinux() {
+		// Traefik runs with network_mode: host on Linux: its resolver is the
+		// host's, which cannot resolve container names, and container bridge
+		// IPs are unreachable from the host namespace. Route through the
+		// container's published port on the loopback instead — the only path
+		// that works (and the same one host-networked Traefik needs for a
+		// native failover primary).
+		hostPort, pubErr := docker.PublishedHostPort(containerName, containerPort)
+		if pubErr != nil {
+			return "", "", fmt.Errorf("container %s: %w — publish the port to the host (docker run -p %s:%s ...) so Traefik can reach it", containerName, pubErr, containerPort, containerPort)
+		}
+		return fmt.Sprintf("http://%s:%s", constants.LocalhostAlias, hostPort), "", nil
+	}
+	// Mac/Windows: Traefik joins the srv network (bridge mode), so it resolves
+	// the container by its Docker DNS name directly.
 	return fmt.Sprintf("http://%s:%s", containerName, containerPort), "", nil
 }
 

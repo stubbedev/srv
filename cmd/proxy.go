@@ -115,7 +115,7 @@ func init() {
 // =============================================================================
 
 // runProxyAdd delegates entirely to internal/proxy.Add: validation, cert,
-// DNS, container networking, the --fallback sidecar, config, and metadata are
+// DNS, container networking, the --fallback failover, config, and metadata are
 // all shared with the MCP add_proxy tool, so the CLI is a thin flag mapper.
 func runProxyAdd(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
@@ -156,7 +156,7 @@ func runProxyRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// The shared removal (config, cert, DNS, routes, metadata, and the
-	// --fallback sidecar when one exists) lives in internal/proxy so the CLI
+	// --fallback failover when one exists) lives in internal/proxy so the CLI
 	// and the MCP remove_proxy tool stay in lockstep.
 	warnings, err := proxy.RemoveProxy(cfg, name)
 	if err != nil {

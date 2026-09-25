@@ -106,13 +106,15 @@
     },
     "fallback_url": {
       "type": "string",
-      "description": "Fallback (srv proxy add --fallback): the remote URL 5xx responses\nre-proxy to, and the connect timeout to the primary upstream. Empty\nwhen the proxy has no fallback. FallbackPort is set only when the\nfallback is hosted by the srv daemon (localhost-primary proxies): the\ndaemon serves the failover proxy on that 127.0.0.1 port, and the port\nis persisted so the Traefik route survives daemon restarts. A fallback\nfor a container primary still uses a container sidecar and has no port."
+      "description": "Fallback (srv proxy add --fallback): the remote URL 5xx responses\nre-proxy to. Empty when the proxy has no fallback. The failover itself\nis Traefik's native `failover` service, rendered into proxy-\u003cname\u003e.yml."
     },
     "fallback_timeout": {
-      "type": "string"
+      "type": "string",
+      "description": "FallbackTimeout is the connect timeout to the primary upstream before\nTraefik fails over (--fallback-timeout)."
     },
     "fallback_port": {
-      "type": "integer"
+      "type": "integer",
+      "description": "FallbackPort is retired: it recorded the loopback port of the daemon-\nhosted failover listener, which the native Traefik failover replaced.\nOld metadata files still carry it; it is read only to detect proxies\nthat need migration, and cleared when that migration re-renders them."
     }
   },
   "additionalProperties": false,

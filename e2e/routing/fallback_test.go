@@ -1,12 +1,10 @@
 //go:build e2e
 
-// End-to-end coverage for the daemon-hosted fallback proxy, through real
-// Traefik: `srv proxy add --fallback` writes a route at the persisted
-// loopback listener, the failover proxy (started here the way the daemon's
-// reconcile loop starts it) fronts a localhost primary, and a request that
-// travels Traefik -> listener -> primary returns the primary's body until
-// the primary dies — then the same request returns the fallback's, with no
-// Traefik reload in between.
+// End-to-end coverage for proxy fallback, through real Traefik: `srv proxy
+// add --fallback` renders a native Traefik failover service, and a request
+// that travels Traefik -> primary returns the primary's body until the
+// primary dies — then the same request returns the fallback's, with no
+// Traefik reload and no extra proxy or container in between.
 package routing_test
 
 import (
@@ -19,7 +17,6 @@ import (
 	"time"
 
 	"github.com/stubbedev/srv/e2e/harness"
-	"github.com/stubbedev/srv/internal/fallbackd"
 	"github.com/stubbedev/srv/internal/proxy"
 )
 
@@ -52,33 +49,20 @@ func TestFallbackFailoverThroughTraefik(t *testing.T) {
 	if err != nil || meta == nil {
 		t.Fatalf("proxy metadata: %v", err)
 	}
-	if meta.FallbackPort <= 0 {
-		t.Fatalf("metadata FallbackPort = %d, want an allocated port", meta.FallbackPort)
+	if meta.FallbackURL == "" {
+		t.Fatalf("metadata FallbackURL is empty, want the fallback recorded")
+	}
+	if meta.FallbackPort != 0 {
+		t.Errorf("metadata FallbackPort = %d, want 0 — the retired daemon-hosted listener must not come back", meta.FallbackPort)
 	}
 
-	// Start the failover listener exactly the way the daemon's reconcile
-	// loop does (same package, same metadata fields). The daemon is not
-	// running in this test, so the suite plays that role directly.
-	mgr := fallbackd.NewManager()
-	t.Cleanup(mgr.Shutdown)
-	addr, err := mgr.Ensure(fallbackd.Spec{
-		Name:        meta.Name,
-		PrimaryURL:  fmt.Sprintf("http://127.0.0.1:%d", meta.Port),
-		FallbackURL: meta.FallbackURL,
-		Timeout:     2 * time.Second,
-		ListenPort:  meta.FallbackPort,
-	})
-	if err != nil {
-		t.Fatalf("start fallback listener: %v", err)
-	}
-	t.Logf("failover listener on %s", addr)
-
-	// Through Traefik, via the listener, to the live primary.
+	// Through Traefik to the live primary.
 	harness.WaitForHTTPS(t, "app.test", "/", 30*time.Second, func(status int, body string) bool {
 		return status == http.StatusOK && body == "primary body"
 	})
 
-	// Kill the primary: same route, same listener, now the fallback answers.
+	// Kill the primary: the same route now serves the fallback's body —
+	// Traefik sees the dial failure as a 502 and fails over per request.
 	primary.Close()
 	harness.WaitForHTTPS(t, "app.test", "/", 30*time.Second, func(status int, body string) bool {
 		return status == http.StatusOK && body == "fallback body"

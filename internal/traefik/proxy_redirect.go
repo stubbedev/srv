@@ -8,6 +8,7 @@ package traefik
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
@@ -21,10 +22,23 @@ type ProxyRoute struct {
 	TargetURL string // upstream URL (http://host:port or http://container:port)
 	Container string // optional container name, recorded in the header comment
 	Wildcard  bool   // match apex + one-level subdomains
+	// FallbackURL turns the service into Traefik's native failover (v3.7+):
+	// 5xx responses and dial failures re-proxy to this URL.
+	FallbackURL string
+	// FallbackDial bounds the connect phase to the primary before a dial
+	// failure fails over. Empty means the Traefik default; srv passes the
+	// user's --fallback-timeout through.
+	FallbackDial string
 }
 
 // WriteProxyConfig renders proxy-<name>.yml. The config terminates TLS with a
-// file-provider (mkcert) certificate and forwards to TargetURL.
+// file-provider (mkcert) certificate and forwards to TargetURL. With a
+// FallbackURL the service becomes a failover pair: primary + fallback
+// load balancers under a failover wrapper with errors.status 500-599, so a
+// 5xx response from the primary (or its connection failing, which Traefik
+// surfaces as 502) transparently re-serves from the fallback. An https
+// fallback gets an insecureSkipVerify transport — the fallback host is
+// operator-configured and its cert may not match a dev chain.
 func WriteProxyConfig(cfg *config.Config, p ProxyRoute) error {
 	key := constants.ProxyConfigPrefix + p.Name
 	router := dynRouter{
@@ -33,12 +47,58 @@ func WriteProxyConfig(cfg *config.Config, p ProxyRoute) error {
 		Service:     key,
 		TLS:         localTLS(),
 	}
+
+	services := map[string]dynService{
+		key: {LoadBalancer: &dynLoadBalancer{Servers: []dynServer{{URL: p.TargetURL}}}},
+	}
+	var transports map[string]dynServersTransport
+
+	if p.FallbackURL != "" {
+		dial := p.FallbackDial
+		if dial == "" {
+			dial = constants.FallbackTimeoutDefault
+		}
+		primaryTransport := key + "-transport"
+		transports = map[string]dynServersTransport{
+			primaryTransport: {
+				ForwardingTimeouts: &dynForwardingTimeouts{DialTimeout: dial},
+			},
+		}
+
+		primary, fallback := key+"-primary", key+"-fallback"
+		services = map[string]dynService{
+			key: {
+				Failover: &dynFailover{
+					Service:  primary,
+					Fallback: fallback,
+					Errors:   &dynFailoverErrors{Status: []string{"500-599"}},
+				},
+			},
+			primary: {
+				LoadBalancer: &dynLoadBalancer{
+					Servers:          []dynServer{{URL: p.TargetURL}},
+					ServersTransport: primaryTransport,
+				},
+			},
+			fallback: {LoadBalancer: &dynLoadBalancer{Servers: []dynServer{{URL: p.FallbackURL}}}},
+		}
+		if strings.HasPrefix(p.FallbackURL, "https://") {
+			fallbackTransport := key + "-fb-transport"
+			transports[fallbackTransport] = dynServersTransport{InsecureSkipVerify: true}
+			services[fallback] = dynService{
+				LoadBalancer: &dynLoadBalancer{
+					Servers:          []dynServer{{URL: p.FallbackURL}},
+					ServersTransport: fallbackTransport,
+				},
+			}
+		}
+	}
+
 	conf := DynConfig{
 		HTTP: dynHTTP{
-			Routers: map[string]dynRouter{key: router},
-			Services: map[string]dynService{
-				key: {LoadBalancer: dynLoadBalancer{Servers: []dynServer{{URL: p.TargetURL}}}},
-			},
+			Routers:           map[string]dynRouter{key: router},
+			Services:          services,
+			ServersTransports: transports,
 		},
 	}
 
@@ -113,7 +173,7 @@ func WriteRedirectConfig(cfg *config.Config, r HTTPRedirect) error {
 			// misconfigured middleware fails loudly instead of silently
 			// forwarding traffic somewhere.
 			Services: map[string]dynService{
-				svcKey: {LoadBalancer: dynLoadBalancer{Servers: []dynServer{{URL: "http://127.0.0.1:1"}}}},
+				svcKey: {LoadBalancer: &dynLoadBalancer{Servers: []dynServer{{URL: "http://127.0.0.1:1"}}}},
 			},
 			Middlewares: map[string]dynMiddleware{mwKey: mw},
 		},

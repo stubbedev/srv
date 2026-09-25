@@ -39,7 +39,7 @@ parallel packages would race. Within the package, tests run sequentially.
 |---|---|
 | `routing/proxy` | `srv proxy add` → Traefik file-provider hot-loads the router + mkcert cert → a request to the websecure entrypoint (matched by Host rule) is forwarded to a localhost upstream and returns its body. |
 | `routing/site` | `srv add` on a static project → same chain, site leg. |
-| `routing/fallback` | `srv proxy add --fallback` → Traefik routes through the daemon-hosted failover listener to the primary; when the primary dies, the same request returns the fallback's body with no Traefik reload. |
+ `routing/fallback` | `srv proxy add --fallback` → Traefik's native failover service fronts the primary; when the primary dies (dial failure or 5xx), the same request returns the fallback's body with no Traefik reload and no extra proxy or container. |
 | `dns/` | `srv dnsd` (the embedded server the daemon hosts) answers registered domains from the generated zone files — exact, wildcard at every depth — and live-reloads on a zone-file rewrite, no signal or restart. Container-free, safe to run in parallel with anything. |
 
 ## Harness

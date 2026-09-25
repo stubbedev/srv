@@ -77,14 +77,14 @@ const (
 // Synthetic cert-site naming.
 const (
 	// ProxyCertSitePrefix prefixes the synthetic site name a proxy's local
-	// cert and fallback sidecar are stored under.
+	// cert is stored under.
 	ProxyCertSitePrefix = "_proxy-"
 )
 
 // Proxy defaults.
 const (
 	// FallbackTimeoutDefault is the connect timeout to the primary upstream
-	// before the fallback sidecar takes over.
+	// before the native Traefik failover takes over.
 	FallbackTimeoutDefault = "2s"
 )
 

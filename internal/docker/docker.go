@@ -61,8 +61,11 @@ const (
 
 // Image constants for Docker images used by the application.
 const (
-	// ImageTraefik is the Traefik reverse proxy image used for routing.
-	ImageTraefik = "traefik:latest"
+	// ImageTraefik is the Traefik reverse proxy image used for routing. Pinned to
+	// the v3.7 minor: srv renders Traefik's native failover.errors service (added
+	// in v3.7) for --fallback proxies, and a floating latest tag would silently
+	// route through an image too old for it.
+	ImageTraefik = "traefik:v3.7"
 )
 
 // Container name constants.
@@ -240,11 +243,11 @@ func ComposeUpBuild(dir string) error {
 // ComposeUpForceRecreate runs docker compose up -d --force-recreate.
 //
 // Plain `up -d` only recreates a container when the compose spec changes. A
-// stack whose config lives in a bind-mounted file (e.g. the fallback sidecar's
-// nginx.conf) therefore keeps running its old config after the file is
-// regenerated — the container must be recreated to reload it. --force-recreate
-// is scoped to this dir's compose file, so it is safe under the shared "srv"
-// project (unlike --remove-orphans; see ComposeUp).
+// stack whose config lives in a bind-mounted file therefore keeps running its
+// old config after the file is regenerated — the container must be recreated
+// to reload it. --force-recreate is scoped to this dir's compose file, so it
+// is safe under the shared "srv" project (unlike --remove-orphans; see
+// ComposeUp).
 func ComposeUpForceRecreate(dir string) error {
 	return Compose(dir, "up", "-d", "--force-recreate")
 }
@@ -736,6 +739,35 @@ func ContainerExists(name string) bool {
 
 	_, err = cli.ContainerInspect(ctx, name)
 	return err == nil
+}
+
+// PublishedHostPort returns the host port a container's TCP port is published
+// to (the right half of `-p 3000:8080`). Used on Linux, where Traefik is
+// host-networked and can only reach containers through published ports.
+func PublishedHostPort(containerName, containerPort string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+
+	cli, err := newClient()
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	info, err := cli.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return "", fmt.Errorf("inspect container: %w", err)
+	}
+	if info.NetworkSettings == nil {
+		return "", errors.New("port is not published to the host")
+	}
+	bindings := info.NetworkSettings.Ports[containerPort+"/tcp"]
+	for _, b := range bindings {
+		if b.HostPort != "" {
+			return b.HostPort, nil
+		}
+	}
+	return "", errors.New("port is not published to the host")
 }
 
 // GetContainerImageVersion returns the image tag for a running container.

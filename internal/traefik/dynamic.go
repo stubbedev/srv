@@ -21,17 +21,44 @@ type dynLoadBalancer struct {
 	ServersTransport string      `yaml:"serversTransport,omitempty"` // name of a serversTransports entry
 }
 
-// dynServersTransport configures how Traefik dials an HTTPS upstream. Only the
-// insecureSkipVerify knob is modelled — it lets an upstream whose certificate
-// can't be verified (self-signed, or a cert whose SAN doesn't match its IP) be
-// reached. Referenced by name from dynLoadBalancer.ServersTransport.
-type dynServersTransport struct {
-	InsecureSkipVerify bool `yaml:"insecureSkipVerify"`
+// dynFailover is Traefik's failover service (v3.7+): requests go to Service,
+// and Errors.Status responses (or dial failures, which surface as 502) are
+// transparently re-served by Fallback. Deliberately passive — no healthCheck
+// block — so behaviour matches a per-request try, exactly like the retired
+// nginx/daemon failover hops.
+type dynFailover struct {
+	Service  string             `yaml:"service"`
+	Fallback string             `yaml:"fallback"`
+	Errors   *dynFailoverErrors `yaml:"errors"`
 }
 
-// dynService wraps a load balancer under the Traefik `services` map.
+// dynFailoverErrors selects which primary responses trigger the fallback.
+type dynFailoverErrors struct {
+	Status []string `yaml:"status"`
+}
+
+// dynServersTransport configures how Traefik dials an upstream. insecureSkipVerify
+// lets an upstream whose certificate can't be verified (self-signed, or a cert
+// whose SAN doesn't match its IP) be reached; forwardingTimeouts bounds the
+// dial phase so a dead primary fails over after a bounded wait instead of the
+// 30s default. Referenced by name from dynLoadBalancer.ServersTransport.
+type dynServersTransport struct {
+	InsecureSkipVerify bool                   `yaml:"insecureSkipVerify,omitempty"`
+	ForwardingTimeouts *dynForwardingTimeouts `yaml:"forwardingTimeouts,omitempty"`
+}
+
+// dynForwardingTimeouts is the dial/first-byte timeout block of a serversTransport.
+type dynForwardingTimeouts struct {
+	DialTimeout string `yaml:"dialTimeout,omitempty"`
+}
+
+// dynService wraps either a load balancer or a failover under the Traefik
+// `services` map. Exactly one is set: the pointer + omitempty pairing keeps a
+// failover service from rendering a stray empty loadBalancer block, which
+// Traefik rejects.
 type dynService struct {
-	LoadBalancer dynLoadBalancer `yaml:"loadBalancer"`
+	LoadBalancer *dynLoadBalancer `yaml:"loadBalancer,omitempty"`
+	Failover     *dynFailover     `yaml:"failover,omitempty"`
 }
 
 // dynTLS is a router's TLS block. An empty value marshals to `tls: {}` (file

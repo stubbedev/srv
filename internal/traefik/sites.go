@@ -91,7 +91,7 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 			Routers: routers,
 			Services: map[string]dynService{
 				serviceName: {
-					LoadBalancer: dynLoadBalancer{
+					LoadBalancer: &dynLoadBalancer{
 						Servers: []dynServer{{URL: serviceURL}},
 					},
 				},

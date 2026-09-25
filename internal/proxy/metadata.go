@@ -41,15 +41,17 @@ type Metadata struct {
 	// Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`.
 	Routes []site.Route `yaml:"routes,omitempty"`
 	// Fallback (srv proxy add --fallback): the remote URL 5xx responses
-	// re-proxy to, and the connect timeout to the primary upstream. Empty
-	// when the proxy has no fallback. FallbackPort is set only when the
-	// fallback is hosted by the srv daemon (localhost-primary proxies): the
-	// daemon serves the failover proxy on that 127.0.0.1 port, and the port
-	// is persisted so the Traefik route survives daemon restarts. A fallback
-	// for a container primary still uses a container sidecar and has no port.
-	FallbackURL     string `yaml:"fallback_url,omitempty"`
+	// re-proxy to. Empty when the proxy has no fallback. The failover itself
+	// is Traefik's native `failover` service, rendered into proxy-<name>.yml.
+	FallbackURL string `yaml:"fallback_url,omitempty"`
+	// FallbackTimeout is the connect timeout to the primary upstream before
+	// Traefik fails over (--fallback-timeout).
 	FallbackTimeout string `yaml:"fallback_timeout,omitempty"`
-	FallbackPort    int    `yaml:"fallback_port,omitempty"`
+	// FallbackPort is retired: it recorded the loopback port of the daemon-
+	// hosted failover listener, which the native Traefik failover replaced.
+	// Old metadata files still carry it; it is read only to detect proxies
+	// that need migration, and cleared when that migration re-renders them.
+	FallbackPort int `yaml:"fallback_port,omitempty"`
 }
 
 const currentSchemaVersion = 1

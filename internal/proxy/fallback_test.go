@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
 )
@@ -17,247 +19,195 @@ func TestFallbackDir(t *testing.T) {
 	}
 }
 
-func TestFallbackContainerName(t *testing.T) {
-	if got := FallbackContainerName("blog"); got != "srv-proxy-blog-fallback" {
-		t.Errorf("got %q", got)
+func TestValidateFallbackURL(t *testing.T) {
+	valid := []string{
+		"https://prod.example.com",
+		"http://prod.example.com:8080/path",
+		"https://1.2.3.4",
+	}
+	for _, in := range valid {
+		if err := validateFallbackURL(in); err != nil {
+			t.Errorf("validateFallbackURL(%q) = %v, want nil", in, err)
+		}
+	}
+	invalid := []string{
+		"",
+		"prod.example.com",       // no scheme
+		"ftp://prod.example.com", // wrong scheme
+		"https://",               // no host
+		"://nope",                // unparseable
+	}
+	for _, in := range invalid {
+		if err := validateFallbackURL(in); err == nil {
+			t.Errorf("validateFallbackURL(%q) = nil, want an error", in)
+		}
 	}
 }
 
-func TestFindFreeLoopbackPort(t *testing.T) {
-	port, err := findFreeLoopbackPort()
+func TestParseSemverMinor(t *testing.T) {
+	cases := []struct {
+		in           string
+		major, minor int
+		ok           bool
+	}{
+		{"3.7.9", 3, 7, true},
+		{"v3.7.9", 3, 7, true},
+		{"traefik:v3.7", 3, 7, true},
+		{"2.11.0", 2, 11, true},
+		{"latest", 0, 0, false},
+		{"", 0, 0, false},
+		{"3", 0, 0, false},
+		{"v3.x.9", 0, 0, false},
+	}
+	for _, c := range cases {
+		major, minor, ok := parseSemverMinor(c.in)
+		if ok != c.ok || major != c.major || minor != c.minor {
+			t.Errorf("parseSemverMinor(%q) = %d.%d ok=%v, want %d.%d ok=%v", c.in, major, minor, ok, c.major, c.minor, c.ok)
+		}
+	}
+}
+
+// setupLegacyProxy writes proxy metadata in the shape pre-native-failover srv
+// produced and returns the SRV_ROOT config it lives under.
+func setupLegacyProxy(t *testing.T, meta Metadata) *config.Config {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("SRV_ROOT", tmp)
+	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if port <= 0 || port > 65535 {
-		t.Errorf("port out of range: %d", port)
+	t.Cleanup(func() { _ = os.Unsetenv("SRV_ROOT") })
+	if err := Write(meta); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestMigrateLegacyFallbackDaemonListener(t *testing.T) {
+	cfg := setupLegacyProxy(t, Metadata{
+		Name:         "app",
+		Domains:      []string{"app.test"},
+		IsLocal:      true,
+		Port:         3000,
+		FallbackURL:  "https://prod.example.com",
+		FallbackPort: 41234,
+	})
+	if err := os.MkdirAll(cfg.TraefikConfDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if warns := MigrateLegacyFallback(cfg, mustMeta(t, "app")); len(warns) != 0 {
+		t.Fatalf("unexpected warnings: %v", warns)
+	}
+
+	route := filepath.Join(cfg.TraefikConfDir(), "proxy-app.yml")
+	data, err := os.ReadFile(route)
+	if err != nil {
+		t.Fatalf("read rendered route: %v", err)
+	}
+	for _, want := range []string{
+		"failover:", "service: proxy-app-primary", "fallback: proxy-app-fallback",
+		"500-599", "dialTimeout: 2s", "url: http://localhost:3000",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("rendered route missing %q:\n%s", want, data)
+		}
+	}
+	// The failover wrapper itself must carry no loadBalancer block: Traefik
+	// rejects a service with two types. Assert on the parsed document rather
+	// than string offsets, since the router shares the service's name.
+	var doc struct {
+		HTTP struct {
+			Services map[string]map[string]any `yaml:"services"`
+		} `yaml:"http"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse rendered route: %v", err)
+	}
+	wrapper, ok := doc.HTTP.Services["proxy-app"]
+	if !ok {
+		t.Fatalf("no proxy-app service in:\n%s", data)
+	}
+	if _, has := wrapper["failover"]; !has {
+		t.Errorf("proxy-app is not a failover service:\n%s", data)
+	}
+	if _, has := wrapper["loadBalancer"]; has {
+		t.Errorf("failover wrapper must not carry its own loadBalancer:\n%s", data)
+	}
+
+	meta := mustMeta(t, "app")
+	if meta.FallbackPort != 0 {
+		t.Errorf("FallbackPort = %d, want cleared", meta.FallbackPort)
+	}
+	if meta.FallbackURL != "https://prod.example.com" {
+		t.Errorf("FallbackURL = %q, want preserved", meta.FallbackURL)
 	}
 }
 
-func TestRenderFallbackComposeHostNetwork(t *testing.T) {
-	spec := FallbackSpec{
-		Name:        "blog",
-		HostNetwork: true,
-		PrimaryHost: "127.0.0.1",
-		PrimaryPort: "8080",
-	}
-	out := renderFallbackCompose(spec, "/etc/nginx", "tnet")
-	if !strings.Contains(out, "network_mode: host") {
-		t.Error("missing host networking")
-	}
-	if !strings.Contains(out, "/etc/nginx/nginx.conf") {
-		t.Error("missing nginx conf bind mount")
-	}
-}
-
-func TestRenderFallbackComposeBridge(t *testing.T) {
-	spec := FallbackSpec{Name: "blog", PrimaryHost: "redis", PrimaryPort: "6379"}
-	out := renderFallbackCompose(spec, "/etc/nginx", "tnet")
-	if !strings.Contains(out, "tnet") {
-		t.Error("missing network name")
-	}
-	if strings.Contains(out, "network_mode: host") {
-		t.Error("bridge should not use host networking")
-	}
-}
-
-func TestRemoveFallbackSidecarMissing(t *testing.T) {
-	cfg := addEnv(t)
-	if err := RemoveFallbackSidecar(cfg, "ghost"); err != nil {
-		t.Errorf("missing sidecar should be no-op: %v", err)
-	}
-}
-
-func TestRemoveFallbackSidecarExisting(t *testing.T) {
-	cfg := addEnv(t)
-	dir := FallbackDir(cfg, "blog")
+func TestMigrateLegacyFallbackSidecar(t *testing.T) {
+	cfg := setupLegacyProxy(t, Metadata{
+		Name:         "web",
+		Domains:      []string{"web.test"},
+		IsLocal:      true,
+		FallbackURL:  "https://prod.example.com",
+		FallbackPort: 0,
+	})
+	// The retired container-primary sidecar hid the real primary in its
+	// nginx.conf proxy_pass.
+	dir := FallbackDir(cfg, "web")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "x"), []byte("y"), 0o644); err != nil {
+	nginxConf := "location / {\n    proxy_pass http://myapp:3000;\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(nginxConf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := RemoveFallbackSidecar(cfg, "blog"); err != nil {
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.MkdirAll(cfg.TraefikConfDir(), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	// Hermetic teardown: the migration's sidecar removal shells out to
+	// `docker compose down`; the swap keeps the unit test off the engine.
+	restoreCompose := docker.SwapComposeExec(func(string, bool, ...string) error { return nil })
+	t.Cleanup(restoreCompose)
+
+	if warns := MigrateLegacyFallback(cfg, mustMeta(t, "web")); len(warns) != 0 {
+		t.Fatalf("unexpected warnings: %v", warns)
+	}
+
+	data, err := os.ReadFile(filepath.Join(cfg.TraefikConfDir(), "proxy-web.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "url: http://myapp:3000") {
+		t.Errorf("primary not recovered from sidecar proxy_pass:\n%s", data)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("dir should be gone: %v", err)
+		t.Errorf("sidecar dir still exists after migration: %v", err)
 	}
 }
 
-func TestEnsureFallbackSidecarHostNetwork(t *testing.T) {
-	cfg := addEnv(t)
-	if err := os.MkdirAll(cfg.SitesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, err := EnsureFallbackSidecar(cfg, FallbackSpec{
-		Name:        "blog",
-		FallbackURL: "https://prod.example.com",
-		HostNetwork: true,
-		PrimaryHost: "127.0.0.1",
-		PrimaryPort: "8080",
+func TestMigrateLegacyFallbackNoop(t *testing.T) {
+	cfg := setupLegacyProxy(t, Metadata{
+		Name:    "plain",
+		Domains: []string{"plain.test"},
+		IsLocal: true,
+		Port:    8080,
 	})
-	if err != nil {
-		t.Fatal(err)
+	if warns := MigrateLegacyFallback(cfg, mustMeta(t, "plain")); len(warns) != 0 {
+		t.Fatalf("no legacy hop, got warnings: %v", warns)
 	}
-	if !strings.HasPrefix(got, "http://127.0.0.1:") {
-		t.Errorf("expected loopback URL, got %q", got)
-	}
-}
-
-func TestEnsureFallbackSidecarBridge(t *testing.T) {
-	cfg := addEnv(t)
-	if err := os.MkdirAll(cfg.SitesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, err := EnsureFallbackSidecar(cfg, FallbackSpec{
-		Name:        "blog",
-		FallbackURL: "https://prod.example.com",
-		PrimaryHost: "redis",
-		PrimaryPort: "6379",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, FallbackContainerName("blog")) {
-		t.Errorf("expected container name in URL: %q", got)
+	if _, err := os.Stat(filepath.Join(cfg.TraefikConfDir(), "proxy-plain.yml")); !os.IsNotExist(err) {
+		t.Errorf("route rendered for a proxy without a fallback: %v", err)
 	}
 }
 
-func TestRenderFallbackNginxHostNetworkLoopback(t *testing.T) {
-	out, err := renderFallbackNginx(FallbackSpec{
-		Name:        "blog",
-		FallbackURL: "https://prod.example.com",
-		HostNetwork: true,
-		ListenPort:  5555,
-		PrimaryHost: "127.0.0.1",
-		PrimaryPort: "8080",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "listen 127.0.0.1:5555;") {
-		t.Errorf("expected loopback listen: %q", out[:200])
-	}
-}
-
-func TestRenderFallbackNginxDefaultTimeout(t *testing.T) {
-	out, err := renderFallbackNginx(FallbackSpec{
-		Name:        "blog",
-		FallbackURL: "https://prod.example.com",
-		PrimaryHost: "redis",
-		PrimaryPort: "6379",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "proxy_connect_timeout 2s;") {
-		t.Error("default timeout should be 2s")
-	}
-}
-
-func TestRenderFallbackNginx(t *testing.T) {
-	conf, err := renderFallbackNginx(FallbackSpec{
-		Name:            "myapp",
-		PrimaryHost:     "host.docker.internal",
-		PrimaryPort:     "3001",
-		FallbackURL:     "https://myapp.com",
-		FallbackTimeout: "3s",
-	})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	mustContain := []string{
-		"proxy_pass http://host.docker.internal:3001;",
-		"error_page 502 503 504 = @fallback;",
-		"location @fallback {",
-		"proxy_pass https://$fb_host:443$request_uri;",
-		`set $fb_host "myapp.com";`,
-		"proxy_connect_timeout 3s;",
-		"proxy_ssl_server_name on;",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(conf, want) {
-			t.Errorf("missing %q in:\n%s", want, conf)
-		}
-	}
-}
-
-func TestRenderFallbackNginx_BadURL(t *testing.T) {
-	for _, u := range []string{"ftp://x", "notaurl"} {
-		if _, err := renderFallbackNginx(FallbackSpec{
-			Name:        "x",
-			PrimaryHost: "host.docker.internal",
-			PrimaryPort: "80",
-			FallbackURL: u,
-		}); err == nil {
-			t.Errorf("expected error for %q", u)
-		}
-	}
-}
-
-// TestAddFallbackSidecarLifecycle pins the localhost-primary fallback
-// contract: Add with a FallbackURL records the fallback and a persisted
-// daemon-hosted listener port in metadata (no sidecar container — the daemon
-// hosts that proxy now), and RemoveProxy drops the metadata (the daemon's
-// watcher then retires the listener).
-func TestAddFallbackSidecarLifecycle(t *testing.T) {
-	cfg := addEnv(t)
-	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-
-	res, err := Add(cfg, AddSpec{Domain: "app.test", Port: "8080", FallbackURL: "https://prod.example.com", FallbackTimeout: "3s"})
-	if err != nil {
-		t.Fatalf("Add() = %v", err)
-	}
-	if !res.FallbackEnabled {
-		t.Error("FallbackEnabled = false, want true")
-	}
-	if !strings.Contains(res.TargetURL, "127.0.0.1:") && !strings.Contains(res.TargetURL, "host.docker.internal:") {
-		t.Errorf("target should be the daemon-hosted listener, got %q", res.TargetURL)
-	}
-	meta, err := Read("app-test")
+func mustMeta(t *testing.T, name string) *Metadata {
+	t.Helper()
+	meta, err := Read(name)
 	if err != nil || meta == nil {
-		t.Fatalf("Read metadata: %v", err)
+		t.Fatalf("read %s metadata: %v (%v)", name, meta, err)
 	}
-	if meta.FallbackURL != "https://prod.example.com" || meta.FallbackTimeout != "3s" {
-		t.Errorf("fallback not recorded in metadata: %+v", meta)
-	}
-	if meta.FallbackPort <= 0 {
-		t.Errorf("FallbackPort = %d, want an allocated loopback port", meta.FallbackPort)
-	}
-	if meta.Port != 8080 {
-		t.Errorf("primary Port = %d, want 8080", meta.Port)
-	}
-	if _, err := os.Stat(FallbackDir(cfg, "app-test")); !os.IsNotExist(err) {
-		t.Errorf("daemon-hosted fallback must not create a sidecar dir: %v", err)
-	}
-
-	if _, err := RemoveProxy(cfg, "app-test"); err != nil {
-		t.Fatalf("RemoveProxy() = %v", err)
-	}
-	if meta2, _ := Read("app-test"); meta2 != nil {
-		t.Error("metadata should be gone after RemoveProxy")
-	}
-}
-
-// Legacy proxies (pre-metadata-fallback) are torn down by directory presence.
-func TestRemoveProxyTearsDownLegacySidecarDir(t *testing.T) {
-	cfg := addEnv(t)
-	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-
-	if _, err := Add(cfg, AddSpec{Domain: "old.test", Port: "9000"}); err != nil {
-		t.Fatalf("Add() = %v", err)
-	}
-	dir := FallbackDir(cfg, "old-test")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services: {}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RemoveProxy(cfg, "old-test"); err != nil {
-		t.Fatalf("RemoveProxy() = %v", err)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("legacy sidecar dir should be gone: %v", err)
-	}
+	return meta
 }

@@ -123,7 +123,7 @@ func WriteRoutesConfig(cfg *config.Config, set SiteRouteSet) error {
 			transports[transportName] = dynServersTransport{InsecureSkipVerify: true}
 			lb.ServersTransport = transportName
 		}
-		services[serviceName] = dynService{LoadBalancer: lb}
+		services[serviceName] = dynService{LoadBalancer: &lb}
 	}
 
 	http := dynHTTP{
