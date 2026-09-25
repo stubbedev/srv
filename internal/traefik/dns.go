@@ -530,40 +530,65 @@ var dnsConfigMu sync.Mutex
 // Registering the same bare domain with a different wildcard setting upgrades
 // or downgrades the existing entry.
 func RegisterLocalDomain(domain string, wildcard bool) error {
+	return RegisterLocalDomains([]string{domain}, wildcard)
+}
+
+// RegisterLocalDomains is the batch form of RegisterLocalDomain: the registry
+// is loaded and saved once and dnsmasq is regenerated once, no matter how many
+// domains a site carries. A multi-domain site add used to run the whole
+// regen+flush pipeline once per domain — D container restarts where one
+// sufficed when any of them was a wildcard.
+func RegisterLocalDomains(domains []string, wildcard bool) error {
 	dnsConfigMu.Lock()
 	defer dnsConfigMu.Unlock()
+	return registerLocalDomainsLocked(domains, wildcard)
+}
 
-	domains, err := LoadLocalDomains()
+func registerLocalDomainsLocked(domains []string, wildcard bool) error {
+	entries := make([]string, 0, len(domains))
+	bare := make(map[string]bool, len(domains))
+	for _, d := range domains {
+		entry := d
+		if wildcard {
+			entry = WildcardPrefix + d
+		}
+		entries = append(entries, entry)
+		bare[d] = true
+	}
+
+	existing, err := LoadLocalDomains()
 	if err != nil {
 		return err
 	}
 
-	entry := domain
-	if wildcard {
-		entry = WildcardPrefix + domain
-	}
-
-	// Check if already registered with the same wildcard mode.
-	if slices.Contains(domains, entry) {
-		return nil // Already registered
-	}
-
-	// Drop any conflicting alternate-form entry for the same bare domain
-	// (registering wildcard supersedes apex-only and vice versa).
-	filtered := make([]string, 0, len(domains)+1)
-	for _, d := range domains {
-		if BareDomain(d) == domain {
+	// Drop conflicting alternate-form entries for every bare domain being
+	// registered (wildcard supersedes apex-only and vice versa).
+	filtered := make([]string, 0, len(existing)+len(entries))
+	for _, d := range existing {
+		if bare[BareDomain(d)] {
 			continue
 		}
 		filtered = append(filtered, d)
 	}
 
-	// Check if this is the first local domain being added
+	// All entries already registered in the same form: idempotent no-op, no
+	// regen, no flush.
+	allPresent := true
+	for _, e := range entries {
+		if !slices.Contains(filtered, e) {
+			allPresent = false
+			break
+		}
+	}
+	if allPresent {
+		return nil
+	}
+
+	// First local domain triggers the one-time system DNS setup below.
 	isFirstDomain := len(filtered) == 0
 
-	filtered = append(filtered, entry)
-	domains = filtered
-	if err := SaveLocalDomains(domains); err != nil {
+	filtered = append(filtered, entries...)
+	if err := SaveLocalDomains(filtered); err != nil {
 		return err
 	}
 
@@ -574,7 +599,7 @@ func RegisterLocalDomain(domain string, wildcard bool) error {
 	// Automatically set up system DNS when adding the first local domain.
 	// Failure here is non-fatal: the domain is registered in dnsmasq and the
 	// caller can still proceed; the user can run `srv dns setup` manually.
-	if isFirstDomain && !CheckSystemDNS(domain) {
+	if isFirstDomain && !CheckSystemDNS(domains[0]) {
 		if err := SetupDNS(); err != nil {
 			// Log but do not propagate — DNS registration succeeded above.
 			fmt.Fprintf(os.Stderr, "warning: system DNS setup failed (run 'srv dns setup' manually): %v\n", err)
@@ -768,9 +793,15 @@ func updateDnsmasqConfigLocked() error {
 
 	// Decide up front what kind of reload each file needs: a change to the
 	// main config requires a container restart, a change confined to the
-	// hostsdir only needs a SIGHUP.
+	// hostsdir only needs a SIGHUP. When neither changed, skip everything:
+	// writing an unchanged hosts file still makes dnsmasq re-read and flush,
+	// and the flush + container inspect below are the expensive tail of every
+	// registration.
 	confChanged := fileContentDiffers(dnsmasqPath, confBody)
 	hostsChanged := fileContentDiffers(hostsPath, hostsBody)
+	if !confChanged && !hostsChanged {
+		return nil
+	}
 
 	if err := os.MkdirAll(hostsDir, constants.DirPermDefault); err != nil {
 		return fmt.Errorf("failed to create dnsmasq hosts dir: %w", err)
@@ -778,11 +809,15 @@ func updateDnsmasqConfigLocked() error {
 	// Write atomically: dnsmasq watches the hostsdir (and is SIGHUP'd on a
 	// conf change), so a plain truncating write exposes a window where dnsmasq
 	// reads a partial file and fails to resolve a domain.
-	if err := fsutil.AtomicWriteFile(hostsPath, []byte(hostsBody), constants.FilePermDefault); err != nil {
-		return fmt.Errorf("failed to write dnsmasq hosts file: %w", err)
+	if hostsChanged {
+		if err := fsutil.AtomicWriteFile(hostsPath, []byte(hostsBody), constants.FilePermDefault); err != nil {
+			return fmt.Errorf("failed to write dnsmasq hosts file: %w", err)
+		}
 	}
-	if err := fsutil.AtomicWriteFile(dnsmasqPath, []byte(confBody), constants.FilePermDefault); err != nil {
-		return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
+	if confChanged {
+		if err := fsutil.AtomicWriteFile(dnsmasqPath, []byte(confBody), constants.FilePermDefault); err != nil {
+			return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
+		}
 	}
 
 	// Keep the system resolver routing config in sync so that every registered

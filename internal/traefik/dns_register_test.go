@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
@@ -108,6 +109,49 @@ func TestRegisterLocalDomainConcurrent(t *testing.T) {
 	}
 	if len(domains) != n {
 		t.Errorf("lost updates: got %d entries, want %d: %v", len(domains), n, domains)
+	}
+}
+
+// The batch form registers every domain with one registry write and one
+// dnsmasq regen, and a second identical call is a no-op that does not touch
+// the generated files (the rename itself would make dnsmasq re-read + flush).
+func TestRegisterLocalDomainsBatchIdempotent(t *testing.T) {
+	setupDNSTest(t)
+	swapShell(t, shelltest.New(nil))
+
+	domains := []string{"a.test", "b.test", "c.test"}
+	if err := RegisterLocalDomains(domains, false); err != nil {
+		t.Fatal(err)
+	}
+	registered, err := LoadLocalDomains()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(registered) != 3 {
+		t.Fatalf("got %v, want the 3 batch domains", registered)
+	}
+
+	hostsPath := filepath.Join(t.TempDir())
+	_ = hostsPath
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostsFile := filepath.Join(cfg.TraefikDir, constants.DnsmasqHostsDir, constants.DnsmasqHostsFile)
+	confFile := filepath.Join(cfg.TraefikDir, constants.DnsmasqConfFile)
+	hostsBefore, mErr := os.ReadFile(hostsFile)
+	confBefore, _ := os.ReadFile(confFile)
+	if mErr != nil {
+		t.Fatal(mErr)
+	}
+
+	if err := RegisterLocalDomains(domains, false); err != nil {
+		t.Fatal(err)
+	}
+	hostsAfter, _ := os.ReadFile(hostsFile)
+	confAfter, _ := os.ReadFile(confFile)
+	if string(hostsAfter) != string(hostsBefore) || string(confAfter) != string(confBefore) {
+		t.Error("no-op registration rewrote the dnsmasq files")
 	}
 }
 

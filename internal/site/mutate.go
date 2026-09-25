@@ -44,10 +44,8 @@ func regenerateRouting(siteName string, meta *SiteMetadata) error {
 // rather than failing the mutation. Does not install the CA (a site that is
 // local already has one); a missing CA surfaces as a warning.
 func refreshLocalCert(siteName string, meta *SiteMetadata) (warnings []string) {
-	for _, d := range meta.Domains {
-		if err := traefik.RegisterLocalDomain(d, meta.Wildcard); err != nil {
-			warnings = append(warnings, fmt.Sprintf("register DNS for %s: %v", d, err))
-		}
+	if err := traefik.RegisterLocalDomains(meta.Domains, meta.Wildcard); err != nil {
+		warnings = append(warnings, fmt.Sprintf("register DNS: %v", err))
 	}
 	if renewed, err := traefik.EnsureLocalCert(siteName, meta.Domains, meta.Wildcard); err != nil {
 		warnings = append(warnings, fmt.Sprintf("refresh certificate: %v", err))

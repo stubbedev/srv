@@ -75,10 +75,8 @@ func runMetricsEnable(cmd *cobra.Command, args []string) error {
 	if _, err := traefik.EnsureLocalCert(metrics.ProxySiteName, domains, false); err != nil {
 		ui.Warn("Failed to provision metrics certificate: %v", err)
 	}
-	for _, d := range domains {
-		if err := traefik.RegisterLocalDomain(d, false); err != nil {
-			ui.Warn("Failed to register DNS for %s: %v", d, err)
-		}
+	if err := traefik.RegisterLocalDomains(domains, false); err != nil {
+		ui.Warn("Failed to register DNS for metrics domains: %v", err)
 	}
 
 	if err := metrics.WriteStack(cfg); err != nil {

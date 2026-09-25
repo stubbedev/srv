@@ -368,10 +368,8 @@ func issueLocalCert(siteName string, domains []string, wildcard bool) (warnings 
 	if len(domains) == 0 {
 		return nil
 	}
-	for _, d := range domains {
-		if err := traefik.RegisterLocalDomain(d, wildcard); err != nil {
-			warnings = append(warnings, fmt.Sprintf("register DNS for %s: %v", d, err))
-		}
+	if err := traefik.RegisterLocalDomains(domains, wildcard); err != nil {
+		warnings = append(warnings, fmt.Sprintf("register DNS: %v", err))
 	}
 	if err := traefik.CheckMkcert(); err != nil {
 		return append(warnings, fmt.Sprintf("mkcert unavailable, local HTTPS will not work: %v", err))

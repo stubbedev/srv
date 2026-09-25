@@ -154,12 +154,10 @@ func reload(name string, force bool) (*ReloadResult, error) {
 	// Local SSL + DNS: idempotent; re-issues the cert only if the SAN set
 	// would change (handled inside EnsureLocalCert).
 	if meta.IsLocal && len(meta.Domains) > 0 {
-		for _, d := range meta.Domains {
-			if err := traefik.RegisterLocalDomain(d, meta.Wildcard); err != nil {
-				res.Warnings = append(res.Warnings, fmt.Sprintf("DNS register %s: %v", d, err))
-				continue
-			}
-			res.DNSRegistered++
+		if err := traefik.RegisterLocalDomains(meta.Domains, meta.Wildcard); err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("DNS register: %v", err))
+		} else {
+			res.DNSRegistered = len(meta.Domains)
 		}
 		if err := traefik.CheckMkcert(); err == nil {
 			renewed, certErr := traefik.EnsureLocalCert(name, meta.Domains, meta.Wildcard)

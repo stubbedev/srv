@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -102,33 +103,47 @@ type ResolvedAlias struct {
 	ResolveErr error
 }
 
-// ResolveAliases resolves each alias's target to an IPv4 address. Resolution
-// uses the system resolver with a short timeout so a single unreachable target
-// cannot stall the dnsmasq regen pipeline.
+// ResolveAliases resolves each alias's target to an IPv4 address. Lookups run
+// concurrently (bounded), so wall time is the slowest lookup rather than the
+// sum: ten stale aliases with a 3s budget each used to stall a dnsmasq regen
+// for up to thirty seconds serially. Results keep the input order.
 func ResolveAliases(aliases []DNSAlias) []ResolvedAlias {
 	out := make([]ResolvedAlias, len(aliases))
 	if len(aliases) == 0 {
 		return out
 	}
 
-	resolver := &net.Resolver{}
-	for i, a := range aliases {
-		out[i].DNSAlias = a
-		// 3s budget per lookup — long enough for a real resolver round trip,
-		// short enough that ten stale aliases cannot block dnsmasq for half a
-		// minute.
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		ips, err := resolver.LookupIP(ctx, "ip4", a.Target)
-		cancel()
-		if err != nil {
-			out[i].ResolveErr = err
-			continue
-		}
-		if len(ips) == 0 {
-			out[i].ResolveErr = fmt.Errorf("no A record for %s", a.Target)
-			continue
-		}
-		out[i].IP = ips[0].String()
+	const maxWorkers = 8
+	workers := min(maxWorkers, len(aliases))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			resolver := &net.Resolver{}
+			for i := range jobs {
+				a := aliases[i]
+				out[i].DNSAlias = a
+				// 3s budget per lookup — long enough for a real resolver round
+				// trip, short enough that one stale alias cannot stall its
+				// worker for long.
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				ips, err := resolver.LookupIP(ctx, "ip4", a.Target)
+				cancel()
+				switch {
+				case err != nil:
+					out[i].ResolveErr = err
+				case len(ips) == 0:
+					out[i].ResolveErr = fmt.Errorf("no A record for %s", a.Target)
+				default:
+					out[i].IP = ips[0].String()
+				}
+			}
+		})
 	}
+	for i := range aliases {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 	return out
 }
