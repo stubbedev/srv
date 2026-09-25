@@ -106,11 +106,13 @@ func Add(opts AddOptions) (*AddResult, error) {
 		return nil, err
 	}
 
-	if err := writeAddFiles(cfg, setup); err != nil {
+	writeWarnings, err := writeAddFiles(cfg, setup)
+	if err != nil {
 		return nil, err
 	}
 
 	res := &AddResult{Name: setup.siteName, Domain: setup.domain, Type: setup.typeLabel(), IsLocal: opts.Local}
+	res.Warnings = append(res.Warnings, writeWarnings...)
 	if opts.Local {
 		res.Warnings = append(res.Warnings, issueLocalCert(setup.siteName, setup.allDomains(), opts.Wildcard)...)
 	}
@@ -292,8 +294,9 @@ func selectComposeService(s *addSetup, service, profile string) error {
 	return nil
 }
 
-// writeAddFiles writes metadata.yml and the per-type artifacts.
-func writeAddFiles(cfg *config.Config, s *addSetup) error {
+// writeAddFiles writes metadata.yml and the per-type artifacts. Warnings are
+// non-fatal observations (e.g. a preserved user-modified file on force re-add).
+func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err error) {
 	siteType := SiteTypeCompose
 	switch {
 	case s.isDockerfile:
@@ -330,17 +333,18 @@ func writeAddFiles(cfg *config.Config, s *addSetup) error {
 	}
 
 	if err := WriteSiteMetadata(s.siteName, meta); err != nil {
-		return fmt.Errorf("write site metadata: %w", err)
+		return warnings, fmt.Errorf("write site metadata: %w", err)
 	}
 
 	switch {
 	case s.isDockerfile:
 		if err := WriteDockerfileSiteConfig(s.siteName, meta, s.dockerfileInfo, s.opts.Force); err != nil {
-			return fmt.Errorf("write Dockerfile site config: %w", err)
+			return warnings, fmt.Errorf("write Dockerfile site config: %w", err)
 		}
 	case s.isStatic:
-		if err := WriteStaticSiteConfig(s.siteName, meta, s.opts.Force); err != nil {
-			return fmt.Errorf("write static site config: %w", err)
+		warnings, err = WriteStaticSiteConfig(s.siteName, meta, s.opts.Force)
+		if err != nil {
+			return warnings, fmt.Errorf("write static site config: %w", err)
 		}
 	default:
 		if err := traefik.WriteSiteRouteConfig(cfg, traefik.SiteRouteConfig{
@@ -352,10 +356,10 @@ func writeAddFiles(cfg *config.Config, s *addSetup) error {
 			Wildcard:    s.opts.Wildcard,
 			Listeners:   meta.Listeners,
 		}); err != nil {
-			return fmt.Errorf("write traefik config: %w", err)
+			return warnings, fmt.Errorf("write traefik config: %w", err)
 		}
 	}
-	return nil
+	return warnings, nil
 }
 
 // issueLocalCert registers DNS for every domain and issues the mkcert cert,

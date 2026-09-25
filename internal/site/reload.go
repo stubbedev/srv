@@ -116,7 +116,9 @@ func reload(name string, force bool) (*ReloadResult, error) {
 	// a container restart is required to pick up new Traefik labels.
 	switch meta.Type {
 	case SiteTypeStatic:
-		if err := WriteStaticSiteConfig(name, *meta, true); err != nil {
+		regenWarnings, err := WriteStaticSiteConfig(name, *meta, true)
+		res.Warnings = append(res.Warnings, regenWarnings...)
+		if err != nil {
 			return res, fmt.Errorf("regenerate static config: %w", err)
 		}
 		res.NeedsRestart = true

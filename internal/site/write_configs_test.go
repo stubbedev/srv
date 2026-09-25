@@ -21,7 +21,7 @@ func TestWriteStaticSiteConfigCreatesFiles(t *testing.T) {
 		SPA:         true,
 		Cache:       true,
 	}
-	if err := WriteStaticSiteConfig("blog", meta, true); err != nil {
+	if _, err := WriteStaticSiteConfig("blog", meta, true); err != nil {
 		t.Fatalf("WriteStaticSiteConfig err: %v", err)
 	}
 	siteDir := filepath.Join(root, "sites", "blog")
@@ -46,7 +46,7 @@ func TestWriteStaticSiteConfigForceFalsePreserves(t *testing.T) {
 		IsLocal:     true,
 		NetworkName: "tnet",
 	}
-	if err := WriteStaticSiteConfig("blog", meta, true); err != nil {
+	if _, err := WriteStaticSiteConfig("blog", meta, true); err != nil {
 		t.Fatal(err)
 	}
 	siteDir := filepath.Join(root, "sites", "blog")
@@ -54,7 +54,7 @@ func TestWriteStaticSiteConfigForceFalsePreserves(t *testing.T) {
 	if err := os.WriteFile(nginxPath, []byte("MANUAL"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteStaticSiteConfig("blog", meta, false); err != nil {
+	if _, err := WriteStaticSiteConfig("blog", meta, false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(nginxPath)
@@ -86,5 +86,126 @@ func TestWriteDockerfileSiteConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(compose), constants.DockerfileFile) {
 		t.Error("compose missing Dockerfile reference")
+	}
+}
+
+// The daemon reloads with force=true, so a hand-edited generated file (both
+// carry a "yours to edit" header) must never be silently reverted: the fresh
+// render lands beside it as *.regenerated and the result carries a warning.
+func TestForceRegenPreservesUserEditedFile(t *testing.T) {
+	root := withSRVRoot(t)
+	meta := SiteMetadata{
+		Type:        SiteTypeStatic,
+		Domains:     []string{"blog.local"},
+		ProjectPath: "/srv/blog",
+		Port:        80,
+		IsLocal:     true,
+		NetworkName: "tnet",
+	}
+	if _, err := WriteStaticSiteConfig("blog", meta, true); err != nil {
+		t.Fatal(err)
+	}
+	siteDir := filepath.Join(root, "sites", "blog")
+	composePath := filepath.Join(siteDir, "docker-compose.yml")
+	orig, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := string(orig) + "# my custom volume\n"
+	if err := os.WriteFile(composePath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	warnings, err := WriteStaticSiteConfig("blog", meta, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != edited {
+		t.Error("force regen reverted a user-edited compose file")
+	}
+	regen, err := os.ReadFile(composePath + ".regenerated")
+	if err != nil {
+		t.Fatalf("expected a .regenerated side file: %v", err)
+	}
+	if string(regen) != string(orig) {
+		t.Error(".regenerated does not carry the fresh render")
+	}
+	if len(warnings) == 0 {
+		t.Error("expected a merge warning for the preserved file")
+	}
+}
+
+// An untouched generated file keeps updating in place, and adopting the
+// .regenerated content (copying it over the original) hands ownership back.
+func TestForceRegenReclaimsAdoptedFile(t *testing.T) {
+	root := withSRVRoot(t)
+	meta := SiteMetadata{
+		Type:        SiteTypeStatic,
+		Domains:     []string{"blog.local"},
+		ProjectPath: "/srv/blog",
+		Port:        80,
+		IsLocal:     true,
+		NetworkName: "tnet",
+	}
+	if _, err := WriteStaticSiteConfig("blog", meta, true); err != nil {
+		t.Fatal(err)
+	}
+	siteDir := filepath.Join(root, "sites", "blog")
+	composePath := filepath.Join(siteDir, "docker-compose.yml")
+
+	// Untouched file: regen with a metadata change updates in place.
+	meta.Cache = true
+	warnings, err := WriteStaticSiteConfig("blog", meta, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("owned file should regen in place, got warnings %v", warnings)
+	}
+	if _, err := os.Stat(composePath + ".regenerated"); !os.IsNotExist(err) {
+		t.Error("unexpected .regenerated for owned file")
+	}
+
+	// User edits, regen preserves, user adopts by copying back: next regen
+	// owns the file again.
+	orig, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(composePath, append(orig, []byte("# mine\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteStaticSiteConfig("blog", meta, true); err != nil {
+		t.Fatal(err)
+	}
+	regen, err := os.ReadFile(composePath + ".regenerated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(composePath, regen, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta.SPA = true
+	warnings, err = WriteStaticSiteConfig("blog", meta, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("adopted file should regen in place, got warnings %v", warnings)
+	}
+	nginx, err := os.ReadFile(filepath.Join(siteDir, "nginx.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(nginx), "try_files") {
+		t.Error("SPA change did not reach nginx.conf on the adopted site")
+	}
+	got, _ := os.ReadFile(composePath)
+	if strings.Contains(string(got), "# mine\n") {
+		t.Error("adopted compose file still carries the user's edit")
 	}
 }
