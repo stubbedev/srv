@@ -7,7 +7,6 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fatih/color v1.19.0
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/hashicorp/go-envparse v0.1.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/modelcontextprotocol/go-sdk v1.7.0

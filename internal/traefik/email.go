@@ -10,8 +10,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hashicorp/go-envparse"
-
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 )
@@ -43,7 +41,7 @@ func GetEmail(provided string) (string, error) {
 	envPath := cfg.EnvTraefikPath()
 	if file, err := os.Open(envPath); err == nil {
 		defer func() { _ = file.Close() }()
-		envMap, err := envparse.Parse(file)
+		envMap, err := parseEnvFile(file)
 		if err == nil {
 			if email, ok := envMap[constants.EnvACMEEmail]; ok && email != "" {
 				return email, nil

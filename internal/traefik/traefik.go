@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hashicorp/go-envparse"
 	"gopkg.in/yaml.v3"
 
 	"github.com/stubbedev/srv/internal/config"
@@ -218,7 +217,7 @@ func readEnvFile(path string) map[string]string {
 		return map[string]string{}
 	}
 	defer func() { _ = f.Close() }()
-	parsed, err := envparse.Parse(f)
+	parsed, err := parseEnvFile(f)
 	if err != nil {
 		return map[string]string{}
 	}
