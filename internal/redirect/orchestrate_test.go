@@ -39,8 +39,10 @@ func TestValidateAddSpecHTTPNegative(t *testing.T) {
 	cases := []AddSpec{
 		{Domain: "old.test", To: "new.example.com"},             // no scheme
 		{Domain: "old.test", To: "ftp://x"},                     // wrong scheme
+		{Domain: "old.test", To: "http://"},                     // parses but has no host — a redirect to nowhere
 		{Domain: "bad/domain", To: "https://x.test"},            // invalid domain
 		{Domain: "old.test", To: "https://x.test", Name: "x/y"}, // invalid name
+		{Domain: "old.test", To: "https://old.test"},            // redirect to itself is a loop
 	}
 	for i, c := range cases {
 		if _, _, err := validateAddSpec(c); err == nil {
@@ -65,6 +67,7 @@ func TestValidateAddSpecDNSOnly(t *testing.T) {
 		{Domain: "old.test", To: "x.test/path", DNSOnly: true},
 		{Domain: "old.test", To: "x.test", DNSOnly: true, Wildcard: true},
 		{Domain: "old.test", To: "evil.test/127.0.0.1", DNSOnly: true}, // injection-shaped target
+		{Domain: "old.test", To: "old.test", DNSOnly: true},            // self-alias is a loop
 	}
 	for i, c := range bad {
 		if _, _, err := validateAddSpec(c); err == nil {

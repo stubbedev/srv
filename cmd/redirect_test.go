@@ -42,260 +42,24 @@ func setupRedirectTestEnv(t *testing.T) *config.Config {
 }
 
 // =============================================================================
-// validateRedirectInput
-// =============================================================================
-
-func TestValidateRedirectInput_HTTPMode(t *testing.T) {
-	tests := []struct {
-		name      string
-		domain    string
-		to        string
-		temporary bool
-		wildcard  bool
-		flagName  string
-		wantErr   string // substring to match; "" means success
-		wantTo    string
-		wantPerm  bool
-		wantWild  bool
-		wantName  string
-	}{
-		{
-			name:     "valid https target",
-			domain:   "old.test",
-			to:       "https://new.example.com",
-			wantTo:   "https://new.example.com",
-			wantPerm: true,
-			wantName: "old-test",
-		},
-		{
-			name:     "valid http target",
-			domain:   "old.test",
-			to:       "http://internal.example",
-			wantTo:   "http://internal.example",
-			wantPerm: true,
-			wantName: "old-test",
-		},
-		{
-			name:     "trailing slash stripped",
-			domain:   "old.test",
-			to:       "https://new.test/",
-			wantTo:   "https://new.test",
-			wantPerm: true,
-			wantName: "old-test",
-		},
-		{
-			name:      "temporary flips permanent off",
-			domain:    "old.test",
-			to:        "https://new.test",
-			temporary: true,
-			wantTo:    "https://new.test",
-			wantPerm:  false,
-			wantName:  "old-test",
-		},
-		{
-			name:     "wildcard preserved",
-			domain:   "old.test",
-			to:       "https://new.test",
-			wildcard: true,
-			wantTo:   "https://new.test",
-			wantPerm: true,
-			wantWild: true,
-			wantName: "old-test",
-		},
-		{
-			name:     "custom name overrides derived",
-			domain:   "old.test",
-			to:       "https://new.test",
-			flagName: "custom-name",
-			wantTo:   "https://new.test",
-			wantPerm: true,
-			wantName: "custom-name",
-		},
-
-		// rejections
-		{
-			name:    "rejects ftp scheme",
-			domain:  "old.test",
-			to:      "ftp://bad",
-			wantErr: "scheme must be http or https",
-		},
-		{
-			name:    "rejects relative url",
-			domain:  "old.test",
-			to:      "/no-host",
-			wantErr: "must be an absolute",
-		},
-		{
-			name:    "rejects empty target",
-			domain:  "old.test",
-			to:      "",
-			wantErr: "must be an absolute",
-		},
-		{
-			name:    "rejects invalid domain",
-			domain:  "_bad domain_",
-			to:      "https://new.test",
-			wantErr: "invalid domain",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			setupRedirectTestEnv(t)
-			redirectAddFlags.domain = tc.domain
-			redirectAddFlags.to = tc.to
-			redirectAddFlags.temporary = tc.temporary
-			redirectAddFlags.permanent = !tc.temporary
-			redirectAddFlags.wildcard = tc.wildcard
-			redirectAddFlags.name = tc.flagName
-			redirectAddFlags.dnsOnly = false
-
-			got, err := validateRedirectInput()
-			if tc.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got success: %+v", tc.wantErr, got)
-				}
-				if !strings.Contains(err.Error(), tc.wantErr) {
-					t.Errorf("expected error containing %q, got %q", tc.wantErr, err.Error())
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.to != tc.wantTo {
-				t.Errorf("to: got %q, want %q", got.to, tc.wantTo)
-			}
-			if got.permanent != tc.wantPerm {
-				t.Errorf("permanent: got %v, want %v", got.permanent, tc.wantPerm)
-			}
-			if got.wildcard != tc.wantWild {
-				t.Errorf("wildcard: got %v, want %v", got.wildcard, tc.wantWild)
-			}
-			if got.name != tc.wantName {
-				t.Errorf("name: got %q, want %q", got.name, tc.wantName)
-			}
-			if got.dnsOnly {
-				t.Errorf("dnsOnly: want false, got true")
-			}
-		})
-	}
-}
-
-func TestValidateRedirectInput_DNSOnlyMode(t *testing.T) {
-	tests := []struct {
-		name      string
-		domain    string
-		to        string
-		temporary bool
-		wildcard  bool
-		wantErr   string
-		wantTo    string
-	}{
-		{
-			name:   "valid bare hostname",
-			domain: "old.test",
-			to:     "new.example.com",
-			wantTo: "new.example.com",
-		},
-		{
-			name:    "rejects scheme",
-			domain:  "old.test",
-			to:      "https://new.test",
-			wantErr: "bare hostname",
-		},
-		{
-			name:    "rejects path",
-			domain:  "old.test",
-			to:      "new.test/path",
-			wantErr: "bare hostname",
-		},
-		{
-			name:    "rejects query",
-			domain:  "old.test",
-			to:      "new.test?q=1",
-			wantErr: "bare hostname",
-		},
-		{
-			name:    "rejects fragment",
-			domain:  "old.test",
-			to:      "new.test#frag",
-			wantErr: "bare hostname",
-		},
-		{
-			name:     "rejects --wildcard",
-			domain:   "old.test",
-			to:       "new.test",
-			wildcard: true,
-			wantErr:  "wildcard is not supported",
-		},
-		{
-			name:      "rejects --temporary",
-			domain:    "old.test",
-			to:        "new.test",
-			temporary: true,
-			wantErr:   "temporary is not supported",
-		},
-		{
-			name:    "rejects malformed target hostname",
-			domain:  "old.test",
-			to:      "_bad_",
-			wantErr: "invalid --to hostname",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			setupRedirectTestEnv(t)
-			redirectAddFlags.domain = tc.domain
-			redirectAddFlags.to = tc.to
-			redirectAddFlags.temporary = tc.temporary
-			redirectAddFlags.permanent = !tc.temporary
-			redirectAddFlags.wildcard = tc.wildcard
-			redirectAddFlags.dnsOnly = true
-
-			got, err := validateRedirectInput()
-			if tc.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got success: %+v", tc.wantErr, got)
-				}
-				if !strings.Contains(err.Error(), tc.wantErr) {
-					t.Errorf("expected error containing %q, got %q", tc.wantErr, err.Error())
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if !got.dnsOnly {
-				t.Errorf("dnsOnly: want true, got false")
-			}
-			if got.to != tc.wantTo {
-				t.Errorf("to: got %q, want %q", got.to, tc.wantTo)
-			}
-		})
-	}
-}
-
-// =============================================================================
-// writeRedirectConfig (HTTP)
+// WriteRedirectConfig (HTTP)
 // =============================================================================
 
 func TestWriteRedirectConfig_HTTP(t *testing.T) {
 	cfg := setupRedirectTestEnv(t)
 
-	input := &redirectInput{
-		name:      "old-test",
-		domain:    "old.test",
-		to:        "https://new.test",
-		permanent: true,
-		wildcard:  false,
+	input := traefik.HTTPRedirect{
+		Name:      "old-test",
+		Domain:    "old.test",
+		To:        "https://new.test",
+		Permanent: true,
+		Wildcard:  false,
 	}
-	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: input.name, Domain: input.domain, To: input.to, Permanent: input.permanent, Wildcard: input.wildcard}); err != nil {
+	if err := traefik.WriteRedirectConfig(cfg, input); err != nil {
 		t.Fatalf("WriteRedirectConfig: %v", err)
 	}
 
-	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
+	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.Name+constants.ExtYAML)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
@@ -325,18 +89,18 @@ func TestWriteRedirectConfig_HTTP(t *testing.T) {
 func TestWriteRedirectConfig_HTTPWildcardAndTemporary(t *testing.T) {
 	cfg := setupRedirectTestEnv(t)
 
-	input := &redirectInput{
-		name:      "old-test",
-		domain:    "old.test",
-		to:        "https://new.test",
-		permanent: false, // 302
-		wildcard:  true,
+	input := traefik.HTTPRedirect{
+		Name:      "old-test",
+		Domain:    "old.test",
+		To:        "https://new.test",
+		Permanent: false, // 302
+		Wildcard:  true,
 	}
-	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: input.name, Domain: input.domain, To: input.to, Permanent: input.permanent, Wildcard: input.wildcard}); err != nil {
+	if err := traefik.WriteRedirectConfig(cfg, input); err != nil {
 		t.Fatalf("WriteRedirectConfig: %v", err)
 	}
 
-	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
+	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.Name+constants.ExtYAML)
 	data, _ := os.ReadFile(path)
 	content := string(data)
 
@@ -355,17 +119,16 @@ func TestWriteRedirectConfig_HTTPWildcardAndTemporary(t *testing.T) {
 func TestWriteRedirectDNSConfig(t *testing.T) {
 	cfg := setupRedirectTestEnv(t)
 
-	input := &redirectInput{
-		name:    "alias",
-		domain:  "old.test",
-		to:      "new.example.com",
-		dnsOnly: true,
+	input := traefik.HTTPRedirect{
+		Name:   "alias",
+		Domain: "old.test",
+		To:     "new.example.com",
 	}
-	if err := redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to); err != nil {
+	if err := redirect.WriteDNSConfig(cfg, input.Name, input.Domain, input.To); err != nil {
 		t.Fatalf("WriteDNSConfig: %v", err)
 	}
 
-	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.name+constants.ExtYAML)
+	path := filepath.Join(cfg.TraefikConfDir(), constants.RedirectConfigPrefix+input.Name+constants.ExtYAML)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
@@ -402,16 +165,16 @@ func TestWriteRedirectDNSConfig(t *testing.T) {
 func TestReadRedirectConfig_HTTPRoundTrip(t *testing.T) {
 	cfg := setupRedirectTestEnv(t)
 
-	input := &redirectInput{
-		name:      "old-test",
-		domain:    "old.test",
-		to:        "https://new.test",
-		permanent: true,
+	input := traefik.HTTPRedirect{
+		Name:      "old-test",
+		Domain:    "old.test",
+		To:        "https://new.test",
+		Permanent: true,
 	}
-	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{Name: input.name, Domain: input.domain, To: input.to, Permanent: input.permanent, Wildcard: input.wildcard}); err != nil {
+	if err := traefik.WriteRedirectConfig(cfg, input); err != nil {
 		t.Fatalf("WriteRedirectConfig: %v", err)
 	}
-	info := readRedirectConfig(cfg, input.name)
+	info := readRedirectConfig(cfg, input.Name)
 
 	if info.DNSOnly {
 		t.Errorf("HTTP redirect read back as DNSOnly")
@@ -430,16 +193,15 @@ func TestReadRedirectConfig_HTTPRoundTrip(t *testing.T) {
 func TestReadRedirectConfig_DNSRoundTrip(t *testing.T) {
 	cfg := setupRedirectTestEnv(t)
 
-	input := &redirectInput{
-		name:    "alias",
-		domain:  "old.test",
-		to:      "new.example.com",
-		dnsOnly: true,
+	input := traefik.HTTPRedirect{
+		Name:   "alias",
+		Domain: "old.test",
+		To:     "new.example.com",
 	}
-	if err := redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to); err != nil {
+	if err := redirect.WriteDNSConfig(cfg, input.Name, input.Domain, input.To); err != nil {
 		t.Fatalf("WriteDNSConfig: %v", err)
 	}
-	info := readRedirectConfig(cfg, input.name)
+	info := readRedirectConfig(cfg, input.Name)
 
 	if !info.DNSOnly {
 		t.Errorf("DNS redirect read back as HTTP")
@@ -472,13 +234,12 @@ func TestReadRedirectConfig_MissingFile(t *testing.T) {
 func TestDNSContractAcrossPackages(t *testing.T) {
 	cfg := setupRedirectTestEnv(t)
 
-	input := &redirectInput{
-		name:    "alias",
-		domain:  "old.test",
-		to:      "new.example.com",
-		dnsOnly: true,
+	input := traefik.HTTPRedirect{
+		Name:   "alias",
+		Domain: "old.test",
+		To:     "new.example.com",
 	}
-	if err := redirect.WriteDNSConfig(cfg, input.name, input.domain, input.to); err != nil {
+	if err := redirect.WriteDNSConfig(cfg, input.Name, input.Domain, input.To); err != nil {
 		t.Fatalf("WriteDNSConfig: %v", err)
 	}
 

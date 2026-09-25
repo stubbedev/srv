@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"errors"
-	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +11,6 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/redirect"
-	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -121,6 +117,7 @@ func init() {
 	redirectAddCmd.Flags().StringVar(&redirectAddFlags.to, "to", "", "Target URL (e.g., https://new.example.com)")
 	redirectAddCmd.Flags().StringVarP(&redirectAddFlags.name, "name", "n", "", "Redirect name (default: derived from domain)")
 	redirectAddCmd.Flags().BoolVar(&redirectAddFlags.permanent, "permanent", true, "Use 301 permanent redirect (default)")
+	_ = redirectAddCmd.Flags().MarkDeprecated("permanent", "301 is the default; use --temporary for a 302")
 	redirectAddCmd.Flags().BoolVar(&redirectAddFlags.temporary, "temporary", false, "Use 302 temporary redirect (overrides --permanent)")
 	redirectAddCmd.Flags().BoolVar(&redirectAddFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test)")
 	redirectAddCmd.Flags().BoolVarP(&redirectAddFlags.force, "force", "f", false, "Overwrite existing redirect configuration")
@@ -131,85 +128,6 @@ func init() {
 	redirectCmd.GroupID = GroupProxy
 	RootCmd.AddCommand(redirectCmd)
 }
-
-// =============================================================================
-// Redirect Input Validation
-// =============================================================================
-
-type redirectInput struct {
-	name      string
-	domain    string
-	to        string // target URL for HTTP mode, bare hostname for dns-only
-	permanent bool
-	wildcard  bool
-	dnsOnly   bool
-}
-
-func validateRedirectInput() (*redirectInput, error) {
-	domain := redirectAddFlags.domain
-	to := strings.TrimSpace(redirectAddFlags.to)
-
-	if err := ValidateDomain(domain); err != nil {
-		return nil, fmt.Errorf("invalid domain: %w", err)
-	}
-
-	var normalizedTo string
-	if redirectAddFlags.dnsOnly {
-		// DNS-only redirects are an A-record swap. The target must be a bare
-		// hostname — schemes, paths, and query strings have no meaning at the
-		// DNS layer and would silently be ignored.
-		if strings.Contains(to, "://") || strings.ContainsAny(to, "/?#") {
-			return nil, fmt.Errorf("invalid --to %q: with --dns-only the target must be a bare hostname (no scheme, no path)", to)
-		}
-		if err := ValidateDomain(to); err != nil {
-			return nil, fmt.Errorf("invalid --to hostname: %w", err)
-		}
-		// --wildcard, --permanent, and --temporary are HTTP-layer concepts
-		// that the DNS layer cannot honor. Reject them outright so the user
-		// gets a clean error instead of a silently-ignored flag.
-		if redirectAddFlags.wildcard {
-			return nil, errors.New("--wildcard is not supported with --dns-only (DNS records do not match wildcard children)")
-		}
-		if redirectAddFlags.temporary {
-			return nil, errors.New("--temporary is not supported with --dns-only (DNS records carry no HTTP status code)")
-		}
-		normalizedTo = to
-	} else {
-		parsed, err := url.Parse(to)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return nil, fmt.Errorf("invalid --to URL %q: must be an absolute http:// or https:// URL", to)
-		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return nil, fmt.Errorf("invalid --to URL %q: scheme must be http or https", to)
-		}
-		// Strip trailing slash on the target so path appends don't double-slash.
-		normalizedTo = strings.TrimRight(to, "/")
-	}
-
-	name := redirectAddFlags.name
-	if name == "" {
-		name = site.SanitizeName(domain)
-	}
-	if err := ValidateProxyName(name); err != nil {
-		return nil, fmt.Errorf("invalid redirect name: %w", err)
-	}
-
-	// --temporary overrides --permanent.
-	permanent := !redirectAddFlags.temporary
-
-	return &redirectInput{
-		name:      name,
-		domain:    domain,
-		to:        normalizedTo,
-		permanent: permanent,
-		wildcard:  redirectAddFlags.wildcard,
-		dnsOnly:   redirectAddFlags.dnsOnly,
-	}, nil
-}
-
-// =============================================================================
-// Redirect Certificate Setup
-// =============================================================================
 
 // redirectSiteName is the synthetic site name under which a redirect's local
 // cert is stored. Prefixed with underscore so it sorts apart from real sites
@@ -222,26 +140,24 @@ func redirectSiteName(name string) string {
 // Redirect Command Handlers
 // =============================================================================
 
+// runRedirectAdd maps flags onto the shared AddSpec; validation, cert, DNS,
+// and the config write all live in internal/redirect so the CLI and the MCP
+// add_redirect tool cannot drift.
 func runRedirectAdd(cmd *cobra.Command, args []string) error {
-	input, err := validateRedirectInput()
-	if err != nil {
-		return err
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	// Orchestration (validation, cert, DNS, config write) lives in
-	// internal/redirect so the CLI and the MCP add_redirect tool share it.
+	// --temporary overrides the (deprecated, default-on) --permanent flag.
+	permanent := !redirectAddFlags.temporary
 	res, err := redirect.Add(cfg, redirect.AddSpec{
-		Name:      input.name,
-		Domain:    input.domain,
-		To:        input.to,
-		Permanent: input.permanent,
-		Wildcard:  input.wildcard,
-		DNSOnly:   input.dnsOnly,
+		Name:      redirectAddFlags.name,
+		Domain:    redirectAddFlags.domain,
+		To:        redirectAddFlags.to,
+		Permanent: permanent,
+		Wildcard:  redirectAddFlags.wildcard,
+		DNSOnly:   redirectAddFlags.dnsOnly,
 		Force:     redirectAddFlags.force,
 	})
 	if err != nil {
@@ -256,7 +172,7 @@ func runRedirectAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	code := "301"
-	if !input.permanent {
+	if !permanent {
 		code = "302"
 	}
 	ui.Success("Redirect '%s' created", res.Name)

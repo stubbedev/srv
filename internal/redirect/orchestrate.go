@@ -183,7 +183,8 @@ func ReadInfo(cfg *config.Config, name string) Info {
 	return Info{}
 }
 
-// validateAddSpec mirrors the CLI's validateRedirectInput.
+// validateAddSpec is the single validator for redirect specs: the CLI maps
+// flags onto an AddSpec and both surfaces are rejected identically here.
 func validateAddSpec(spec AddSpec) (name, normalizedTo string, err error) {
 	if err := validate.Domain(spec.Domain); err != nil {
 		return "", "", fmt.Errorf("invalid domain: %w", err)
@@ -214,6 +215,11 @@ func validateAddSpec(spec AddSpec) (name, normalizedTo string, err error) {
 		targetURL, parseErr := url.Parse(to)
 		if parseErr != nil {
 			return "", "", fmt.Errorf("invalid target %q: %w", to, parseErr)
+		}
+		// url.Parse accepts bare "http://" with an empty host; a redirect to
+		// no host would render a Traefik rule Traefik rejects at load time.
+		if targetURL.Host == "" {
+			return "", "", fmt.Errorf("invalid target %q: must be an absolute http:// or https:// URL with a host", to)
 		}
 		// Same loop, one layer up: Traefik would answer the domain with a 301 to
 		// the same domain, and the browser would follow it until it gives up.
