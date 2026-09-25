@@ -100,7 +100,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if needFirewall {
 		totalSteps++
 	}
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		ui.VerboseLog("Warning: could not list sites: %v", err)
 		sites = nil // Ensure sites is empty on error

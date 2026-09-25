@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -409,16 +410,41 @@ func checkDNS() int {
 //     so the guidance points at .test or the nss ordering fix rather than the
 //     misleading "re-add the site".
 func checkSystemDNSResolution(domains []string) int {
+	// Probe concurrently: each lookup has a 2s timeout, and doctor runs when
+	// DNS is unhealthy — exactly when a serial loop over ~30 domains can
+	// block for a minute.
+	type probe struct {
+		bare string
+		ok   bool
+	}
+	results := make([]probe, len(domains))
+	const maxWorkers = 8
+	workers := min(maxWorkers, len(domains))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for i := range jobs {
+				bare := traefik.BareDomain(domains[i])
+				results[i] = probe{bare: bare, ok: traefik.CheckSystemDNS(bare)}
+			}
+		})
+	}
+	for i := range domains {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
 	var realFail, localFail []string
-	for _, d := range domains {
-		bare := traefik.BareDomain(d)
-		if traefik.CheckSystemDNS(bare) {
+	for _, r := range results {
+		if r.ok {
 			continue
 		}
-		if strings.HasSuffix(bare, ".local") {
-			localFail = append(localFail, bare)
+		if strings.HasSuffix(r.bare, ".local") {
+			localFail = append(localFail, r.bare)
 		} else {
-			realFail = append(realFail, bare)
+			realFail = append(realFail, r.bare)
 		}
 	}
 
@@ -532,7 +558,7 @@ func checkCertificateExpiry() int {
 // hand-edits that won't be hot-reloaded before they hit an error at runtime.
 func checkSitesValid() int {
 	ui.Bold("Site Metadata")
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		ui.IndentedWarn(1, "Could not list sites: %v", err)
 		ui.Blank()
@@ -575,7 +601,7 @@ func checkSitesValid() int {
 //   - case-insensitive variable name match
 func checkSiteEnvHostLoopback() int {
 	ui.Bold(".env host references")
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		ui.IndentedWarn(1, "Could not list sites: %v", err)
 		ui.Blank()

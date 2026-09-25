@@ -166,9 +166,12 @@ func statusForIndex(sites []Site, i int) (status string) {
 	return siteContainerStatus(sites[i])
 }
 
-// List returns all registered sites.
-// Container status checks are done in parallel for better performance.
-func List() ([]Site, error) {
+// ListBasic returns all registered sites without probing container status.
+// Prefer it over List whenever only names/types/domains are needed: List
+// issues one Docker client + API roundtrip per site, which at 40 sites costs
+// ~30ms locally (an order of magnitude more against Docker Desktop) — pure
+// waste for shell completion and the daemon's mapping refresh.
+func ListBasic() ([]Site, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -182,35 +185,43 @@ func List() ([]Site, error) {
 		return nil, err
 	}
 
-	// First pass: collect site metadata (fast, sequential)
 	var sites []Site
-	var validSiteIndices []int // Indices of sites that need status check
-
 	for _, entry := range entries {
 		// Only process directories (site config dirs).
 		// Skip internal directories prefixed with "_" (e.g. _proxy-* cert dirs).
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") {
 			continue
 		}
-
-		site, needsStatus := loadSiteFromDir(cfg, entry)
-		if needsStatus {
-			validSiteIndices = append(validSiteIndices, len(sites))
-		}
+		site, _ := loadSiteFromDir(cfg, entry)
 		sites = append(sites, site)
 	}
+	return sites, nil
+}
 
-	// Second pass: fetch container status in parallel
+// List returns all registered sites.
+// Container status checks are done in parallel for better performance.
+func List() ([]Site, error) {
+	sites, err := ListBasic()
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch container status in parallel for the sites that can have one.
+	var validSiteIndices []int
+	for i, s := range sites {
+		if !s.IsBroken {
+			validSiteIndices = append(validSiteIndices, i)
+		}
+	}
 	fetchSiteStatuses(sites, validSiteIndices)
-
 	return sites, nil
 }
 
 // Get returns a specific site by name.
-// It loads all registered sites and therefore performs a parallel status check
-// for every site. Prefer GetByName when you only need a single site.
+// It loads all registered sites without status probes. Prefer GetByName when
+// you only need a single site.
 func Get(name string) (*Site, error) {
-	sites, err := List()
+	sites, err := ListBasic()
 	if err != nil {
 		return nil, err
 	}

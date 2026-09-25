@@ -147,7 +147,7 @@ func (d *Daemon) log(format string, args ...any) {
 
 // refreshContainerMapping rebuilds the container name to site name mapping.
 func (d *Daemon) refreshContainerMapping() error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}

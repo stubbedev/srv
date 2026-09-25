@@ -90,7 +90,7 @@ func jsonOutput() bool {
 // GetSiteNames returns a list of all registered site names for shell completion.
 // Returns an empty slice if sites cannot be listed (logs warning in verbose mode).
 func GetSiteNames() []string {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		ui.VerboseLog("Warning: could not list sites: %v", err)
 		return []string{}
@@ -182,7 +182,7 @@ func getSiteFromArgsOrCwd(args []string, required bool) (*site.Site, error) {
 		return nil, err
 	}
 
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return nil, err
 	}

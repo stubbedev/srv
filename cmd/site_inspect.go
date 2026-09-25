@@ -47,7 +47,7 @@ type listSiteRow struct {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}
@@ -387,7 +387,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 // prefixing each output line with the site name. Stops when stdin closes
 // (Ctrl-C) or when --follow is off and every per-site tail completes.
 func runLogsAll() error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}

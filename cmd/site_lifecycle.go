@@ -139,7 +139,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 // startAllSites starts all registered sites in parallel.
 func startAllSites() error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 // stopAllSites stops all registered sites in parallel.
 func stopAllSites() error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}
@@ -354,7 +354,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 
 // restartAllSites restarts all registered sites in parallel.
 func restartAllSites() error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}

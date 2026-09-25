@@ -100,7 +100,7 @@ func runInternalDisable(cmd *cobra.Command, args []string) error {
 }
 
 func runInternalList(cmd *cobra.Command, args []string) error {
-	sites, err := site.List()
+	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}
