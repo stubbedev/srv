@@ -79,16 +79,16 @@ func runDNSD(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	watchDone := make(chan struct{})
 	go func() {
-		defer close(watchDone)
 		if err := server.Watch(); err != nil {
-			ui.Warn("DNS file watcher stopped: %v", err)
+			ui.Warn("DNS file watcher stopped (zones stay as loaded): %v", err)
 		}
 	}()
 
 	ui.Info("DNS server listening on %s (zones: %s)", server.Addr(), filepath.Dir(confPath))
-	<-watchDone
+	if err := server.Serve(); err != nil {
+		return fmt.Errorf("DNS server: %w", err)
+	}
 	return nil
 }
 

@@ -33,6 +33,9 @@ available.
 | Suite | What it asserts |
 |---|---|
 | `proxy/` | `srv proxy add` → Traefik file-provider hot-loads the router + mkcert cert → a request to the websecure entrypoint (matched by Host rule) is forwarded to a localhost upstream and returns its body. |
+| `site/` | `srv add` on a static project → same chain, site leg. |
+| `dns/` | `srv dnsd` (the embedded server the daemon hosts) answers registered domains from the generated zone files — exact, wildcard at every depth — and live-reloads on a zone-file rewrite, no signal or restart. |
+| `fallback/` | `srv proxy add --fallback` → Traefik routes through the daemon-hosted failover listener to the primary; when the primary dies, the same request returns the fallback's body with no Traefik reload. |
 
 ## Harness
 
