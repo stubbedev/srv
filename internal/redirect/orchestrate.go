@@ -27,14 +27,20 @@ import (
 func certSiteName(name string) string { return "_" + constants.RedirectConfigPrefix + name }
 
 // AddSpec describes a redirect to create.
+//
+// The json/jsonschema tags are the wire contract of the MCP add_redirect
+// tool, which reflects its input schema from this struct; commas in a
+// description must be written `\\,`. Permanent is CLI-only (MCP exposes the
+// negated `temporary` instead) and stays out of the MCP schema via
+// `json:"-"`.
 type AddSpec struct {
-	Name      string // optional; derived from Domain when empty
-	Domain    string
-	To        string // target URL (HTTP) or bare hostname (DNS-only)
-	Permanent bool   // 301 vs 302 (HTTP only)
-	Wildcard  bool   // HTTP only
-	DNSOnly   bool
-	Force     bool
+	Name      string `json:"name,omitempty"     jsonschema:"description=redirect name; derived from domain when omitted"` // optional; derived from Domain when empty
+	Domain    string `json:"domain"             jsonschema:"description=source hostname clients hit"`
+	To        string `json:"to"                 jsonschema:"description=target: absolute http(s) URL for HTTP mode\\, or a bare hostname for dns_only"` // target URL (HTTP) or bare hostname (DNS-only)
+	Permanent bool   `json:"-"`                                                                                                                         // 301 vs 302 (HTTP only)
+	Wildcard  bool   `json:"wildcard,omitempty" jsonschema:"description=also match one-level subdomains (HTTP mode only)"`                              // HTTP only
+	DNSOnly   bool   `json:"dns_only,omitempty" jsonschema:"description=create a dnsmasq A-record alias instead of an HTTP redirect"`
+	Force     bool   `json:"force,omitempty"    jsonschema:"description=overwrite an existing redirect of the same name"`
 }
 
 // AddResult reports what Add produced.

@@ -93,6 +93,10 @@
       "type": "boolean",
       "description": "Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt."
     },
+    "port": {
+      "type": "integer",
+      "description": "Port of the primary upstream (a localhost service the daemon's embedded\ncomponents dial); 0 for container-primary proxies."
+    },
     "routes": {
       "items": {
         "$ref": "#/$defs/Route"
@@ -102,10 +106,13 @@
     },
     "fallback_url": {
       "type": "string",
-      "description": "Fallback sidecar (srv proxy add --fallback): the remote URL 5xx\nresponses re-proxy to, and the connect timeout to the primary upstream.\nEmpty when the proxy has no sidecar."
+      "description": "Fallback (srv proxy add --fallback): the remote URL 5xx responses\nre-proxy to, and the connect timeout to the primary upstream. Empty\nwhen the proxy has no fallback. FallbackPort is set only when the\nfallback is hosted by the srv daemon (localhost-primary proxies): the\ndaemon serves the failover proxy on that 127.0.0.1 port, and the port\nis persisted so the Traefik route survives daemon restarts. A fallback\nfor a container primary still uses a container sidecar and has no port."
     },
     "fallback_timeout": {
       "type": "string"
+    },
+    "fallback_port": {
+      "type": "integer"
     }
   },
   "additionalProperties": false,

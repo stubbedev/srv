@@ -48,6 +48,38 @@ var tierRank = map[string]int{"core": 0, "read": 1, "write": 2}
 // and lists the tools, so the manifest reflects exactly what clients see — no
 // second source of truth to maintain.
 func ToolManifest(ctx context.Context) ([]ToolDoc, error) {
+	tools, err := fullToolSurface(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tier := tierOf()
+	docs := make([]ToolDoc, 0, len(tools))
+	for _, t := range tools {
+		d := ToolDoc{
+			Name:        t.Name,
+			Tier:        tier[t.Name],
+			Description: t.Description,
+		}
+		if t.Annotations != nil {
+			d.Title = t.Annotations.Title
+		}
+		docs = append(docs, d)
+	}
+
+	slices.SortStableFunc(docs, func(a, b ToolDoc) int {
+		if c := cmp.Compare(tierRank[a.Tier], tierRank[b.Tier]); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return docs, nil
+}
+
+// fullToolSurface connects to the real server over an in-memory transport
+// with every tier registered and lists its tools, exactly as a client sees
+// them — including each tool's input schema.
+func fullToolSurface(ctx context.Context) ([]*mcpsdk.Tool, error) {
 	srv := newServer()
 	// Register the on-demand tiers up front so ListTools returns the whole
 	// surface, not just the core gateway.
@@ -77,26 +109,5 @@ func ToolManifest(ctx context.Context) ([]ToolDoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
-
-	tier := tierOf()
-	docs := make([]ToolDoc, 0, len(res.Tools))
-	for _, t := range res.Tools {
-		d := ToolDoc{
-			Name:        t.Name,
-			Tier:        tier[t.Name],
-			Description: t.Description,
-		}
-		if t.Annotations != nil {
-			d.Title = t.Annotations.Title
-		}
-		docs = append(docs, d)
-	}
-
-	slices.SortStableFunc(docs, func(a, b ToolDoc) int {
-		if c := cmp.Compare(tierRank[a.Tier], tierRank[b.Tier]); c != 0 {
-			return c
-		}
-		return strings.Compare(a.Name, b.Name)
-	})
-	return docs, nil
+	return res.Tools, nil
 }

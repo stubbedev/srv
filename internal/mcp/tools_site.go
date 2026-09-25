@@ -33,6 +33,7 @@ func registerSiteWriteTools(srv *mcpsdk.Server) {
 		Name:        "add_site",
 		Description: "Register a new site from a project directory and start it. Auto-detects type (docker-compose.yml → compose, Dockerfile → dockerfile, else static); override with `type`. `domain` is required. Set `local` for mkcert TLS (otherwise Let's Encrypt). For a multi-service compose project pass `service`. Local sites need the mkcert CA (run `srv install` once in a terminal if missing). Set start=false to register without starting.",
 		Annotations: writeAnno("Add site", false, false, true),
+		InputSchema: toolInputSchema[addSiteIn](),
 	}, addSiteTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -116,30 +117,12 @@ func restartSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in lifecycleI
 
 // ─── add_site ────────────────────────────────────────────────────────
 
-type addSiteVolume struct {
-	Source   string `json:"source"              jsonschema:"host path"`
-	Target   string `json:"target"              jsonschema:"container path (must not overlap /app)"`
-	ReadOnly bool   `json:"read_only,omitempty"`
-}
-
+// addSiteIn is site.AddOptions (whose tags define the add_site input schema)
+// plus the MCP-only start tri-state: nil means default-on, so the schema
+// property is nullable like every optional boolean.
 type addSiteIn struct {
-	Path         string          `json:"path"                    jsonschema:"project directory to register"`
-	Domain       string          `json:"domain"                  jsonschema:"canonical hostname (required)"`
-	Type         string          `json:"type,omitempty"          jsonschema:"force site type: compose, dockerfile, or static (default: auto-detect)"`
-	Name         string          `json:"name,omitempty"          jsonschema:"site name; derived from domain when omitted"`
-	Aliases      []string        `json:"aliases,omitempty"       jsonschema:"extra hostnames mapped to the same site"`
-	Port         int             `json:"port,omitempty"          jsonschema:"container port (default 80)"`
-	Local        bool            `json:"local,omitempty"         jsonschema:"use local mkcert TLS instead of Let's Encrypt"`
-	Wildcard     bool            `json:"wildcard,omitempty"      jsonschema:"match one-level subdomains (local only)"`
-	InternalHTTP bool            `json:"internal_http,omitempty" jsonschema:"also expose on the internal plain-HTTP entrypoint"`
-	Service      string          `json:"service,omitempty"       jsonschema:"compose service to route to (multi-service projects)"`
-	Profile      string          `json:"profile,omitempty"       jsonschema:"compose profile to select"`
-	SPA          bool            `json:"spa,omitempty"           jsonschema:"static sites: SPA fallback to index.html"`
-	Cache        bool            `json:"cache,omitempty"         jsonschema:"static sites: asset caching headers"`
-	CORS         bool            `json:"cors,omitempty"          jsonschema:"static sites: permissive CORS headers"`
-	Volumes      []addSiteVolume `json:"volumes,omitempty"       jsonschema:"extra host bind-mounts"`
-	Force        bool            `json:"force,omitempty"         jsonschema:"overwrite an existing site"`
-	Start        *bool           `json:"start,omitempty"         jsonschema:"start the containers after adding (default true)"`
+	site.AddOptions
+	Start *bool `json:"start,omitempty" jsonschema:"description=start the containers after adding (default true),nullable"`
 }
 type addSiteOut struct {
 	OK       bool     `json:"ok"`
@@ -158,7 +141,11 @@ func addSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in addSiteIn)
 	// A shared HTTP daemon's cwd is not the caller's, so anchor a relative
 	// project path (and any relative bind-mount source) to the client's
 	// workspace root. Absolute paths and stdio callers are unaffected.
-	in.Path = anchorPath(ctx, req, in.Path)
+	opts := in.AddOptions
+	opts.Path = anchorPath(ctx, req, in.Path)
+	for i := range opts.Volumes {
+		opts.Volumes[i].Source = anchorPath(ctx, req, opts.Volumes[i].Source)
+	}
 	// Local sites issue a mkcert cert; guard the CA install behind the same
 	// non-interactive-sudo preflight the proxy/redirect add tools use.
 	if in.Local {
@@ -166,33 +153,8 @@ func addSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in addSiteIn)
 			return nil, addSiteOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 		}
 	}
-	start := true
-	if in.Start != nil {
-		start = *in.Start
-	}
-	mounts := make([]site.VolumeMount, 0, len(in.Volumes))
-	for _, v := range in.Volumes {
-		mounts = append(mounts, site.VolumeMount{Source: anchorPath(ctx, req, v.Source), Target: v.Target, ReadOnly: v.ReadOnly})
-	}
-	res, err := site.Add(site.AddOptions{
-		Path:         in.Path,
-		TypeOverride: in.Type,
-		Name:         in.Name,
-		Domain:       in.Domain,
-		Aliases:      in.Aliases,
-		Port:         in.Port,
-		Local:        in.Local,
-		Wildcard:     in.Wildcard,
-		InternalHTTP: in.InternalHTTP,
-		Service:      in.Service,
-		Profile:      in.Profile,
-		SPA:          in.SPA,
-		Cache:        in.Cache,
-		CORS:         in.CORS,
-		Volumes:      mounts,
-		Force:        in.Force,
-		Start:        start,
-	})
+	opts.Start = in.Start == nil || *in.Start
+	res, err := site.Add(opts)
 	if err != nil {
 		return nil, addSiteOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 	}

@@ -31,15 +31,20 @@ func CertSiteName(name string) string { return constants.ProxyCertSitePrefix + n
 // be set. Container is "name:port". When FallbackURL is set, an nginx sidecar
 // is placed in front of the primary upstream and 5xx responses transparently
 // re-proxy to it.
+//
+// The json/jsonschema tags are the wire contract of the MCP add_proxy tool,
+// which reflects its input schema from this struct; commas in a description
+// must be written `\\,`. The fallback fields are CLI-only (`srv proxy add
+// --fallback`) and stay out of the MCP schema via `json:"-"`.
 type AddSpec struct {
-	Name            string // optional; derived from Domain when empty
-	Domain          string
-	Port            string
-	Container       string
-	Wildcard        bool
-	Force           bool
-	FallbackURL     string // optional; e.g. https://prod.example.com
-	FallbackTimeout string // optional connect timeout to the primary (default 2s)
+	Name            string `json:"name,omitempty"      jsonschema:"description=proxy name; derived from domain when omitted"` // optional; derived from Domain when empty
+	Domain          string `json:"domain"              jsonschema:"description=the hostname clients hit, e.g. app.test"`
+	Port            string `json:"port,omitempty"      jsonschema:"description=localhost port to forward to; mutually exclusive with container"`
+	Container       string `json:"container,omitempty" jsonschema:"description=docker target as name:port; mutually exclusive with port"`
+	Wildcard        bool   `json:"wildcard,omitempty"  jsonschema:"description=also match one-level subdomains"`
+	Force           bool   `json:"force,omitempty"     jsonschema:"description=overwrite an existing proxy of the same name"`
+	FallbackURL     string `json:"-"` // optional; e.g. https://prod.example.com
+	FallbackTimeout string `json:"-"` // optional connect timeout to the primary (default 2s)
 }
 
 // AddResult reports what Add produced.

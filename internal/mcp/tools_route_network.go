@@ -16,6 +16,7 @@ func registerRouteNetworkTools(srv *mcpsdk.Server) {
 		Name:        "add_route",
 		Description: "Attach an extra Traefik route (path-prefix or regex) to a site or proxy `target`. Set one of path/path_regex and one upstream (port, container as name:port, or url). rewrite requires path_regex. id is derived from the path when omitted. Run restart afterward for label-based sites.",
 		Annotations: writeAnno("Add route", false, true, true),
+		InputSchema: toolInputSchema[addRouteIn](),
 	}, addRouteTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -39,18 +40,11 @@ func registerRouteNetworkTools(srv *mcpsdk.Server) {
 
 // ─── add_route / remove_route ────────────────────────────────────────
 
+// addRouteIn is site.RouteInput (whose tags define the add_route input schema)
+// plus the MCP-only target selector.
 type addRouteIn struct {
-	Target             string `json:"target"                         jsonschema:"site or proxy name to attach the route to"`
-	ID                 string `json:"id,omitempty"                   jsonschema:"route id; derived from the path when omitted"`
-	Path               string `json:"path,omitempty"                 jsonschema:"PathPrefix to match (e.g. /api); mutually exclusive with path_regex"`
-	PathRegex          string `json:"path_regex,omitempty"           jsonschema:"Traefik PathRegexp; mutually exclusive with path"`
-	Rewrite            string `json:"rewrite,omitempty"              jsonschema:"replacement for a path_regex rewrite (requires path_regex)"`
-	Port               int    `json:"port,omitempty"                 jsonschema:"localhost upstream port"`
-	Container          string `json:"container,omitempty"            jsonschema:"container upstream as name:port"`
-	URL                string `json:"url,omitempty"                  jsonschema:"raw upstream URL"`
-	PreserveHost       *bool  `json:"preserve_host,omitempty"        jsonschema:"forward the Host header unchanged (default true)"`
-	Priority           int    `json:"priority,omitempty"             jsonschema:"override the auto-computed Traefik router priority"`
-	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty" jsonschema:"skip TLS verification for an https url upstream (self-signed / mismatched cert)"`
+	site.RouteInput
+	Target string `json:"target" jsonschema:"description=site or proxy name to attach the route to"`
 }
 type routeOut struct {
 	OK     bool   `json:"ok"`
@@ -65,18 +59,7 @@ func addRouteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRouteIn) (
 	if in.Target == "" {
 		return nil, routeOut{Error: "target is required"}, nil
 	}
-	route, err := site.BuildRoute(site.RouteInput{
-		ID:                 in.ID,
-		Path:               in.Path,
-		PathRegex:          in.PathRegex,
-		Rewrite:            in.Rewrite,
-		Port:               in.Port,
-		Container:          in.Container,
-		URL:                in.URL,
-		PreserveHost:       in.PreserveHost,
-		Priority:           in.Priority,
-		InsecureSkipVerify: in.InsecureSkipVerify,
-	})
+	route, err := site.BuildRoute(in.RouteInput)
 	if err != nil {
 		return nil, routeOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 	}

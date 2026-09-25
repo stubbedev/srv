@@ -912,9 +912,11 @@ _Path: `~/.config/srv/proxies/proxy-<name>.yml`_
 | `domains` | array<string> | no | All hostnames routed to this proxy; the first entry is canonical. |
 | `wildcard` | boolean | no | Match apex + one-level subdomains (*.example.com); local proxies only. |
 | `is_local` | boolean | no | Use a locally-issued (mkcert) SSL certificate instead of Let's Encrypt. |
+| `port` | integer | no | Port of the primary upstream (a localhost service the daemon's embedded components dial); 0 for container-primary proxies. |
 | `routes` | array<object> | no | Extra Traefik routers (path-prefix / regex-rewrite splits) attached via `srv route`. |
-| `fallback_url` | string | no | Fallback sidecar (srv proxy add --fallback): the remote URL 5xx responses re-proxy to, and the connect timeout to the primary upstream. Empty when the proxy has no sidecar. |
+| `fallback_url` | string | no | Fallback (srv proxy add --fallback): the remote URL 5xx responses re-proxy to, and the connect timeout to the primary upstream. Empty when the proxy has no fallback. FallbackPort is set only when the fallback is hosted by the srv daemon (localhost-primary proxies): the daemon serves the failover proxy on that 127.0.0.1 port, and the port is persisted so the Traefik route survives daemon restarts. A fallback for a container primary still uses a container sidecar and has no port. |
 | `fallback_timeout` | string | no |  |
+| `fallback_port` | integer | no |  |
 
 #### DNS-only redirect
 

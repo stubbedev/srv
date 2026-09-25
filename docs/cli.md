@@ -1116,12 +1116,11 @@ Completely remove srv from the system
 ```
 Completely remove srv and all its components from the system:
   1. Stops and removes the Traefik container
-  2. Stops and removes the DNS container
-  3. Removes system DNS configuration
-  4. Removes the daemon service
-  5. Removes the Docker network
-  6. Removes the config directory (~/.config/srv)
-  7. Removes the srv binary
+  2. Removes system DNS configuration
+  3. Removes the daemon service
+  4. Removes the Docker network
+  5. Removes the config directory (~/.config/srv)
+  6. Removes the srv binary
 
 WARNING: This will remove all srv configuration and registered sites.
 Site directories and their contents are NOT removed.

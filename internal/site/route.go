@@ -19,18 +19,21 @@ import (
 // RouteInput is the explicit, surface-agnostic description of a route to build.
 // Exactly one of Port / Container / URL must be set; exactly one of Path /
 // PathRegex must be set.
+//
+// Like AddOptions, the json/jsonschema tags are the wire contract of the MCP
+// add_route tool, which reflects its input schema from this struct; commas in
+// a description must be written `\\,`.
 type RouteInput struct {
-	ID           string
-	Path         string
-	PathRegex    string
-	Rewrite      string
-	Port         int    // localhost upstream
-	Container    string // "name:port" upstream
-	URL          string // raw URL upstream
-	PreserveHost *bool  // nil → true
-	Priority     int
-	// InsecureSkipVerify skips TLS verification on an https url upstream.
-	InsecureSkipVerify bool
+	ID                 string `json:"id,omitempty"                   jsonschema:"description=route id; derived from the path when omitted"`
+	Path               string `json:"path,omitempty"                 jsonschema:"description=PathPrefix to match (e.g. /api); mutually exclusive with path_regex"`
+	PathRegex          string `json:"path_regex,omitempty"           jsonschema:"description=Traefik PathRegexp; mutually exclusive with path"`
+	Rewrite            string `json:"rewrite,omitempty"              jsonschema:"description=replacement for a path_regex rewrite (requires path_regex)"`
+	Port               int    `json:"port,omitempty"                 jsonschema:"description=localhost upstream port"`                                   // localhost upstream
+	Container          string `json:"container,omitempty"            jsonschema:"description=container upstream as name:port"`                           // "name:port" upstream
+	URL                string `json:"url,omitempty"                  jsonschema:"description=raw upstream URL"`                                          // raw URL upstream
+	PreserveHost       *bool  `json:"preserve_host,omitempty"        jsonschema:"description=forward the Host header unchanged (default true),nullable"` // nil → true
+	Priority           int    `json:"priority,omitempty"             jsonschema:"description=override the auto-computed Traefik router priority"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty" jsonschema:"description=skip TLS verification for an https url upstream (self-signed / mismatched cert)"`
 }
 
 // BuildRoute validates the input and returns a site.Route, deriving the id from

@@ -36,6 +36,7 @@ func registerProxyWriteTools(srv *mcpsdk.Server) {
 		Name:        "add_proxy",
 		Description: "Create a proxy routing a domain to a localhost port or a Docker container (container=\"name:port\"). Issues a local TLS cert and registers local DNS. Set exactly one of `port` or `container`. The CLI-only --fallback sidecar is not exposed. Requires the mkcert CA to be installed (run `srv install` once in a terminal if it is not).",
 		Annotations: writeAnno("Add proxy", false, true, true),
+		InputSchema: toolInputSchema[addProxyIn](),
 	}, addProxyTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -50,6 +51,7 @@ func registerRedirectWriteTools(srv *mcpsdk.Server) {
 		Name:        "add_redirect",
 		Description: "Create a redirect. HTTP mode (default): 301/302 from `domain` to `to` (an absolute http(s) URL), with a local cert. DNS-only mode (dns_only=true): a dnsmasq A-record alias from `domain` to a bare hostname `to` (no TLS, no Traefik). HTTP mode requires the mkcert CA (run `srv install` once in a terminal if missing).",
 		Annotations: writeAnno("Add redirect", false, true, true),
+		InputSchema: toolInputSchema[addRedirectIn](),
 	}, addRedirectTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -61,22 +63,20 @@ func registerRedirectWriteTools(srv *mcpsdk.Server) {
 
 // ─── add_proxy ───────────────────────────────────────────────────────
 
-type addProxyIn struct {
-	Domain    string `json:"domain"              jsonschema:"the hostname clients hit, e.g. app.test"`
-	Port      string `json:"port,omitempty"      jsonschema:"localhost port to forward to; mutually exclusive with container"`
-	Container string `json:"container,omitempty" jsonschema:"docker target as name:port; mutually exclusive with port"`
-	Name      string `json:"name,omitempty"      jsonschema:"proxy name; derived from domain when omitted"`
-	Wildcard  bool   `json:"wildcard,omitempty"  jsonschema:"also match one-level subdomains"`
-	Force     bool   `json:"force,omitempty"     jsonschema:"overwrite an existing proxy of the same name"`
-}
-type addProxyOut struct {
-	OK        bool     `json:"ok"`
-	Name      string   `json:"name,omitempty"`
-	Domain    string   `json:"domain,omitempty"`
-	TargetURL string   `json:"target_url,omitempty"`
-	Warnings  []string `json:"warnings,omitempty"`
-	Error     string   `json:"error,omitempty"`
-}
+// addProxyIn is proxy.AddSpec itself: its tags define the add_proxy input
+// schema (the CLI-only fallback fields are json:"-"), so the handler decodes
+// the shared spec directly with no field-by-field copy.
+type (
+	addProxyIn  = proxy.AddSpec
+	addProxyOut struct {
+		OK        bool     `json:"ok"`
+		Name      string   `json:"name,omitempty"`
+		Domain    string   `json:"domain,omitempty"`
+		TargetURL string   `json:"target_url,omitempty"`
+		Warnings  []string `json:"warnings,omitempty"`
+		Error     string   `json:"error,omitempty"`
+	}
+)
 
 func addProxyTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addProxyIn) (*mcpsdk.CallToolResult, addProxyOut, error) {
 	if err := requireCAForLocalCert(); err != nil {
@@ -86,14 +86,7 @@ func addProxyTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addProxyIn) (
 	if err != nil {
 		return nil, addProxyOut{}, err
 	}
-	res, err := proxy.Add(cfg, proxy.AddSpec{
-		Name:      in.Name,
-		Domain:    in.Domain,
-		Port:      in.Port,
-		Container: in.Container,
-		Wildcard:  in.Wildcard,
-		Force:     in.Force,
-	})
+	res, err := proxy.Add(cfg, in)
 	if err != nil {
 		return nil, addProxyOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 	}
@@ -137,14 +130,12 @@ func removeProxyTool(ctx context.Context, req *mcpsdk.CallToolRequest, in remove
 
 // ─── add_redirect ────────────────────────────────────────────────────
 
+// addRedirectIn is redirect.AddSpec (whose tags define the add_redirect input
+// schema) plus the MCP-only `temporary` convenience flag, the negation of the
+// CLI-only Permanent field.
 type addRedirectIn struct {
-	Domain    string `json:"domain"              jsonschema:"source hostname clients hit"`
-	To        string `json:"to"                  jsonschema:"target: absolute http(s) URL for HTTP mode, or a bare hostname for dns_only"`
-	Name      string `json:"name,omitempty"      jsonschema:"redirect name; derived from domain when omitted"`
-	Temporary bool   `json:"temporary,omitempty" jsonschema:"use a 302 instead of 301 (HTTP mode only)"`
-	Wildcard  bool   `json:"wildcard,omitempty"  jsonschema:"also match one-level subdomains (HTTP mode only)"`
-	DNSOnly   bool   `json:"dns_only,omitempty"  jsonschema:"create a dnsmasq A-record alias instead of an HTTP redirect"`
-	Force     bool   `json:"force,omitempty"     jsonschema:"overwrite an existing redirect of the same name"`
+	redirect.AddSpec
+	Temporary bool `json:"temporary,omitempty" jsonschema:"description=use a 302 instead of 301 (HTTP mode only)"`
 }
 type addRedirectOut struct {
 	OK       bool     `json:"ok"`
@@ -167,15 +158,9 @@ func addRedirectTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRedirec
 	if err != nil {
 		return nil, addRedirectOut{}, err
 	}
-	res, err := redirect.Add(cfg, redirect.AddSpec{
-		Name:      in.Name,
-		Domain:    in.Domain,
-		To:        in.To,
-		Permanent: !in.Temporary,
-		Wildcard:  in.Wildcard,
-		DNSOnly:   in.DNSOnly,
-		Force:     in.Force,
-	})
+	spec := in.AddSpec
+	spec.Permanent = !in.Temporary
+	res, err := redirect.Add(cfg, spec)
 	if err != nil {
 		return nil, addRedirectOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 	}

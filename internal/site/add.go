@@ -20,24 +20,30 @@ import (
 )
 
 // AddOptions is the full, non-interactive description of a site to add.
+//
+// The json/jsonschema tags are the wire contract of the MCP add_site tool:
+// the input schema is reflected from this struct (see internal/mcp), so a
+// field name or description changes here automatically reaches MCP clients.
+// Commas inside a description must be escaped as `\,` — the jsonschema tag is
+// comma-separated.
 type AddOptions struct {
-	Path         string   // project path (resolved against cwd / parked roots)
-	TypeOverride string   // "", "compose", "dockerfile", or "static"
-	Name         string   // site name; derived from Domain when empty
-	Domain       string   // canonical hostname (required)
-	Aliases      []string // extra hostnames
-	Port         int      // container port; 0 → DefaultContainerPort
-	Local        bool     // local mkcert TLS (otherwise Let's Encrypt)
-	Wildcard     bool     // match one-level subdomains (local only)
-	InternalHTTP bool     // also expose on the internal plain-HTTP entrypoint
-	Service      string   // compose service selector (compose sites)
-	Profile      string   // compose profile selector
-	SPA          bool     // static-site options
-	Cache        bool
-	CORS         bool
-	Volumes      []VolumeMount // extra bind-mounts
-	Force        bool          // overwrite an existing site
-	Start        bool          // bring containers up after adding
+	Path         string        `json:"path"                    jsonschema:"description=project directory to register"`                                              // project path (resolved against cwd / parked roots)
+	TypeOverride string        `json:"type,omitempty"          jsonschema:"description=force site type: compose\\, dockerfile\\, or static (default: auto-detect)"` // "", "compose", "dockerfile", or "static"
+	Name         string        `json:"name,omitempty"          jsonschema:"description=site name; derived from domain when omitted"`                                // site name; derived from Domain when empty
+	Domain       string        `json:"domain"                  jsonschema:"description=canonical hostname (required)"`                                              // canonical hostname (required)
+	Aliases      []string      `json:"aliases,omitempty"       jsonschema:"description=extra hostnames mapped to the same site,nullable"`                           // extra hostnames
+	Port         int           `json:"port,omitempty"          jsonschema:"description=container port (default 80)"`                                                // container port; 0 → DefaultContainerPort
+	Local        bool          `json:"local,omitempty"         jsonschema:"description=use local mkcert TLS instead of Let's Encrypt"`                              // local mkcert TLS (otherwise Let's Encrypt)
+	Wildcard     bool          `json:"wildcard,omitempty"      jsonschema:"description=match one-level subdomains (local only)"`                                    // match one-level subdomains (local only)
+	InternalHTTP bool          `json:"internal_http,omitempty" jsonschema:"description=also expose on the internal plain-HTTP entrypoint"`                          // also expose on the internal plain-HTTP entrypoint
+	Service      string        `json:"service,omitempty"       jsonschema:"description=compose service to route to (multi-service projects)"`                       // compose service selector (compose sites)
+	Profile      string        `json:"profile,omitempty"       jsonschema:"description=compose profile to select"`                                                  // compose profile selector
+	SPA          bool          `json:"spa,omitempty"           jsonschema:"description=static sites: SPA fallback to index.html"`                                   // static-site options
+	Cache        bool          `json:"cache,omitempty"         jsonschema:"description=static sites: asset caching headers"`
+	CORS         bool          `json:"cors,omitempty"          jsonschema:"description=static sites: permissive CORS headers"`
+	Volumes      []VolumeMount `json:"volumes,omitempty"       jsonschema:"description=extra host bind-mounts,nullable"`      // extra bind-mounts
+	Force        bool          `json:"force,omitempty"         jsonschema:"description=overwrite an existing site"`           // overwrite an existing site
+	Start        bool          `json:"start,omitempty"         jsonschema:"description=bring the containers up after adding"` // bring containers up after adding
 }
 
 // AddResult reports what Add produced.

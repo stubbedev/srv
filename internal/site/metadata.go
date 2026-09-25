@@ -60,9 +60,9 @@ type Route struct {
 // binaries, demo asset trees, etc.). Source and Target are absolute paths;
 // the source must already exist on the host.
 type VolumeMount struct {
-	Source   string `jsonschema:"description=Absolute host path."                 yaml:"source"`
-	Target   string `jsonschema:"description=Absolute path inside the container." yaml:"target"`
-	ReadOnly bool   `jsonschema:"description=Mount the bind read-only."           yaml:"read_only,omitempty"`
+	Source   string `json:"source"              jsonschema:"description=Absolute host path."                 yaml:"source"`
+	Target   string `json:"target"              jsonschema:"description=Absolute path inside the container." yaml:"target"`
+	ReadOnly bool   `json:"read_only,omitempty" jsonschema:"description=Mount the bind read-only."           yaml:"read_only,omitempty"`
 }
 
 // CurrentMetadataSchema is the version written to new metadata.yml files. Bump
