@@ -5,11 +5,6 @@ import (
 	"errors"
 	"io"
 	"strings"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
 )
 
 // fakeSDK is a controllable sdkClient used by docker package tests.
@@ -17,21 +12,22 @@ type fakeSDK struct {
 	closed bool
 
 	pingErr error
-	pingRet types.Ping
 
-	networks    []network.Summary
-	listErr     error
-	createErr   error
-	createCount int
-	removeErr   error
+	networks  []networkSummary
+	listErr   error
+	createErr error
+	// createConflict makes NetworkCreate return the daemon's 409 class.
+	createConflict bool
+	createCount    int
+	removeErr      error
 
 	connectErr   error
 	connectCount int
 
-	inspect    map[string]container.InspectResponse
+	inspect    map[string]inspectResponse
 	inspectErr map[string]error
 
-	listContainers     []container.Summary
+	listContainers     []containerSummary
 	listContainersErr  error
 	listContainersCall int
 
@@ -39,47 +35,50 @@ type fakeSDK struct {
 	pullErr    error
 }
 
-func (f *fakeSDK) Ping(ctx context.Context) (types.Ping, error) {
-	return f.pingRet, f.pingErr
+func (f *fakeSDK) Ping(ctx context.Context) error {
+	return f.pingErr
 }
 
-func (f *fakeSDK) NetworkList(ctx context.Context, opts network.ListOptions) ([]network.Summary, error) {
+func (f *fakeSDK) NetworkList(ctx context.Context, nameFilter string) ([]networkSummary, error) {
 	return f.networks, f.listErr
 }
 
-func (f *fakeSDK) NetworkCreate(ctx context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error) {
+func (f *fakeSDK) NetworkCreate(ctx context.Context, name, driver string) error {
 	f.createCount++
 	if f.createErr != nil {
-		return network.CreateResponse{}, f.createErr
+		return f.createErr
 	}
-	return network.CreateResponse{ID: "net-id-" + name}, nil
+	if f.createConflict {
+		return &conflictError{op: "network create"}
+	}
+	return nil
 }
 
 func (f *fakeSDK) NetworkRemove(ctx context.Context, name string) error {
 	return f.removeErr
 }
 
-func (f *fakeSDK) NetworkConnect(ctx context.Context, networkID, containerID string, cfg *network.EndpointSettings) error {
+func (f *fakeSDK) NetworkConnect(ctx context.Context, networkName, containerID string, aliases []string) error {
 	f.connectCount++
 	return f.connectErr
 }
 
-func (f *fakeSDK) ContainerInspect(ctx context.Context, name string) (container.InspectResponse, error) {
+func (f *fakeSDK) ContainerInspect(ctx context.Context, name string) (inspectResponse, error) {
 	if err, ok := f.inspectErr[name]; ok {
-		return container.InspectResponse{}, err
+		return inspectResponse{}, err
 	}
 	if r, ok := f.inspect[name]; ok {
 		return r, nil
 	}
-	return container.InspectResponse{}, errors.New("not found")
+	return inspectResponse{}, errors.New("not found")
 }
 
-func (f *fakeSDK) ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error) {
+func (f *fakeSDK) ContainerList(ctx context.Context, all bool, labelFilter string) ([]containerSummary, error) {
 	f.listContainersCall++
 	return f.listContainers, f.listContainersErr
 }
 
-func (f *fakeSDK) ImagePull(ctx context.Context, ref string, opts image.PullOptions) (io.ReadCloser, error) {
+func (f *fakeSDK) ImagePull(ctx context.Context, ref string) (io.ReadCloser, error) {
 	if f.pullErr != nil {
 		return nil, f.pullErr
 	}
@@ -92,6 +91,13 @@ func (f *fakeSDK) ImagePull(ctx context.Context, ref string, opts image.PullOpti
 			`{"status":"Downloading","id":"abc123","progress":"[===>]  1kB/2kB"}` + "\n" +
 			`{"status":"Download complete","id":"abc123"}` + "\n" +
 			`{"status":"Status: Downloaded newer image"}` + "\n")), nil
+}
+
+func (f *fakeSDK) Events(ctx context.Context, filters map[string][]string) (<-chan Event, <-chan error) {
+	eventCh := make(chan Event)
+	errCh := make(chan error, 1)
+	close(eventCh)
+	return eventCh, errCh
 }
 
 func (f *fakeSDK) Close() error {

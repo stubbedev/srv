@@ -8,9 +8,8 @@ import (
 	"testing"
 	"time"
 
-	dockerevents "github.com/docker/docker/api/types/events"
-
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -135,8 +134,8 @@ func TestHandleContainerStartUntrackedNoop(t *testing.T) {
 	defer f.Close()
 	d.logFile = f
 	d.lastRefreshTime = time.Now() // suppress refresh attempt
-	d.handleContainerStart(dockerevents.Message{
-		Actor: dockerevents.Actor{Attributes: map[string]string{"name": "ghost"}},
+	d.handleContainerStart(docker.Event{
+		Actor: docker.EventActor{Attributes: map[string]string{"name": "ghost"}},
 	})
 	// Should produce no log line.
 	data, _ := os.ReadFile(logPath)
@@ -151,7 +150,7 @@ func TestHandleContainerStartNoName(t *testing.T) {
 		networkName: "n",
 		containers:  map[string]string{},
 	}
-	d.handleContainerStart(dockerevents.Message{}) // no name attribute
+	d.handleContainerStart(docker.Event{}) // no name attribute
 }
 
 func TestIsDirectChild(t *testing.T) {
@@ -203,8 +202,8 @@ func TestHandleContainerStartTracked(t *testing.T) {
 	defer f.Close()
 	d.logFile = f
 	d.lastRefreshTime = time.Now()
-	d.handleContainerStart(dockerevents.Message{
-		Actor: dockerevents.Actor{Attributes: map[string]string{"name": "web"}},
+	d.handleContainerStart(docker.Event{
+		Actor: docker.EventActor{Attributes: map[string]string{"name": "web"}},
 	})
 	data, _ := os.ReadFile(filepath.Join(root, "x.log"))
 	if !contains(string(data), "Container web started") {

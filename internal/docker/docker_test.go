@@ -7,10 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
 )
 
 func swap(t *testing.T, f *fakeSDK) {
@@ -177,14 +173,14 @@ func TestEnsureRunningClientFactoryErr(t *testing.T) {
 }
 
 func TestNetworkExistsMatch(t *testing.T) {
-	swap(t, &fakeSDK{networks: []network.Summary{{Name: "srv_traefik"}, {Name: "other"}}})
+	swap(t, &fakeSDK{networks: []networkSummary{{Name: "srv_traefik"}, {Name: "other"}}})
 	if !NetworkExists("srv_traefik") {
 		t.Error("expected match")
 	}
 }
 
 func TestNetworkExistsPrefixOnly(t *testing.T) {
-	swap(t, &fakeSDK{networks: []network.Summary{{Name: "srv_traefik_other"}}})
+	swap(t, &fakeSDK{networks: []networkSummary{{Name: "srv_traefik_other"}}})
 	if NetworkExists("srv_traefik") {
 		t.Error("prefix match should not count as exact")
 	}
@@ -205,7 +201,7 @@ func TestNetworkExistsListErr(t *testing.T) {
 }
 
 func TestEnsureInitializedExisting(t *testing.T) {
-	swap(t, &fakeSDK{networks: []network.Summary{{Name: "net"}}})
+	swap(t, &fakeSDK{networks: []networkSummary{{Name: "net"}}})
 	if err := EnsureInitialized("net"); err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -230,7 +226,7 @@ func TestCreateNetworkSuccess(t *testing.T) {
 }
 
 func TestCreateNetworkConflictNoOp(t *testing.T) {
-	swap(t, &fakeSDK{createErr: cerrdefs.ErrConflict})
+	swap(t, &fakeSDK{createErr: &conflictError{op: "test"}})
 	if err := CreateNetwork("net"); err != nil {
 		t.Errorf("conflict should be no-op, got %v", err)
 	}
@@ -272,8 +268,8 @@ func TestRemoveNetworkClientErr(t *testing.T) {
 }
 
 func TestIsContainerRunningTrue(t *testing.T) {
-	swap(t, &fakeSDK{inspect: map[string]container.InspectResponse{
-		"x": {ContainerJSONBase: &container.ContainerJSONBase{State: &container.State{Running: true}}},
+	swap(t, &fakeSDK{inspect: map[string]inspectResponse{
+		"x": {State: &inspectState{Running: true}},
 	}})
 	if !IsContainerRunning("x") {
 		t.Error("expected true")
@@ -281,8 +277,8 @@ func TestIsContainerRunningTrue(t *testing.T) {
 }
 
 func TestIsContainerRunningStopped(t *testing.T) {
-	swap(t, &fakeSDK{inspect: map[string]container.InspectResponse{
-		"x": {ContainerJSONBase: &container.ContainerJSONBase{State: &container.State{Running: false}}},
+	swap(t, &fakeSDK{inspect: map[string]inspectResponse{
+		"x": {State: &inspectState{Running: false}},
 	}})
 	if IsContainerRunning("x") {
 		t.Error("expected false")
@@ -304,7 +300,7 @@ func TestIsContainerRunningClientErr(t *testing.T) {
 }
 
 func TestContainerExists(t *testing.T) {
-	swap(t, &fakeSDK{inspect: map[string]container.InspectResponse{"x": {}}})
+	swap(t, &fakeSDK{inspect: map[string]inspectResponse{"x": {}}})
 	if !ContainerExists("x") {
 		t.Error("expected true")
 	}
@@ -318,8 +314,8 @@ func TestContainerExistsMissing(t *testing.T) {
 }
 
 func TestGetContainerImageVersion(t *testing.T) {
-	swap(t, &fakeSDK{inspect: map[string]container.InspectResponse{
-		"x": {Config: &container.Config{Image: "nginx:1.25"}},
+	swap(t, &fakeSDK{inspect: map[string]inspectResponse{
+		"x": {Config: &inspectConfig{Image: "nginx:1.25"}},
 	}})
 	if got := GetContainerImageVersion("x"); got != "1.25" {
 		t.Errorf("got %q", got)
@@ -327,8 +323,8 @@ func TestGetContainerImageVersion(t *testing.T) {
 }
 
 func TestGetContainerImageVersionUntagged(t *testing.T) {
-	swap(t, &fakeSDK{inspect: map[string]container.InspectResponse{
-		"x": {Config: &container.Config{Image: "nginx"}},
+	swap(t, &fakeSDK{inspect: map[string]inspectResponse{
+		"x": {Config: &inspectConfig{Image: "nginx"}},
 	}})
 	if got := GetContainerImageVersion("x"); got != "latest" {
 		t.Errorf("got %q", got)
@@ -401,7 +397,7 @@ func TestConnectContainerToNetwork(t *testing.T) {
 }
 
 func TestConnectContainerToNetworkConflictNoOp(t *testing.T) {
-	swap(t, &fakeSDK{connectErr: cerrdefs.ErrConflict})
+	swap(t, &fakeSDK{connectErr: &conflictError{op: "test"}})
 	if err := ConnectContainerToNetwork("c", "n", ""); err != nil {
 		t.Errorf("conflict should be no-op, got %v", err)
 	}
@@ -422,8 +418,8 @@ func TestConnectContainerToNetworkClientErr(t *testing.T) {
 }
 
 func TestContainerStatusByNameRunning(t *testing.T) {
-	swap(t, &fakeSDK{inspect: map[string]container.InspectResponse{
-		"x": {ContainerJSONBase: &container.ContainerJSONBase{State: &container.State{Running: true}}},
+	swap(t, &fakeSDK{inspect: map[string]inspectResponse{
+		"x": {State: &inspectState{Running: true}},
 	}})
 	if got := ContainerStatusByName("x"); got != "running" {
 		t.Errorf("got %q", got)
@@ -445,7 +441,7 @@ func TestContainerStatusByComposeDirEmpty(t *testing.T) {
 }
 
 func TestContainerStatusByComposeDirRunning(t *testing.T) {
-	swap(t, &fakeSDK{listContainers: []container.Summary{
+	swap(t, &fakeSDK{listContainers: []containerSummary{
 		{State: "running"},
 		{State: "running"},
 	}})
@@ -455,7 +451,7 @@ func TestContainerStatusByComposeDirRunning(t *testing.T) {
 }
 
 func TestContainerStatusByComposeDirPartial(t *testing.T) {
-	swap(t, &fakeSDK{listContainers: []container.Summary{
+	swap(t, &fakeSDK{listContainers: []containerSummary{
 		{State: "running"},
 		{State: "exited"},
 	}})
@@ -775,7 +771,7 @@ func TestSwapNewClientWithNetwork(t *testing.T) {
 
 func TestNetworkFakeSDKListMatches(t *testing.T) {
 	f := networkFakeSDK{networkName: "x"}
-	out, err := f.NetworkList(context.Background(), network.ListOptions{})
+	out, err := f.NetworkList(context.Background(), "x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -796,13 +792,13 @@ func TestSwapNewClientOK(t *testing.T) {
 	}
 	// Exercise every noopSDK method.
 	ctx := context.Background()
-	if _, err := cli.Ping(ctx); err != nil {
+	if err := cli.Ping(ctx); err != nil {
 		t.Errorf("Ping err: %v", err)
 	}
-	if _, err := cli.NetworkList(ctx, network.ListOptions{}); err != nil {
+	if _, err := cli.NetworkList(ctx, ""); err != nil {
 		t.Errorf("NetworkList err: %v", err)
 	}
-	if _, err := cli.NetworkCreate(ctx, "x", network.CreateOptions{}); err != nil {
+	if err := cli.NetworkCreate(ctx, "x", "bridge"); err != nil {
 		t.Errorf("NetworkCreate err: %v", err)
 	}
 	if err := cli.NetworkRemove(ctx, "x"); err != nil {
@@ -814,10 +810,10 @@ func TestSwapNewClientOK(t *testing.T) {
 	if _, err := cli.ContainerInspect(ctx, "c"); err == nil {
 		t.Error("expected ContainerInspect err")
 	}
-	if _, err := cli.ContainerList(ctx, container.ListOptions{}); err != nil {
+	if _, err := cli.ContainerList(ctx, false, ""); err != nil {
 		t.Errorf("ContainerList err: %v", err)
 	}
-	r, err := cli.ImagePull(ctx, "x", image.PullOptions{})
+	r, err := cli.ImagePull(ctx, "x")
 	if err != nil {
 		t.Errorf("ImagePull err: %v", err)
 	}

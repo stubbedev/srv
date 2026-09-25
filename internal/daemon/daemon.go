@@ -13,11 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
-	dockerevents "github.com/docker/docker/api/types/events"
-	dockerfilters "github.com/docker/docker/api/types/filters"
-	dockerclient "github.com/docker/docker/client"
-
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
@@ -228,22 +223,14 @@ func (d *Daemon) watchEvents() error {
 	}
 }
 
-// runEventLoop runs a single event watching session using the Docker SDK.
+// runEventLoop runs a single event watching session against the daemon API.
 func (d *Daemon) runEventLoop() error {
-	// Resolving the engine exports DOCKER_HOST, which FromEnv then reads.
+	// Resolving the engine exports DOCKER_HOST, which the event client reads.
 	eng := ops.Engine()
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	eventCh, errCh, err := docker.WatchEvents(d.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create %s client: %w", eng.Name, err)
 	}
-	defer func() { _ = cli.Close() }()
-
-	f := dockerfilters.NewArgs(
-		dockerfilters.Arg("type", string(dockerevents.ContainerEventType)),
-		dockerfilters.Arg("event", "start"),
-	)
-
-	eventCh, errCh := cli.Events(d.ctx, dockerevents.ListOptions{Filters: f})
 
 	for {
 		select {
@@ -258,7 +245,7 @@ func (d *Daemon) runEventLoop() error {
 }
 
 // handleContainerStart processes a container start event.
-func (d *Daemon) handleContainerStart(event dockerevents.Message) {
+func (d *Daemon) handleContainerStart(event docker.Event) {
 	containerName := event.Actor.Attributes["name"]
 	if containerName == "" {
 		return
@@ -285,7 +272,7 @@ func (d *Daemon) handleContainerStart(event dockerevents.Message) {
 	if err := docker.ConnectContainerToNetwork(containerName, d.networkName, containerName); err != nil {
 		// docker.ConnectContainerToNetwork already swallows "already connected"
 		// conflicts; anything that reaches us here is a real failure worth logging.
-		if !cerrdefs.IsConflict(err) {
+		if !docker.IsConflict(err) {
 			d.log("Failed to connect %s to network: %v", containerName, err)
 		}
 	} else {
@@ -300,7 +287,7 @@ func (d *Daemon) handleContainerStart(event dockerevents.Message) {
 			if extra == d.networkName {
 				continue
 			}
-			if err := docker.ConnectContainerToNetwork(containerName, extra, containerName); err != nil && !cerrdefs.IsConflict(err) {
+			if err := docker.ConnectContainerToNetwork(containerName, extra, containerName); err != nil && !docker.IsConflict(err) {
 				d.log("Failed to connect %s to extra network %s: %v", containerName, extra, err)
 			}
 		}

@@ -12,14 +12,6 @@ import (
 	"strings"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
-
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/ops"
@@ -83,28 +75,25 @@ const (
 	ContainerDNS = "srv_dns"
 )
 
-// sdkClient is the subset of the Docker SDK that srv actually calls. Wrapping
-// the concrete *dockerclient.Client behind this interface lets tests substitute
-// a fake without standing up a real daemon.
+// sdkClient is the daemon API surface srv uses. The production implementation
+// is miniclient (stdlib HTTP over the daemon socket); tests install fakes.
 type sdkClient interface {
-	Ping(ctx context.Context) (types.Ping, error)
-	NetworkList(ctx context.Context, opts network.ListOptions) ([]network.Summary, error)
-	NetworkCreate(ctx context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error)
+	Ping(ctx context.Context) error
+	NetworkList(ctx context.Context, nameFilter string) ([]networkSummary, error)
+	NetworkCreate(ctx context.Context, name, driver string) error
 	NetworkRemove(ctx context.Context, name string) error
-	NetworkConnect(ctx context.Context, networkID, containerID string, cfg *network.EndpointSettings) error
-	ContainerInspect(ctx context.Context, name string) (container.InspectResponse, error)
-	ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error)
-	ImagePull(ctx context.Context, ref string, opts image.PullOptions) (io.ReadCloser, error)
+	NetworkConnect(ctx context.Context, networkName, containerID string, aliases []string) error
+	ContainerInspect(ctx context.Context, name string) (inspectResponse, error)
+	ContainerList(ctx context.Context, all bool, labelFilter string) ([]containerSummary, error)
+	ImagePull(ctx context.Context, ref string) (io.ReadCloser, error)
+	Events(ctx context.Context, filters map[string][]string) (<-chan Event, <-chan error)
 	Close() error
 }
 
 // newClientFn produces an sdkClient. Tests swap this to install a fake. By
 // default it dials the daemon described by the standard Docker env vars.
 var newClientFn = func() (sdkClient, error) {
-	// Resolving the engine exports DOCKER_HOST, which is what FromEnv reads —
-	// so this call is what points the SDK at Podman rather than Docker.
-	_ = ops.Engine()
-	return dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	return newMiniClient()
 }
 
 // SwapNewClient replaces the SDK client factory and returns a function that
@@ -144,8 +133,8 @@ type networkFakeSDK struct {
 	networkName string
 }
 
-func (f networkFakeSDK) NetworkList(ctx context.Context, opts network.ListOptions) ([]network.Summary, error) {
-	return []network.Summary{{Name: f.networkName}}, nil
+func (f networkFakeSDK) NetworkList(ctx context.Context, nameFilter string) ([]networkSummary, error) {
+	return []networkSummary{{Name: f.networkName}}, nil
 }
 
 // newClient returns a Docker client using the environment-configured socket.
@@ -165,7 +154,7 @@ func EnsureRunning() error {
 	}
 	defer func() { _ = cli.Close() }()
 
-	if _, err := cli.Ping(ctx); err != nil {
+	if err := cli.Ping(ctx); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("docker check timed out. Try: docker info\n  Docker may be unresponsive or overloaded")
 		}
@@ -194,8 +183,7 @@ func NetworkExists(name string) bool {
 	}
 	defer func() { _ = cli.Close() }()
 
-	f := filters.NewArgs(filters.Arg("name", name))
-	networks, err := cli.NetworkList(ctx, network.ListOptions{Filters: f})
+	networks, err := cli.NetworkList(ctx, name)
 	if err != nil {
 		return false
 	}
@@ -219,14 +207,14 @@ func CreateNetwork(name string) error {
 	}
 	defer func() { _ = cli.Close() }()
 
-	_, err = cli.NetworkCreate(ctx, name, network.CreateOptions{Driver: "bridge"})
+	err = cli.NetworkCreate(ctx, name, "bridge")
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return errors.New("docker network create timed out")
 		}
 		// Network already exists → idempotent no-op. errdefs.IsConflict
 		// covers the HTTP 409 the daemon returns regardless of error wording.
-		if cerrdefs.IsConflict(err) {
+		if IsConflict(err) {
 			return nil
 		}
 		return err
@@ -607,10 +595,7 @@ func ContainerStatusByComposeDir(dir string) string {
 	}
 	defer func() { _ = cli.Close() }()
 
-	f := filters.NewArgs(
-		filters.Arg("label", "com.docker.compose.project.working_dir="+dir),
-	)
-	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true, Filters: f})
+	containers, err := cli.ContainerList(ctx, true, "com.docker.compose.project.working_dir="+dir)
 	if err != nil {
 		// Fall back to subprocess
 		return ContainerStatus(dir)
@@ -660,7 +645,7 @@ func Pull(imageName string, onProgress func(update string)) error {
 	// doesn't hang forever.
 	ctx, cancel := context.WithTimeout(context.Background(), ComposeTimeout)
 	defer cancel()
-	reader, err := cli.ImagePull(ctx, imageName, image.PullOptions{})
+	reader, err := cli.ImagePull(ctx, imageName)
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
 	}
@@ -772,6 +757,9 @@ func GetContainerImageVersion(containerName string) string {
 	if err != nil {
 		return ""
 	}
+	if info.Config == nil {
+		return ""
+	}
 
 	return extractImageTag(info.Config.Image)
 }
@@ -816,17 +804,17 @@ func connectContainerByID(ctx context.Context, containerID, networkName, alias s
 	}
 	defer func() { _ = cli.Close() }()
 
-	endpointCfg := &network.EndpointSettings{}
+	var aliases []string
 	if alias != "" {
-		endpointCfg.Aliases = []string{alias}
+		aliases = []string{alias}
 	}
 
-	err = cli.NetworkConnect(ctx, networkName, containerID, endpointCfg)
+	err = cli.NetworkConnect(ctx, networkName, containerID, aliases)
 	if err != nil {
 		// Container is already attached to the network → idempotent no-op.
 		// Docker returns HTTP 409 for both "already exists" and "endpoint with
-		// name <x> already exists" — errdefs.IsConflict catches both.
-		if cerrdefs.IsConflict(err) {
+		// name <x> already exists" — IsConflict catches both.
+		if IsConflict(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to connect container to network: %w", err)
@@ -839,28 +827,32 @@ func connectContainerByID(ctx context.Context, containerID, networkName, alias s
 // so callers that look beyond reachability see a controlled failure.
 type noopSDK struct{}
 
-func (noopSDK) Ping(context.Context) (types.Ping, error) { return types.Ping{}, nil }
-func (noopSDK) NetworkList(context.Context, network.ListOptions) ([]network.Summary, error) {
+func (noopSDK) Ping(context.Context) error { return nil }
+func (noopSDK) NetworkList(context.Context, string) ([]networkSummary, error) {
 	return nil, nil
 }
 
-func (noopSDK) NetworkCreate(context.Context, string, network.CreateOptions) (network.CreateResponse, error) {
-	return network.CreateResponse{}, nil
-}
-func (noopSDK) NetworkRemove(context.Context, string) error { return nil }
-func (noopSDK) NetworkConnect(context.Context, string, string, *network.EndpointSettings) error {
+func (noopSDK) NetworkCreate(context.Context, string, string) error { return nil }
+func (noopSDK) NetworkRemove(context.Context, string) error         { return nil }
+func (noopSDK) NetworkConnect(context.Context, string, string, []string) error {
 	return nil
 }
 
-func (noopSDK) ContainerInspect(context.Context, string) (container.InspectResponse, error) {
-	return container.InspectResponse{}, errors.New("noopSDK: not found")
+func (noopSDK) ContainerInspect(context.Context, string) (inspectResponse, error) {
+	return inspectResponse{}, errors.New("noopSDK: not found")
 }
 
-func (noopSDK) ContainerList(context.Context, container.ListOptions) ([]container.Summary, error) {
+func (noopSDK) ContainerList(context.Context, bool, string) ([]containerSummary, error) {
 	return nil, nil
 }
 
-func (noopSDK) ImagePull(context.Context, string, image.PullOptions) (io.ReadCloser, error) {
+func (noopSDK) ImagePull(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
+}
+func (noopSDK) Events(context.Context, map[string][]string) (<-chan Event, <-chan error) {
+	eventCh := make(chan Event)
+	errCh := make(chan error, 1)
+	close(eventCh)
+	return eventCh, errCh
 }
 func (noopSDK) Close() error { return nil }
