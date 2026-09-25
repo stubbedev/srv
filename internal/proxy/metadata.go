@@ -48,7 +48,7 @@ const currentSchemaVersion = 1
 
 // proxiesDir returns ~/.config/srv/proxies.
 func proxiesDir(cfg *config.Config) string {
-	return filepath.Join(cfg.Root, "proxies")
+	return filepath.Join(cfg.Root, constants.ProxiesSubdir)
 }
 
 // metadataPath returns the metadata.yml path for a given proxy.

@@ -157,7 +157,7 @@ func DockerComposeTemplate(networkName, sitesDir, dnsUser, dnsPass string) (stri
 		traefikSvc.NetworkMode = "host"
 	} else {
 		// Mac/Windows: publish the host ports and join the shared network.
-		traefikSvc.Ports = []string{"80:80", "443:443", "88:88", "8080:8080"}
+		traefikSvc.Ports = []string{constants.PortMapHTTP, constants.PortMapHTTPS, constants.PortMapInternal, constants.PortMapDashboard}
 		traefikSvc.Networks = []string{"traefik"}
 	}
 
@@ -543,6 +543,23 @@ func renderTraefikTemplate(networkName, email string) ([]byte, error) {
 	}
 	if err := yamlpatch.SetPath(&doc, "certificatesResolvers.letsencrypt.acme.email", email); err != nil {
 		return nil, fmt.Errorf("failed to set acme email: %w", err)
+	}
+	// The binding addresses and log buffer are overwritten from constants so
+	// the template literal can never be the source of truth.
+	for _, bind := range []struct {
+		path string
+		val  string
+	}{
+		{"entryPoints.web.address", constants.BindHTTP},
+		{"entryPoints.websecure.address", constants.BindHTTPS},
+		{"entryPoints.internal.address", constants.BindInternal},
+	} {
+		if err := yamlpatch.SetPath(&doc, bind.path, bind.val); err != nil {
+			return nil, fmt.Errorf("failed to set %s: %w", bind.path, err)
+		}
+	}
+	if err := yamlpatch.SetPath(&doc, "accessLog.bufferingSize", constants.AccessLogBufferSizeDefault); err != nil {
+		return nil, fmt.Errorf("failed to set access log buffer: %w", err)
 	}
 	return yamlpatch.Marshal(&doc)
 }

@@ -200,12 +200,12 @@ func WriteTraefikConfig(cfg *config.Config) error {
 	doc.HTTP.Routers = map[string]tfRouter{
 		"metrics-grafana": {
 			Rule:        fmt.Sprintf("Host(`%s`)", GrafanaDomain),
-			EntryPoints: []string{"websecure"},
+			EntryPoints: []string{constants.EntryPointWebsecure},
 			Service:     "metrics-grafana",
 		},
 		"metrics-prometheus": {
 			Rule:        fmt.Sprintf("Host(`%s`)", PrometheusDomain),
-			EntryPoints: []string{"websecure"},
+			EntryPoints: []string{constants.EntryPointWebsecure},
 			Service:     "metrics-prometheus",
 		},
 	}

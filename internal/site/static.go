@@ -175,7 +175,7 @@ func buildTraefikLabels(name string, domains []string, isLocal, wildcard bool, p
 	labels := map[string]string{
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.%s.rule", name):                      traefik.BuildHostRule(domains, wildcard),
-		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               "websecure",
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints", name):               constants.EntryPointWebsecure,
 		fmt.Sprintf("traefik.http.routers.%s.tls", name):                       "true",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", name): strconv.Itoa(port),
 	}

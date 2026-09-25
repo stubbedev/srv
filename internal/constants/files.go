@@ -82,6 +82,8 @@ const (
 	TraefikSubdir = "traefik"
 	// SitesSubdir is the sites subdirectory name.
 	SitesSubdir = "sites"
+	// ProxiesSubdir is the proxies subdirectory name (proxy metadata sidecars).
+	ProxiesSubdir = "proxies"
 	// CertsSubdir is the certificates subdirectory name.
 	CertsSubdir = "certs"
 	// LogsSubdir is the logs subdirectory name.

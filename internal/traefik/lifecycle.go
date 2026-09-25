@@ -50,7 +50,7 @@ func SetupDashboardProxy() error {
 
 	domain := constants.TraefikDashboardDomain
 	name := constants.TraefikDashboardProxyName
-	proxySiteName := "_proxy-" + name
+	proxySiteName := constants.ProxyCertSitePrefix + name
 
 	if _, err := EnsureLocalCert(proxySiteName, []string{domain}, false); err != nil {
 		return fmt.Errorf("failed to generate certificate for %s: %w", domain, err)

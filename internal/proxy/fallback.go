@@ -154,7 +154,7 @@ func renderFallbackNginx(spec FallbackSpec) (string, error) {
 	}
 	timeout := spec.FallbackTimeout
 	if timeout == "" {
-		timeout = "2s"
+		timeout = constants.FallbackTimeoutDefault
 	}
 
 	// A host-network sidecar must not bind :80 (Traefik owns it) — it listens

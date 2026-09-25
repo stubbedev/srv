@@ -128,8 +128,8 @@ func pathsTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ pathsIn) (*mcpsdk
 	}
 	return nil, pathsOut{
 		ConfigRoot:     cfg.Root,
-		SitesDir:       filepath.Join(cfg.Root, "sites"),
-		ProxiesDir:     filepath.Join(cfg.Root, "proxies"),
+		SitesDir:       filepath.Join(cfg.Root, constants.SitesSubdir),
+		ProxiesDir:     filepath.Join(cfg.Root, constants.ProxiesSubdir),
 		TraefikDir:     cfg.TraefikDir,
 		TraefikConfDir: cfg.TraefikConfDir(),
 		UserConfigFile: filepath.Join(cfg.Root, constants.UserConfigFile),

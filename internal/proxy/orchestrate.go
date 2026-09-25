@@ -24,7 +24,7 @@ import (
 
 // CertSiteName is the synthetic site name a proxy's local cert is stored
 // under, kept distinct from real sites so cert files never collide.
-func CertSiteName(name string) string { return "_proxy-" + name }
+func CertSiteName(name string) string { return constants.ProxyCertSitePrefix + name }
 
 // AddSpec describes a proxy to create. Exactly one of Port or Container must
 // be set. Container is "name:port". When FallbackURL is set, an nginx sidecar

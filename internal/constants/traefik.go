@@ -66,8 +66,28 @@ const (
 	PortMapHTTPS = "443:443"
 	// PortMapDashboard is the dashboard port mapping.
 	PortMapDashboard = "8080:8080"
+	// PortMapInternal is the plain-HTTP internal entrypoint mapping.
+	PortMapInternal = "88:88"
 	// PortMapDNS is the DNS port mapping (localhost only).
 	PortMapDNS = "127.0.0.1:53:53/udp"
+	// AccessLogBufferSizeDefault is the access-log buffer size rendered into
+	// traefik.yml (the template's literal is overwritten from here at render
+	// time so there is one source of truth).
+	AccessLogBufferSizeDefault = 100
+)
+
+// Synthetic cert-site naming.
+const (
+	// ProxyCertSitePrefix prefixes the synthetic site name a proxy's local
+	// cert and fallback sidecar are stored under.
+	ProxyCertSitePrefix = "_proxy-"
+)
+
+// Proxy defaults.
+const (
+	// FallbackTimeoutDefault is the connect timeout to the primary upstream
+	// before the fallback sidecar takes over.
+	FallbackTimeoutDefault = "2s"
 )
 
 // =============================================================================

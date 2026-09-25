@@ -103,7 +103,7 @@ func init() {
 	proxyAddCmd.Flags().BoolVarP(&proxyAddFlags.force, "force", "f", false, "Overwrite existing proxy configuration")
 	proxyAddCmd.Flags().BoolVar(&proxyAddFlags.wildcard, "wildcard", false, "Also match one-level subdomains (e.g. *.foo.test)")
 	proxyAddCmd.Flags().StringVar(&proxyAddFlags.fallbackURL, "fallback", "", "URL to proxy to when the primary upstream returns 5xx (e.g. https://prod.example.com)")
-	proxyAddCmd.Flags().StringVar(&proxyAddFlags.fallbackTimeout, "fallback-timeout", "2s", "Connect timeout to the primary upstream before falling back")
+	proxyAddCmd.Flags().StringVar(&proxyAddFlags.fallbackTimeout, "fallback-timeout", constants.FallbackTimeoutDefault, "Connect timeout to the primary upstream before falling back")
 	_ = proxyAddCmd.MarkFlagRequired("domain")
 
 	proxyCmd.GroupID = GroupProxy
