@@ -14,7 +14,6 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/tufanbarisyildirim/gonginx v0.0.0-20260220081509-8e17ce617db3
 	gopkg.in/yaml.v3 v3.0.1
-	howett.net/plist v1.0.1
 )
 
 require (

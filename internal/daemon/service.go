@@ -2,12 +2,12 @@ package daemon
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
-
-	"howett.net/plist"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
@@ -256,20 +256,14 @@ func GetSystemdStatus() (string, error) {
 // and escaping are handled by the library. Struct field order is preserved in
 // the output; the two nested dicts have a single key each, so map ordering is
 // deterministic.
-type launchdPlist struct {
-	Label                string            `plist:"Label"`
-	ProgramArguments     []string          `plist:"ProgramArguments"`
-	RunAtLoad            bool              `plist:"RunAtLoad"`
-	KeepAlive            map[string]bool   `plist:"KeepAlive"`
-	StandardOutPath      string            `plist:"StandardOutPath"`
-	StandardErrorPath    string            `plist:"StandardErrorPath"`
-	EnvironmentVariables map[string]string `plist:"EnvironmentVariables"`
-}
-
-// renderLaunchdPlist builds the LaunchAgent plist XML. The daemon is kept alive
-// across non-zero exits (KeepAlive/SuccessfulExit=false) and runs with a PATH
-// that includes the binary's own dir plus the usual Homebrew/system locations.
-// As with the systemd unit, SRV_ROOT and SRV_CONTAINER_ENGINE are carried over
+// renderLaunchdPlist builds the LaunchAgent plist XML by hand: the document
+// is a fixed key set over strings, one array, one bool, and two sub-dicts, so
+// a writer is smaller than the plist marshalling dependency. Keys are emitted
+// in a stable (alphabetical) order — launchd does not care, but deterministic
+// output keeps installs reproducible. The daemon is kept alive across
+// non-zero exits (KeepAlive/SuccessfulExit=false) and runs with a PATH that
+// includes the binary's own dir plus the usual Homebrew/system locations. As
+// with the systemd unit, SRV_ROOT and SRV_CONTAINER_ENGINE are carried over
 // when set so the daemon honours the overrides its installer ran under.
 func renderLaunchdPlist(executable, logPath string) (string, error) {
 	env := map[string]string{
@@ -280,20 +274,47 @@ func renderLaunchdPlist(executable, logPath string) (string, error) {
 			env[key] = val
 		}
 	}
-	doc := launchdPlist{
-		Label:                "dev.stubbe.srv-daemon",
-		ProgramArguments:     []string{executable, "daemon", "start", "--foreground"},
-		RunAtLoad:            true,
-		KeepAlive:            map[string]bool{"SuccessfulExit": false},
-		StandardOutPath:      logPath,
-		StandardErrorPath:    logPath,
-		EnvironmentVariables: env,
+
+	var b strings.Builder
+	w := func(format string, args ...any) {
+		fmt.Fprintf(&b, format, args...)
 	}
-	data, err := plist.MarshalIndent(doc, plist.XMLFormat, "    ")
-	if err != nil {
-		return "", fmt.Errorf("marshal launchd plist: %w", err)
+	key := func(name, value string) {
+		w("    <key>%s</key>\n    <string>%s</string>\n", name, plistEscape(value))
 	}
-	return string(data) + "\n", nil
+	w("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+	w("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")
+	w("<plist version=\"1.0\">\n<dict>\n")
+	key("EnvironmentVariables", "")
+	w("    <dict>\n")
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		w("        <key>%s</key>\n        <string>%s</string>\n", k, plistEscape(env[k]))
+	}
+	w("    </dict>\n")
+	w("    <key>KeepAlive</key>\n    <dict>\n        <key>SuccessfulExit</key>\n        <false/>\n    </dict>\n")
+	key("Label", "dev.stubbe.srv-daemon")
+	w("    <key>ProgramArguments</key>\n    <array>\n")
+	for _, arg := range []string{executable, "daemon", "start", "--foreground"} {
+		w("        <string>%s</string>\n", plistEscape(arg))
+	}
+	w("    </array>\n")
+	w("    <key>RunAtLoad</key>\n    <true/>\n")
+	key("StandardErrorPath", logPath)
+	key("StandardOutPath", logPath)
+	w("</dict>\n</plist>\n")
+	return b.String(), nil
+}
+
+// plistEscape escapes the five XML entities for attribute/element text.
+func plistEscape(s string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"\"", "&quot;",
+		"'", "&apos;",
+	)
+	return r.Replace(s)
 }
 
 func launchdPlistPath() (string, error) {

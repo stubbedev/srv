@@ -33,3 +33,30 @@ func TestRenderSystemdUnitGolden(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", unit, want)
 	}
 }
+
+func TestRenderLaunchdPlistIsValid(t *testing.T) {
+	t.Setenv("SRV_ROOT", "/custom/root")
+	plist, err := renderLaunchdPlist("/usr/bin/srv", "/tmp/srv.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"<key>Label</key>", "<string>dev.stubbe.srv-daemon</string>",
+		"<key>RunAtLoad</key>", "<true/>",
+		"<key>SuccessfulExit</key>", "<false/>",
+		"<key>SRV_ROOT</key>", "<string>/custom/root</string>",
+		"<!DOCTYPE plist",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Errorf("plist missing %q:\n%s", want, plist)
+		}
+	}
+	// An executable path with XML-special characters must not break the file.
+	escaped, err := renderLaunchdPlist("/opt/a b&c<d>/srv", "/tmp/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(escaped, "a b&amp;c&lt;d&gt;") {
+		t.Errorf("XML escaping missing:\n%s", escaped)
+	}
+}
