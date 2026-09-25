@@ -56,7 +56,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		cfg, cfgErr := config.Load()
 		ui.Warn("--fresh removes the entire srv configuration:")
 		ui.Blank()
-		ui.Print("  - Stop and remove Traefik and DNS containers")
+		ui.Print("  - Stop and remove the Traefik container")
 		if cfgErr == nil {
 			ui.Print("  - Delete the config directory: %s", cfg.Root)
 		}

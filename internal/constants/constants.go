@@ -106,13 +106,6 @@ const (
 // Random String Constants
 // =============================================================================
 
-const (
-	// DNSUserLength is the length of the DNS HTTP user string.
-	DNSUserLength = 16
-	// DNSPassLength is the length of the DNS HTTP password string.
-	DNSPassLength = 32
-)
-
 // =============================================================================
 // Default Values
 // =============================================================================

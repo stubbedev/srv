@@ -24,6 +24,9 @@ type fakeSDK struct {
 	connectErr   error
 	connectCount int
 
+	removeContainerErr   error
+	removeContainerCount int
+
 	inspect    map[string]inspectResponse
 	inspectErr map[string]error
 
@@ -76,6 +79,11 @@ func (f *fakeSDK) ContainerInspect(ctx context.Context, name string) (inspectRes
 func (f *fakeSDK) ContainerList(ctx context.Context, all bool, labelFilter string) ([]containerSummary, error) {
 	f.listContainersCall++
 	return f.listContainers, f.listContainersErr
+}
+
+func (f *fakeSDK) ContainerRemove(ctx context.Context, name string) error {
+	f.removeContainerCount++
+	return f.removeContainerErr
 }
 
 func (f *fakeSDK) ImagePull(ctx context.Context, ref string) (io.ReadCloser, error) {

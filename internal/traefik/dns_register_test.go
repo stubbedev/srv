@@ -9,7 +9,6 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
 
@@ -205,24 +204,6 @@ func TestSetupMacOSResolverCallsUpdate(t *testing.T) {
 	setupDNSTest(t)
 	swapShell(t, shelltest.New(nil))
 	_ = setupMacOSResolver()
-}
-
-func TestReloadDNS(t *testing.T) {
-	setupDNSTest(t)
-	swapShell(t, shelltest.New(nil))
-	// docker.SwapComposeExec stub keeps the call from forking.
-	// Without it ReloadDNS shells out to `docker compose`.
-	// Just verify no panic via the composeExec seam already wired in
-	// other tests — call with empty defaults and accept either outcome.
-	_ = ReloadDNS()
-}
-
-func TestReloadDNSHosts(t *testing.T) {
-	setupDNSTest(t)
-	t.Cleanup(docker.SwapDockerExec(func(bool, ...string) error { return nil }))
-	if err := reloadDNSHosts(); err != nil {
-		t.Errorf("err: %v", err)
-	}
 }
 
 func TestUpdateDnsmasqConfigWithWildcards(t *testing.T) {

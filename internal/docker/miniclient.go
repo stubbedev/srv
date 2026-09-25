@@ -35,6 +35,18 @@ func IsConflict(err error) bool {
 	return errors.As(err, &c)
 }
 
+// notFoundError marks the HTTP 404 the daemon returns for a missing container
+// or network.
+type notFoundError struct{ op string }
+
+func (e *notFoundError) Error() string { return e.op + ": not found" }
+
+// IsNotFound reports whether err is the daemon's 404 class.
+func IsNotFound(err error) bool {
+	var n *notFoundError
+	return errors.As(err, &n)
+}
+
 // networkSummary is the subset of GET /networks srv reads.
 type networkSummary struct {
 	Name string `json:"Name"`
@@ -158,6 +170,13 @@ func (m *miniClient) NetworkConnect(ctx context.Context, networkName, containerI
 	return m.do(ctx, http.MethodPost, "/networks/"+networkName+"/connect", nil, body, nil)
 }
 
+// ContainerRemove force-deletes a container by name. A missing container is
+// reported as notFoundError so callers treat "gone" as success.
+func (m *miniClient) ContainerRemove(ctx context.Context, name string) error {
+	q := url.Values{"force": []string{"1"}}
+	return m.do(ctx, http.MethodDelete, "/containers/"+name, q, nil, nil)
+}
+
 // ContainerInspect fetches the inspect subset for a container (by name or ID).
 func (m *miniClient) ContainerInspect(ctx context.Context, name string) (inspectResponse, error) {
 	var info inspectResponse
@@ -278,6 +297,8 @@ func (m *miniClient) do(ctx context.Context, method, path string, query url.Valu
 	switch {
 	case resp.StatusCode == http.StatusConflict:
 		return &conflictError{op: method + " " + path}
+	case resp.StatusCode == http.StatusNotFound:
+		return &notFoundError{op: method + " " + path}
 	case resp.StatusCode >= 300:
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg)))

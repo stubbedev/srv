@@ -14,6 +14,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/dnsd"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/fsutil"
 )
@@ -23,9 +24,13 @@ func IsRunning() bool {
 	return docker.IsContainerRunning(docker.ContainerTraefik)
 }
 
-// IsDNSRunning checks if the DNS container is running.
+// IsDNSRunning checks whether srv's embedded DNS server is answering on
+// 127.0.0.1:53. The probe queries the health-check name, which only srv's
+// server answers from its local zones — a foreign resolver that happens to
+// own the port would forward it upstream and come back without the expected
+// loopback answer, reading as "not running".
 func IsDNSRunning() bool {
-	return docker.IsContainerRunning(docker.ContainerDNS)
+	return dnsd.Ping()
 }
 
 // DashboardURL returns the Traefik dashboard URL (plain HTTP, local port).

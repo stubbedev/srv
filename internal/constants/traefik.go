@@ -68,8 +68,6 @@ const (
 	PortMapDashboard = "8080:8080"
 	// PortMapInternal is the plain-HTTP internal entrypoint mapping.
 	PortMapInternal = "88:88"
-	// PortMapDNS is the DNS port mapping (localhost only).
-	PortMapDNS = "127.0.0.1:53:53/udp"
 	// AccessLogBufferSizeDefault is the access-log buffer size rendered into
 	// traefik.yml (the template's literal is overwritten from here at render
 	// time so there is one source of truth).

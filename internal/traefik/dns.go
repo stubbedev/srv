@@ -15,7 +15,6 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/platform"
@@ -644,8 +643,9 @@ func UnregisterLocalDomain(domain string) error {
 
 // buildDnsmasqConf renders dnsmasq.conf. Only wildcard domains and DNS-alias
 // redirects land here (via address= directives); exact local domains go into
-// the hostsdir instead. dnsmasq re-reads this file only on a full restart, so
-// changing its content is what makes a DNS container restart necessary.
+// the hostsdir instead. The file name and directives keep the dnsmasq shape —
+// it is the on-disk contract the embedded DNS server (internal/dnsd) parses,
+// and a familiar format for anyone who reads it by hand.
 func buildDnsmasqConf(wildcards []string, aliases []ResolvedAlias, upstreamDNS []string) string {
 	var b strings.Builder
 	b.WriteString("# Local domains managed by srv\n")
@@ -831,51 +831,10 @@ func updateDnsmasqConfigLocked() error {
 	// Flush system DNS cache so the new routing takes effect immediately.
 	FlushDNSCache()
 
-	if !IsDNSRunning() {
-		return nil
-	}
-
-	// A change to dnsmasq.conf (wildcard domains or upstream servers) needs a
-	// container restart — dnsmasq only re-reads the main config on restart.
-	if confChanged {
-		return ReloadDNS()
-	}
-
-	// A change confined to the hostsdir — the common case, an ordinary site
-	// add or remove — only needs a SIGHUP: dnsmasq re-reads the hosts files
-	// and flushes its cache without dropping the listening socket. If the
-	// signal fails for any reason, fall back to a full reload so the change
-	// still lands.
-	if hostsChanged {
-		if err := reloadDNSHosts(); err != nil {
-			return ReloadDNS()
-		}
-	}
-
+	// The embedded DNS server (internal/dnsd, hosted by the daemon) watches
+	// both generated files and re-reads them within a fraction of a second.
+	// There is no reload signal and no container to restart; when the daemon
+	// is not running, the files on disk are the source of truth it loads on
+	// next start.
 	return nil
-}
-
-// reloadDNSHosts sends SIGHUP to the running dnsmasq so it re-reads its
-// hostsdir and flushes its cache. This applies exact-domain adds and removes
-// instantly without restarting the container. It does NOT re-read the main
-// config file — wildcard/upstream changes still go through ReloadDNS.
-func reloadDNSHosts() error {
-	return docker.ExecNonInteractive(docker.ContainerDNS, "pkill", "-HUP", "dnsmasq")
-}
-
-// ReloadDNS recreates the DNS container so it picks up changes to dnsmasq.conf.
-// It first regenerates docker-compose.yml, then uses `up -d --force-recreate`
-// rather than `restart`, so that changes to the compose definition itself —
-// notably the hostsdir bind mount added by newer srv versions — also take
-// effect on an install created by an older version, without a full reinstall.
-func ReloadDNS() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	if err := writeTraefikCompose(cfg); err != nil {
-		return fmt.Errorf("refresh traefik compose: %w", err)
-	}
-	return docker.Compose(cfg.TraefikDir, "up", "-d", "--force-recreate", "dns")
 }

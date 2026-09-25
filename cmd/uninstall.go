@@ -22,12 +22,11 @@ var uninstallCmd = &cobra.Command{
 	Short: "Completely remove srv from the system",
 	Long: `Completely remove srv and all its components from the system:
   1. Stops and removes the Traefik container
-  2. Stops and removes the DNS container
-  3. Removes system DNS configuration
-  4. Removes the daemon service
-  5. Removes the Docker network
-  6. Removes the config directory (~/.config/srv)
-  7. Removes the srv binary
+  2. Removes system DNS configuration
+  3. Removes the daemon service
+  4. Removes the Docker network
+  5. Removes the config directory (~/.config/srv)
+  6. Removes the srv binary
 
 WARNING: This will remove all srv configuration and registered sites.
 Site directories and their contents are NOT removed.
@@ -60,7 +59,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	if !uninstallFlags.force {
 		ui.Warn("This will completely remove srv from your system:")
 		ui.Blank()
-		ui.Print("  - Stop and remove Traefik and DNS containers")
+		ui.Print("  - Stop and remove the Traefik container")
 		ui.Print("  - Remove system DNS configuration")
 		ui.Print("  - Remove daemon service")
 		ui.Print("  - Remove Docker network")
@@ -77,7 +76,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 
 	ui.Blank()
 
-	// Step 1: Stop Traefik and DNS containers
+	// Step 1: Stop the Traefik container
 	ui.Info("Stopping containers...")
 	if cfg != nil && (traefik.IsRunning() || traefik.IsDNSRunning()) {
 		if err := docker.Compose(cfg.TraefikDir, "down"); err != nil {

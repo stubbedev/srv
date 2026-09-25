@@ -63,16 +63,12 @@ const (
 const (
 	// ImageTraefik is the Traefik reverse proxy image used for routing.
 	ImageTraefik = "traefik:latest"
-	// ImageDNS is the dnsmasq image used for local DNS resolution of .test domains.
-	ImageDNS = "jpillora/dnsmasq:latest"
 )
 
 // Container name constants.
 const (
 	// ContainerTraefik is the name of the Traefik container managed by srv.
 	ContainerTraefik = "srv_proxy"
-	// ContainerDNS is the name of the DNS container managed by srv.
-	ContainerDNS = "srv_dns"
 )
 
 // sdkClient is the daemon API surface srv uses. The production implementation
@@ -84,6 +80,7 @@ type sdkClient interface {
 	NetworkRemove(ctx context.Context, name string) error
 	NetworkConnect(ctx context.Context, networkName, containerID string, aliases []string) error
 	ContainerInspect(ctx context.Context, name string) (inspectResponse, error)
+	ContainerRemove(ctx context.Context, name string) error
 	ContainerList(ctx context.Context, all bool, labelFilter string) ([]containerSummary, error)
 	ImagePull(ctx context.Context, ref string) (io.ReadCloser, error)
 	Events(ctx context.Context, filters map[string][]string) (<-chan Event, <-chan error)
@@ -764,6 +761,24 @@ func GetContainerImageVersion(containerName string) string {
 	return extractImageTag(info.Config.Image)
 }
 
+// RemoveContainer force-removes a container by name. A missing container is
+// a success — the goal is "gone", not "was present".
+func RemoveContainer(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
+	defer cancel()
+
+	cli, err := newClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	if err := cli.ContainerRemove(ctx, name); err != nil && !IsNotFound(err) {
+		return fmt.Errorf("remove container %s: %w", name, err)
+	}
+	return nil
+}
+
 // extractImageTag returns the tag portion of "image:tag" or "latest" when
 // untagged. Empty input yields "latest" to mirror Docker's default tag.
 func extractImageTag(image string) string {
@@ -841,6 +856,8 @@ func (noopSDK) NetworkConnect(context.Context, string, string, []string) error {
 func (noopSDK) ContainerInspect(context.Context, string) (inspectResponse, error) {
 	return inspectResponse{}, errors.New("noopSDK: not found")
 }
+
+func (noopSDK) ContainerRemove(context.Context, string) error { return nil }
 
 func (noopSDK) ContainerList(context.Context, bool, string) ([]containerSummary, error) {
 	return nil, nil

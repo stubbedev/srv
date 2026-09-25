@@ -97,7 +97,7 @@ func TestRemoteEndpointIsPassedThroughAndNotMounted(t *testing.T) {
 		t.Errorf("endpoint = %v, want the tcp url", endpoint)
 	}
 
-	compose, err := DockerComposeTemplate("srv-network", "/tmp/sites", "u", "p")
+	compose, err := DockerComposeTemplate("srv-network", "/tmp/sites")
 	if err != nil {
 		t.Fatal(err)
 	}

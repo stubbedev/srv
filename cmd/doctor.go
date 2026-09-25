@@ -284,14 +284,14 @@ func checkPorts(engineUp bool) int {
 		port      int
 		name      string
 		ownedByFn func() bool
-		container string
+		container string // empty for the daemon-hosted DNS server
 	}
 	ports := []portInfo{
 		{constants.PortHTTP, constants.PortNameHTTP, traefik.IsRunning, docker.ContainerTraefik},
 		{constants.PortHTTPS, constants.PortNameHTTPS, traefik.IsRunning, docker.ContainerTraefik},
 		{constants.PortInternal, constants.PortNameInternal, traefik.IsRunning, docker.ContainerTraefik},
 		{constants.PortDashboard, constants.PortNameDashboard, traefik.IsRunning, docker.ContainerTraefik},
-		{constants.PortDNS, constants.PortNameDNS, traefik.IsDNSRunning, docker.ContainerDNS},
+		{constants.PortDNS, constants.PortNameDNS, traefik.IsDNSRunning, ""},
 	}
 
 	for _, p := range ports {
@@ -300,9 +300,13 @@ func checkPorts(engineUp bool) int {
 			continue
 		}
 
-		if engineUp && p.ownedByFn() {
-			version := docker.GetContainerImageVersion(p.container)
-			ui.IndentedSuccess(1, ":%d (%s) - in use by srv [%s:%s]", p.port, p.name, p.container, version)
+		if p.ownedByFn() {
+			if p.container != "" && engineUp {
+				version := docker.GetContainerImageVersion(p.container)
+				ui.IndentedSuccess(1, ":%d (%s) - in use by srv [%s:%s]", p.port, p.name, p.container, version)
+			} else {
+				ui.IndentedSuccess(1, ":%d (%s) - in use by the srv daemon (embedded DNS)", p.port, p.name)
+			}
 			continue
 		}
 
@@ -369,7 +373,7 @@ func checkDNS() int {
 	hasLocalDomains := len(localDomains) > 0
 
 	if traefik.IsDNSRunning() {
-		ui.IndentedSuccess(1, "Container is running")
+		ui.IndentedSuccess(1, "Embedded DNS server is running (srv daemon)")
 
 		// Only check DNS resolution if there are local domains to test against
 		if hasLocalDomains {
@@ -386,10 +390,10 @@ func checkDNS() int {
 			ui.IndentedDim(1, "No local domains registered")
 		}
 	} else {
-		// DNS container not running is only an issue if there are local domains
+		// DNS not running is only an issue if there are local domains
 		if hasLocalDomains {
-			ui.IndentedWarn(1, "Container is not running")
-			ui.IndentedDim(1, "Run 'srv install' to start")
+			ui.IndentedWarn(1, "Embedded DNS server is not running")
+			ui.IndentedDim(1, "It is hosted by the srv daemon — run 'srv daemon install' (or 'srv install') to start it")
 			issues++
 		} else {
 			ui.IndentedDim(1, "Not running (no local domains registered)")
@@ -812,24 +816,21 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Pull both images. Layer detail goes to verbose diagnostics; the
-	// non-verbose default shows one line per image, not Docker's JSON stream.
+	// Pull the one image the stack still needs: DNS is served by the srv
+	// daemon's embedded server, not a container.
 	ui.Info("Pulling latest images...")
 	progress := func(update string) { ui.VerboseLog("pull: %s", update) }
 	if err := docker.Pull(docker.ImageTraefik, progress); err != nil {
 		return fmt.Errorf("failed to pull Traefik image: %w", err)
 	}
-	if err := docker.Pull(docker.ImageDNS, progress); err != nil {
-		return fmt.Errorf("failed to pull DNS image: %w", err)
-	}
 
 	// Recreate containers if running
-	if traefik.IsRunning() || traefik.IsDNSRunning() {
+	if traefik.IsRunning() {
 		ui.Info("Recreating containers...")
 		if err := traefik.RecreateTraefik(); err != nil {
 			return fmt.Errorf("failed to recreate containers: %w", err)
 		}
-		ui.Success("Traefik and DNS updated and restarted")
+		ui.Success("Traefik updated and restarted")
 	} else {
 		ui.Success("Images updated")
 		ui.Dim("Run 'srv install' to start containers")

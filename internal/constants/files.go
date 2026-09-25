@@ -105,10 +105,6 @@ const (
 	EnvXDGConfigHome = "XDG_CONFIG_HOME"
 	// EnvACMEEmail is the environment variable prefix for ACME email.
 	EnvACMEEmail = "ACME_EMAIL"
-	// EnvDNSHTTPUser is the environment variable for the dnsmasq HTTP user.
-	EnvDNSHTTPUser = "DNS_HTTP_USER"
-	// EnvDNSHTTPPass is the environment variable for the dnsmasq HTTP password.
-	EnvDNSHTTPPass = "DNS_HTTP_PASS" //nolint:gosec // G101: the name of an env var, not a credential
 	// EnvMCPHTTPAddr overrides the listen address for `srv mcp --http`.
 	EnvMCPHTTPAddr = "SRV_MCP_HTTP_ADDR"
 	// EnvMCPHTTPPath overrides the endpoint path for `srv mcp --http`.

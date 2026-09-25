@@ -15,6 +15,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/dnsd"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/site"
@@ -125,8 +126,71 @@ func (d *Daemon) Run() error {
 		d.log("Metadata watcher disabled by --no-watch")
 	}
 
+	// Embedded DNS: serve the local domains from the generated zone files on
+	// the host loopback. The dnsmasq container this replaces is long gone from
+	// the stack; best-effort clean it up for installs upgraded from one, so
+	// the port it still holds frees up for this server.
+	d.startEmbeddedDNS()
+
 	// Watch Docker events
 	return d.watchEvents()
+}
+
+// startEmbeddedDNS binds 127.0.0.1:53 and serves the local-domain zones. It
+// never fails the daemon: DNS is one of its jobs, not its reason to run. A
+// bind failure (port held by the legacy container, or the unprivileged-port
+// sysctl on Linux) is retried on a slow timer so an upgrade converges without
+// a daemon restart.
+func (d *Daemon) startEmbeddedDNS() {
+	if d.cfg == nil || d.cfg.TraefikDir == "" {
+		return
+	}
+	go func() {
+		confPath := filepath.Join(d.cfg.TraefikDir, constants.DnsmasqConfFile)
+		hostsPath := filepath.Join(d.cfg.TraefikDir, constants.DnsmasqHostsDir, constants.DnsmasqHostsFile)
+
+		// The legacy dnsmasq container holds 127.0.0.1:53 on installs that
+		// predate the embedded server. It is no longer in the compose file, so
+		// nothing restarts it — remove it once, best-effort, then give the
+		// port a moment to settle.
+		_ = docker.RemoveContainer("srv_dns")
+
+		for d.ctx.Err() == nil {
+			server, err := dnsd.New(constants.LocalhostIP, 53, confPath, hostsPath)
+			if err != nil {
+				d.log("Embedded DNS unavailable (%v); retrying in 30s", err)
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-time.After(30 * time.Second):
+				}
+				continue
+			}
+			d.log("Embedded DNS listening on %s (zones: %s)", server.Addr(), d.cfg.TraefikDir)
+
+			watchDone := make(chan struct{})
+			go func() {
+				defer close(watchDone)
+				if err := server.Watch(); err != nil {
+					d.log("DNS zone watcher stopped: %v", err)
+				}
+			}()
+			_ = server.Serve()
+			<-watchDone
+
+			if d.ctx.Err() != nil {
+				return
+			}
+			// Serve returned while the daemon lives: transient failure. Back
+			// off briefly and rebind.
+			d.log("Embedded DNS stopped; restarting in 5s")
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}()
 }
 
 // log writes a timestamped message to the log file.

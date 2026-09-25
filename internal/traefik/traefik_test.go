@@ -5,85 +5,37 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/stubbedev/srv/internal/constants"
 )
 
 // ---------------------------------------------------------------------------
-// loadOrGenerateDNSCredentials
+// writeEnvFile / readEnvFile
 // ---------------------------------------------------------------------------
 
-func TestLoadOrGenerateDNSCredentials_GeneratesWhenMissing(t *testing.T) {
+func TestWriteEnvFilePreservesOtherKeys(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, "env.traefik")
 
-	user, pass, err := loadOrGenerateDNSCredentials(envPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if user == "" {
-		t.Error("expected non-empty user")
-	}
-	if pass == "" {
-		t.Error("expected non-empty pass")
-	}
-
-	// File should now contain the credentials.
-	data, err := os.ReadFile(envPath)
-	if err != nil {
-		t.Fatalf("env file not written: %v", err)
-	}
-	content := string(data)
-	if !strings.Contains(content, constants.EnvDNSHTTPUser+"="+user) {
-		t.Errorf("env file missing %s=%s; content: %s", constants.EnvDNSHTTPUser, user, content)
-	}
-	if !strings.Contains(content, constants.EnvDNSHTTPPass+"="+pass) {
-		t.Errorf("env file missing %s=%s; content: %s", constants.EnvDNSHTTPPass, pass, content)
-	}
-}
-
-func TestLoadOrGenerateDNSCredentials_ReusesExisting(t *testing.T) {
-	dir := t.TempDir()
-	envPath := filepath.Join(dir, "env.traefik")
-
-	// Pre-populate with known credentials.
-	existing := constants.EnvDNSHTTPUser + "=alice\n" + constants.EnvDNSHTTPPass + "=secret\n"
-	if err := os.WriteFile(envPath, []byte(existing), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	user, pass, err := loadOrGenerateDNSCredentials(envPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if user != "alice" {
-		t.Errorf("expected user=alice, got %q", user)
-	}
-	if pass != "secret" {
-		t.Errorf("expected pass=secret, got %q", pass)
-	}
-}
-
-func TestLoadOrGenerateDNSCredentials_PreservesOtherKeys(t *testing.T) {
-	dir := t.TempDir()
-	envPath := filepath.Join(dir, "env.traefik")
-
-	// Pre-populate with an unrelated key and no credentials.
+	// Pre-populate with an unrelated key, then persist a different one and
+	// check the original survives (writeEnvFile used to be fed by the
+	// credentials generator; the preservation contract now lives here).
 	if err := os.WriteFile(envPath, []byte("ACME_EMAIL=me@example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, err := loadOrGenerateDNSCredentials(envPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	envMap := readEnvFile(envPath)
+	envMap["OTHER_KEY"] = "value"
+	if err := writeEnvFile(envPath, envMap); err != nil {
+		t.Fatal(err)
 	}
 
 	data, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "ACME_EMAIL=me@example.com") {
-		t.Errorf("existing key ACME_EMAIL was lost; content: %s", data)
+	for _, want := range []string{"ACME_EMAIL=me@example.com", "OTHER_KEY=value"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("existing key lost; missing %q; content: %s", want, data)
+		}
 	}
 }
 

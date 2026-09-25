@@ -253,18 +253,17 @@ type composeDoc struct {
 	} `yaml:"networks"`
 }
 
-// TestDockerComposeTemplateCreds: positive — ordinary values land in the right
-// fields; negative — credentials and a sites path containing YAML-hostile
-// characters round-trip verbatim and cannot break the document or inject keys.
+// TestDockerComposeTemplateCreds: the template has no secrets left to
+// protect (the dnsmasq container and its HTTP credentials are gone — DNS is
+// daemon-hosted), so the remaining contract is that YAML-hostile path and
+// network values round-trip verbatim and cannot break the document or inject
+// keys.
 func TestDockerComposeTemplateCreds(t *testing.T) {
 	const (
-		user = "user1"
-		// Quotes, colon, newline, and a fake env var — all YAML-hostile.
-		pass     = "p:a\"s'’s\n- INJECTED=1"
 		sitesDir = "/sites:with\"quote"
 		network  = "net'name"
 	)
-	out, err := DockerComposeTemplate(network, sitesDir, user, pass)
+	out, err := DockerComposeTemplate(network, sitesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,16 +273,6 @@ func TestDockerComposeTemplateCreds(t *testing.T) {
 		t.Fatalf("hostile values broke the document: %v\n%s", err, out)
 	}
 
-	dns := doc.Services["dns"]
-	wantEnv := []string{"HTTP_USER=" + user, "HTTP_PASS=" + pass}
-	if len(dns.Environment) != 2 || dns.Environment[0] != wantEnv[0] || dns.Environment[1] != wantEnv[1] {
-		t.Errorf("env not round-tripped:\ngot:  %q\nwant: %q", dns.Environment, wantEnv)
-	}
-	// The injected "- INJECTED=1" line must be part of the password scalar, not
-	// a sibling list element.
-	if len(dns.Environment) != 2 {
-		t.Errorf("password leaked into an extra environment entry: %q", dns.Environment)
-	}
 	if doc.Networks["traefik"].Name != network {
 		t.Errorf("network name = %q, want %q", doc.Networks["traefik"].Name, network)
 	}
@@ -297,5 +286,8 @@ func TestDockerComposeTemplateCreds(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("sites volume not round-tripped, want %q in %q", wantVol, traefik.Volumes)
+	}
+	if _, has := doc.Services["dns"]; has {
+		t.Error("dns service must not come back — it is daemon-hosted now")
 	}
 }
