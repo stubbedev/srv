@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -83,11 +82,6 @@ func ValidateUserConfig(c *config.UserConfig) error {
 			problems = append(problems, err)
 		}
 	}
-	for _, p := range c.ParkedPaths {
-		if err := validateParkedPath(p); err != nil {
-			problems = append(problems, err)
-		}
-	}
 	return errors.Join(problems...)
 }
 
@@ -116,19 +110,6 @@ func validateUpstreamDNS(s string) error {
 	return nil
 }
 
-// validateParkedPath checks one `parked_paths` entry. A relative path would be
-// resolved against whatever directory srv happened to be started in, which is
-// not something a config file can mean.
-func validateParkedPath(p string) error {
-	if p == "" {
-		return errors.New("parked_paths: empty entry")
-	}
-	if !filepath.IsAbs(p) {
-		return fmt.Errorf("parked_paths %q: must be an absolute path", p)
-	}
-	return nil
-}
-
 // UserConfigJSON projects config.yml into the shape agents and scripts see.
 //
 // The keys are the yaml keys — the ones in the file the user edits and in the
@@ -140,7 +121,6 @@ func UserConfigJSON() (map[string]any, error) {
 	userCfg, err := UserConfig()
 	out := map[string]any{
 		"container_engine": userCfg.ContainerEngine,
-		"parked_paths":     nonNil(userCfg.ParkedPaths),
 		"upstream_dns":     nonNil(userCfg.UpstreamDNS),
 	}
 	if err != nil {
@@ -158,27 +138,4 @@ func nonNil(v []string) []string {
 		return []string{}
 	}
 	return v
-}
-
-// ParkedPaths returns the directories `srv park` watches, empty rather than
-// nil so a caller can range over it unguarded.
-func ParkedPaths() ([]string, error) {
-	userCfg, err := UserConfig()
-	if err != nil {
-		return nil, err
-	}
-	return nonNil(userCfg.ParkedPaths), nil
-}
-
-// SetParkedPaths replaces the parked-directory list.
-//
-// This lives here rather than on config.Config, where it used to: those
-// accessors read and wrote config.yml directly, so they would have persisted a
-// relative path that then resolved against whatever directory srv happened to
-// be started in. They had no callers, which is the only reason it never bit.
-func SetParkedPaths(paths []string) error {
-	return UpdateUserConfig(func(c *config.UserConfig) error {
-		c.ParkedPaths = paths
-		return nil
-	})
 }

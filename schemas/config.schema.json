@@ -14,13 +14,6 @@
       ],
       "description": "Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2."
     },
-    "parked_paths": {
-      "items": {
-        "type": "string"
-      },
-      "type": "array",
-      "description": "Absolute directories that 'srv park' watches for new sites."
-    },
     "upstream_dns": {
       "items": {
         "type": "string"

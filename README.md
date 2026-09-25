@@ -931,7 +931,6 @@ _Path: `~/.config/srv/config.yml`_
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `container_engine` | string | no | Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2. |
-| `parked_paths` | array<string> | no | Absolute directories that 'srv park' watches for new sites. |
 | `upstream_dns` | array<string> | no | Upstream resolvers written into dnsmasq.conf as server= lines. Each entry must be an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4) when empty. |
 <!-- END:config -->
 

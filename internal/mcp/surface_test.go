@@ -176,7 +176,6 @@ func TestUserConfigResource(t *testing.T) {
 	}
 	if err := cfg.SaveUserConfig(&config.UserConfig{
 		ContainerEngine: "podman",
-		ParkedPaths:     []string{"/srv/projects"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +188,7 @@ func TestUserConfigResource(t *testing.T) {
 	if out["container_engine"] != "podman" {
 		t.Errorf("container_engine = %v, want podman (keys: %v)", out["container_engine"], slices.Sorted(maps.Keys(out)))
 	}
-	for _, goName := range []string{"ContainerEngine", "ParkedPaths", "UpstreamDNS"} {
+	for _, goName := range []string{"ContainerEngine", "UpstreamDNS"} {
 		if _, leaked := out[goName]; leaked {
 			t.Errorf("resource leaked the Go field name %q", goName)
 		}

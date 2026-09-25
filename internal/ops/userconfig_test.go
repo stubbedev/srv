@@ -63,32 +63,18 @@ func TestValidateUpstreamDNSRejectsInjection(t *testing.T) {
 	}
 }
 
-// ─── parked_paths ────────────────────────────────────────────────────────
-
-func TestValidateParkedPath(t *testing.T) {
-	if err := validateParkedPath("/srv/projects"); err != nil {
-		t.Errorf("absolute path rejected: %v", err)
-	}
-	for _, p := range []string{"", "relative/path", "./here", "~/projects"} {
-		if err := validateParkedPath(p); err == nil {
-			t.Errorf("validateParkedPath(%q) = nil, want a rejection", p)
-		}
-	}
-}
-
 // ─── whole-file validation ───────────────────────────────────────────────
 
 func TestValidateUserConfigReportsEveryProblemAtOnce(t *testing.T) {
 	err := ValidateUserConfig(&config.UserConfig{
 		ContainerEngine: "podmna",
 		UpstreamDNS:     []string{"not-an-ip", "8.8.8.8"},
-		ParkedPaths:     []string{"relative"},
 	})
 	if err == nil {
 		t.Fatal("ValidateUserConfig() = nil, want errors")
 	}
 	msg := err.Error()
-	for _, want := range []string{"podmna", "not-an-ip", "relative"} {
+	for _, want := range []string{"podmna", "not-an-ip"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not mention %q — a hand-edited file with several\nmistakes should not need one round trip per mistake", msg, want)
 		}
@@ -214,7 +200,6 @@ func TestUserConfigJSONUsesTheFilesOwnKeys(t *testing.T) {
 	withRoot(t)
 	if err := UpdateUserConfig(func(c *config.UserConfig) error {
 		c.ContainerEngine = "podman"
-		c.ParkedPaths = []string{"/srv/projects"}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -227,7 +212,7 @@ func TestUserConfigJSONUsesTheFilesOwnKeys(t *testing.T) {
 	if out["container_engine"] != "podman" {
 		t.Errorf("container_engine = %v", out["container_engine"])
 	}
-	for _, goName := range []string{"ContainerEngine", "ParkedPaths", "UpstreamDNS"} {
+	for _, goName := range []string{"ContainerEngine", "UpstreamDNS"} {
 		if _, bad := out[goName]; bad {
 			t.Errorf("projection leaked the Go field name %q", goName)
 		}
@@ -242,7 +227,7 @@ func TestUserConfigJSONRendersEmptyListsNotNull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"parked_paths", "upstream_dns"} {
+	for _, k := range []string{"upstream_dns"} {
 		v, ok := out[k].([]string)
 		if !ok {
 			t.Errorf("%s = %#v, want an empty slice", k, out[k])
@@ -279,7 +264,7 @@ func TestUserConfigJSONKeysMatchTheYAMLTags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"container_engine", "parked_paths", "upstream_dns"} {
+	for _, want := range []string{"container_engine", "upstream_dns"} {
 		if _, ok := out[want]; !ok {
 			t.Errorf("projection is missing the %q key", want)
 		}
@@ -290,73 +275,5 @@ func TestConfigPathIsUnderTheRoot(t *testing.T) {
 	cfg := withRoot(t)
 	if filepath.Dir(cfg.ConfigPath()) != cfg.Root {
 		t.Errorf("ConfigPath() = %q, want it directly under %q", cfg.ConfigPath(), cfg.Root)
-	}
-}
-
-// ─── parked paths ────────────────────────────────────────────────────────
-//
-// These accessors moved here from config.Config, where they wrote the file
-// directly. The round-trip cases came with them; the validation case is new.
-
-func TestParkedPathsRoundTrip(t *testing.T) {
-	withRoot(t)
-
-	got, err := ParkedPaths()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
-		t.Errorf("ParkedPaths() = %v on a fresh root, want empty", got)
-	}
-
-	if err := SetParkedPaths([]string{"/foo", "/bar"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err = ParkedPaths()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0] != "/foo" || got[1] != "/bar" {
-		t.Errorf("ParkedPaths() = %v, want [/foo /bar]", got)
-	}
-
-	if err := SetParkedPaths([]string{}); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := ParkedPaths(); len(got) != 0 {
-		t.Errorf("ParkedPaths() = %v after clearing, want empty", got)
-	}
-}
-
-func TestSetParkedPathsPreservesOtherKeys(t *testing.T) {
-	withRoot(t)
-	if err := UpdateUserConfig(func(c *config.UserConfig) error {
-		c.UpstreamDNS = []string{"1.1.1.1"}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetParkedPaths([]string{"/projects"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := UserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got.UpstreamDNS) != 1 || got.UpstreamDNS[0] != "1.1.1.1" {
-		t.Errorf("SetParkedPaths clobbered upstream_dns: %+v", got)
-	}
-}
-
-// A relative path would resolve against whatever directory srv was started in,
-// so it must not reach the file. The old config.Config accessors would have
-// written it.
-func TestSetParkedPathsRejectsRelative(t *testing.T) {
-	withRoot(t)
-	if err := SetParkedPaths([]string{"relative/projects"}); err == nil {
-		t.Fatal("SetParkedPaths() = nil for a relative path, want a refusal")
-	}
-	if got, _ := ParkedPaths(); len(got) != 0 {
-		t.Errorf("a relative path was persisted: %v", got)
 	}
 }

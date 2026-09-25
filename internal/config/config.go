@@ -25,7 +25,6 @@ type Config struct {
 // UserConfig holds user-configurable settings stored in config.yml.
 type UserConfig struct {
 	ContainerEngine string   `jsonschema:"description=Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2.,enum=auto,enum=docker,enum=podman,enum=colima,enum=orbstack,enum=rancher-desktop" yaml:"container_engine,omitempty"`
-	ParkedPaths     []string `jsonschema:"description=Absolute directories that 'srv park' watches for new sites."                                                                                                                                                                   yaml:"parked_paths,omitempty"`
 	UpstreamDNS     []string `jsonschema:"description=Upstream resolvers written into dnsmasq.conf as server= lines. Each entry must be an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4) when empty."                                       yaml:"upstream_dns,omitempty"`
 }
 

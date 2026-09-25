@@ -209,13 +209,8 @@ func TestLoadUserConfigEmpty(t *testing.T) {
 	}
 
 	// No config file exists yet
-	userCfg, err := cfg.LoadUserConfig()
-	if err != nil {
+	if _, err := cfg.LoadUserConfig(); err != nil {
 		t.Fatalf("LoadUserConfig() failed: %v", err)
-	}
-
-	if len(userCfg.ParkedPaths) > 0 {
-		t.Errorf("expected empty ParkedPaths, got %v", userCfg.ParkedPaths)
 	}
 }
 
@@ -229,10 +224,8 @@ func TestSaveAndLoadUserConfig(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	// Save user config with parked paths
-	userCfg := &UserConfig{
-		ParkedPaths: []string{"/path/to/projects", "/another/path"},
-	}
+	// Save user config
+	userCfg := &UserConfig{}
 	if err := cfg.SaveUserConfig(userCfg); err != nil {
 		t.Fatalf("SaveUserConfig() failed: %v", err)
 	}
@@ -247,15 +240,8 @@ func TestSaveAndLoadUserConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUserConfig() failed: %v", err)
 	}
-
-	if len(loadedCfg.ParkedPaths) != 2 {
-		t.Errorf("expected 2 parked paths, got %d", len(loadedCfg.ParkedPaths))
-	}
-	if loadedCfg.ParkedPaths[0] != "/path/to/projects" {
-		t.Errorf("ParkedPaths[0] = %v, want /path/to/projects", loadedCfg.ParkedPaths[0])
-	}
-	if loadedCfg.ParkedPaths[1] != "/another/path" {
-		t.Errorf("ParkedPaths[1] = %v, want /another/path", loadedCfg.ParkedPaths[1])
+	if loadedCfg == nil {
+		t.Fatal("nil user config")
 	}
 }
 
