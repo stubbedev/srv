@@ -100,13 +100,13 @@ func (c PortConflict) AutoFix() error {
 
 // CheckPortConflicts checks whether any of the ports srv requires are
 // occupied by a non-srv process. It skips ports already owned by srv
-// containers. Only ports 80, 443, and 53 are checked; port 8080 (dashboard)
+// containers. Only ports 80, 443, and 15353 are checked; port 8080 (dashboard)
 // is advisory only.
 //
-// Port 53 is checked on 127.0.0.1 specifically, because the dnsmasq
-// container binds "127.0.0.1:53:53/udp" — not 0.0.0.0:53. systemd-resolved's
-// stub listener on 127.0.0.53:53 does not conflict with this binding and is
-// not reported as a conflict.
+// Port 15353 is checked on 127.0.0.1 specifically, because srv's embedded DNS
+// server binds the loopback only. systemd-resolved's stub listener on
+// 127.0.0.53:53 does not conflict with this binding and is not reported as a
+// conflict.
 func CheckPortConflicts() []PortConflict {
 	type check struct {
 		port      int

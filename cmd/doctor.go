@@ -222,8 +222,9 @@ func checkComposeV2(eng engine.Engine) int {
 }
 
 // checkPrivilegedPorts reports the one genuine behavioural difference between a
-// rootful and a rootless engine: Traefik binds 80/443 and dnsmasq binds 53, all
-// below the kernel's unprivileged floor.
+// rootful and a rootless engine: Traefik binds 80/443, below the kernel's
+// unprivileged floor. srv's DNS server deliberately lives above it (port
+// 15353), so the daemon never needs the sysctl.
 func checkPrivilegedPorts(eng engine.Engine) int {
 	if !eng.Rootless() {
 		return 0
@@ -233,11 +234,11 @@ func checkPrivilegedPorts(eng engine.Engine) int {
 		return 0 // Not Linux, or no procfs — nothing to assert.
 	}
 	floor, err := strconv.Atoi(strings.TrimSpace(string(start)))
-	if err != nil || floor <= constants.PortDNS {
+	if err != nil || floor <= constants.PortHTTPS {
 		return 0
 	}
-	ui.IndentedError(1, "rootless %s cannot bind ports below %d (srv needs 53, 80, 443)", eng.Name, floor)
-	ui.IndentedDim(2, "either run the engine rootful, or: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
+	ui.IndentedError(1, "rootless %s cannot bind ports below %d (srv needs 80, 443)", eng.Name, floor)
+	ui.IndentedDim(2, "either run the engine rootful, or: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80")
 	return 1
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
+	"github.com/stubbedev/srv/internal/traefik"
 )
 
 // LogFile is the name of the daemon log file.
@@ -273,27 +274,35 @@ func fallbackTimeoutOrDefault(s string) time.Duration {
 	return d
 }
 
-// startEmbeddedDNS binds 127.0.0.1:53 and serves the local-domain zones. It
-// never fails the daemon: DNS is one of its jobs, not its reason to run. A
-// bind failure (port held by the legacy container, or the unprivileged-port
-// sysctl on Linux) is retried on a slow timer so an upgrade converges without
-// a daemon restart.
+// startEmbeddedDNS binds the loopback at the unprivileged embedded port
+// (constants.PortDNS — the daemon is a user service and cannot bind 53) and
+// serves the local-domain zones. It never fails the daemon: DNS is one of its
+// jobs, not its reason to run. A bind failure (port held by something else)
+// is retried on a slow timer so an upgrade converges without a daemon restart.
 func (d *Daemon) startEmbeddedDNS() {
 	if d.cfg == nil || d.cfg.TraefikDir == "" {
 		return
 	}
 	go func() {
+		// Refresh the system resolver routing config: installs upgraded from
+		// the dnsmasq container era point at the old port 53, and nothing else
+		// rewrites this until the next domain add. Idempotent — a no-op when
+		// the on-disk config already matches. Needs sudo for /etc; failure is
+		// logged, not fatal, and the next `srv dns setup` repairs it.
+		if err := traefik.SetupDNS(); err != nil {
+			d.log("DNS routing refresh failed (run 'srv dns setup'): %v", err)
+		}
+
 		confPath := filepath.Join(d.cfg.TraefikDir, constants.DnsmasqConfFile)
 		hostsPath := filepath.Join(d.cfg.TraefikDir, constants.DnsmasqHostsDir, constants.DnsmasqHostsFile)
 
-		// The legacy dnsmasq container holds 127.0.0.1:53 on installs that
+		// The legacy dnsmasq container holds the old port on installs that
 		// predate the embedded server. It is no longer in the compose file, so
-		// nothing restarts it — remove it once, best-effort, then give the
-		// port a moment to settle.
+		// nothing restarts it — remove it once, best-effort.
 		_ = docker.RemoveContainer("srv_dns")
 
 		for d.ctx.Err() == nil {
-			server, err := dnsd.New(constants.LocalhostIP, 53, confPath, hostsPath)
+			server, err := dnsd.New(constants.LocalhostIP, constants.PortDNS, confPath, hostsPath)
 			if err != nil {
 				d.log("Embedded DNS unavailable (%v); retrying in 30s", err)
 				select {

@@ -27,8 +27,14 @@ const (
 	// that opt into the internal listener (typically for container→host calls
 	// that skip TLS verification).
 	PortInternal = 88
-	// PortDNS is the DNS server port.
-	PortDNS = 53
+	// PortDNS is the port of srv's embedded DNS server. It is deliberately
+	// unprivileged: the daemon runs as a user service (systemd user unit,
+	// launchd agent), which cannot bind 53 without a sysctl or capability.
+	// The system resolver is pointed at 127.0.0.1:<PortDNS> explicitly
+	// (systemd-resolved DNS=, NetworkManager server=, macOS resolver port),
+	// so neither the well-known port 53 nor mDNS's 5353 is required. 15353
+	// is high, unassigned, and keeps the DNS association readable.
+	PortDNS = 15353
 	// PortMin is the minimum valid port number.
 	PortMin = 1
 	// PortMax is the maximum valid port number.
@@ -41,7 +47,7 @@ const (
 	PortHTTPSStr     = "443"
 	PortDashboardStr = "8080"
 	PortInternalStr  = "88"
-	PortDNSStr       = "53"
+	PortDNSStr       = "15353"
 )
 
 // Port name constants for display purposes.

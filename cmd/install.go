@@ -175,7 +175,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// stopped (e.g. a former Valet dnsmasq). Without working resolution the
 	// next `docker compose up` can't pull Traefik/dnsmasq images. Swap in
 	// public DNS for the duration of the pull, then restore the original
-	// once srv's own dnsmasq is up and 127.0.0.1:53 resolves again.
+	// once srv's own dnsmasq is up and the embedded DNS server resolves again.
 	restoreResolv, rerr := traefik.EnsureBootstrapResolution()
 	if rerr != nil {
 		ui.Warn("Could not pre-swap /etc/resolv.conf: %v", rerr)

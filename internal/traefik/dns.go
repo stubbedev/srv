@@ -89,8 +89,8 @@ func DetectResolver() DNSResolverType {
 }
 
 // CheckDNS tests if the local DNS server resolves the given domain to localhost.
-// It queries 127.0.0.1:53 directly using a custom resolver so the result is
-// independent of the system-wide DNS configuration.
+// It queries srv's embedded DNS server directly using a custom resolver so the
+// result is independent of the system-wide DNS configuration.
 //
 // The argument may be a raw registry entry, so strip any wildcard prefix
 // first: Go's resolver rejects the literal `*` label as an invalid hostname
@@ -105,7 +105,7 @@ func CheckDNS(domain string) bool {
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "udp", constants.LocalhostIP+":53")
+			return (&net.Dialer{}).DialContext(ctx, "udp", net.JoinHostPort(constants.LocalhostIP, constants.PortDNSStr))
 		},
 	}
 
@@ -157,13 +157,15 @@ func setupSystemdResolved() error {
 }
 
 // renderResolvedConf builds the resolved.conf drop-in that routes the given
-// (already ~-prefixed) domains through dnsmasq on the loopback. Written as
-// text: the ini shape is fixed and tiny, and the change-detection below
-// compares bytes, which a hand writer makes predictable.
+// (already ~-prefixed) domains through srv's embedded DNS server on the
+// loopback, at the unprivileged embedded port (see constants.PortDNS — the
+// daemon is a user service and cannot bind 53). Written as text: the ini
+// shape is fixed and tiny, and the change-detection below compares bytes,
+// which a hand writer makes predictable.
 func renderResolvedConf(routingDomains []string) string {
 	var b strings.Builder
 	b.WriteString("[Resolve]\n")
-	fmt.Fprintf(&b, "DNS=%s\n", constants.LocalhostIP)
+	fmt.Fprintf(&b, "DNS=%s:%s\n", constants.LocalhostIP, constants.PortDNSStr)
 	fmt.Fprintf(&b, "Domains=%s\n", strings.Join(routingDomains, " "))
 	return b.String()
 }
@@ -325,7 +327,8 @@ func setupNetworkManager() error {
 
 // updateNetworkManagerConfig writes /etc/NetworkManager/dnsmasq.d/srv-local.conf
 // so that NetworkManager's built-in dnsmasq routes queries for each registered
-// domain through srv's dnsmasq on 127.0.0.1:53.
+// domain through srv's embedded DNS server on the loopback at the unprivileged
+// embedded port (dnsmasq's server= syntax marks the port with '#').
 //
 // Restarting NetworkManager is disruptive, so it is skipped when the rendered
 // config is unchanged — which is the common case, since domains under a
@@ -337,7 +340,7 @@ func updateNetworkManagerConfig(domains []string) error {
 	var content strings.Builder
 	content.WriteString("# srv local DNS configuration\n")
 	for _, tld := range routingTLDs {
-		fmt.Fprintf(&content, "server=/%s/%s\n", tld, constants.LocalhostIP)
+		fmt.Fprintf(&content, "server=/%s/%s#%s\n", tld, constants.LocalhostIP, constants.PortDNSStr)
 	}
 	for _, d := range domains {
 		bare := BareDomain(d)
@@ -345,8 +348,8 @@ func updateNetworkManagerConfig(domains []string) error {
 			continue
 		}
 		// .local domains get a per-name server= line; other .local names stay
-		// on mDNS rather than being routed wholesale to dnsmasq.
-		fmt.Fprintf(&content, "server=/%s/%s\n", bare, constants.LocalhostIP)
+		// on mDNS rather than being routed wholesale to srv's DNS server.
+		fmt.Fprintf(&content, "server=/%s/%s#%s\n", bare, constants.LocalhostIP, constants.PortDNSStr)
 	}
 
 	if existing, err := os.ReadFile(configFile); err == nil && string(existing) == content.String() {

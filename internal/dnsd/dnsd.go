@@ -1,4 +1,4 @@
-// Package dnsd is srv's embedded DNS server: a UDP responder on 127.0.0.1:53
+// Package dnsd is srv's embedded DNS server: a UDP responder on the loopback
 // that answers the registered local domains from the generated dnsmasq-format
 // files and forwards everything else upstream. It replaces the jpillora/dnsmasq
 // container — srv was already generating those exact files, the daemon is
@@ -124,11 +124,12 @@ func (s *Server) Addr() string {
 	return s.conn.PacketConn.LocalAddr().String()
 }
 
-// Ping probes the server on 127.0.0.1:53 with the health-check name. True
+// Ping probes the server on the loopback at the embedded port with the
+// health-check name. True
 // only when the answer is srv's own loopback response — which is what makes
 // it a usable "is our DNS running" check from doctor and the lifecycle code.
 func Ping() bool {
-	return pingAddr(net.JoinHostPort(constants.LocalhostIP, "53"))
+	return pingAddr(net.JoinHostPort(constants.LocalhostIP, constants.PortDNSStr))
 }
 
 // PingAddr probes a specific server; tests point it at an ephemeral port.

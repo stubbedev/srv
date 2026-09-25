@@ -44,7 +44,7 @@ debug DNS or to run without the daemon.`,
 
 func init() {
 	dnsdCmd.Flags().StringVar(&dnsdFlags.bind, "bind", constants.LocalhostIP, "Address to bind")
-	dnsdCmd.Flags().IntVar(&dnsdFlags.port, "port", 53, "UDP port to listen on")
+	dnsdCmd.Flags().IntVar(&dnsdFlags.port, "port", constants.PortDNS, "UDP port to listen on (the daemon serves this port too)")
 	dnsdCmd.Flags().StringVar(&dnsdFlags.conf, "conf", "", "dnsmasq-format conf file (default <traefik-dir>/dnsmasq.conf)")
 	dnsdCmd.Flags().StringVar(&dnsdFlags.hosts, "hosts", "", "hosts-format file (default <traefik-dir>/dnsmasq.hosts)")
 	RootCmd.AddCommand(dnsdCmd)
