@@ -3,9 +3,9 @@
 // A config is built as a tree of Directive values and marshalled with Render —
 // the same way a docker-compose.yml is built as structs and marshalled with
 // yaml.Marshal. There are no raw nginx text fragments: every byte of the output
-// derives from struct fields. The lowering targets a gonginx AST so the actual
-// formatting, indentation, and escaping are handled by a maintained library
-// rather than hand-written string building.
+// derives from struct fields. The lowering is a small text renderer: nginx
+// directives are uniform, so the whole grammar is "name args;" and
+// "name args { children }" with comments above.
 //
 // Directive is deliberately generic — Name, Args, optional leading Comment, and
 // an optional nested Block — because nginx directives are themselves uniform.
@@ -14,9 +14,6 @@ package nginx
 
 import (
 	"strings"
-
-	"github.com/tufanbarisyildirim/gonginx/config"
-	"github.com/tufanbarisyildirim/gonginx/dumper"
 )
 
 // Directive is one nginx directive. With Block == nil it renders as a simple
@@ -56,45 +53,51 @@ func (d Directive) WithComment(lines ...string) Directive {
 }
 
 // Render marshals a sequence of top-level directives into an nginx config
-// string with a trailing newline.
+// string with a trailing newline. Layout rules: four-space indent per block
+// level, one blank line before every block directive (the visual grouping
+// nginx configs are conventionally written with), comments above their
+// directive, and no trailing whitespace anywhere.
 func Render(directives ...Directive) string {
-	cfg := &config.Config{Block: &config.Block{Directives: lower(directives)}}
-	style := dumper.NewStyle()
-	style.SpaceBeforeBlocks = true // blank line before nested blocks
-	out := dumper.DumpConfig(cfg, style)
-	out = trimLineWhitespace(out)
-	return strings.TrimRight(strings.TrimLeft(out, "\n"), "\n") + "\n"
-}
-
-func lower(ds []Directive) []config.IDirective {
-	out := make([]config.IDirective, 0, len(ds))
-	for _, d := range ds {
-		gd := &config.Directive{Name: d.Name, Parameters: params(d.Args...)}
-		if d.Block != nil {
-			gd.Block = &config.Block{Directives: lower(d.Block)}
-		}
-		if len(d.Comment) > 0 {
-			gd.SetComment(hashComments(d.Comment))
-		}
-		out = append(out, gd)
-	}
-	return out
-}
-
-// trimLineWhitespace strips trailing spaces from every line — gonginx indents
-// blank separator lines, leaving cosmetic trailing whitespace we don't want.
-func trimLineWhitespace(s string) string {
-	lines := strings.Split(s, "\n")
+	lines := renderDirectives(directives, 0)
+	out := make([]string, len(lines))
 	for i, l := range lines {
-		lines[i] = strings.TrimRight(l, " \t")
+		out[i] = strings.TrimRight(l, " \t")
 	}
-	return strings.Join(lines, "\n")
+	return strings.TrimRight(strings.TrimLeft(strings.Join(out, "\n"), "\n"), "\n") + "\n"
 }
 
-func params(vs ...string) []config.Parameter {
-	out := make([]config.Parameter, len(vs))
-	for i, v := range vs {
-		out[i] = config.Parameter{Value: v}
+func renderDirectives(ds []Directive, depth int) []string {
+	indent := strings.Repeat("    ", depth)
+	var out []string
+	for _, d := range ds {
+		if d.Block != nil {
+			// Blank separator before every block — placed before its comments,
+			// which is where the previous library-based dumper put it.
+			out = append(out, "")
+		}
+		for _, c := range hashComments(d.Comment) {
+			out = append(out, indent+c)
+		}
+		if d.Block != nil {
+			header := d.Name
+			if len(d.Args) > 0 {
+				header += " " + strings.Join(d.Args, " ")
+			}
+			out = append(out, indent+header+" {")
+			out = append(out, renderDirectives(d.Block, depth+1)...)
+			if len(d.Block) == 0 {
+				// An empty block still renders as a meaningful construct; keep
+				// a blank line inside so the braces don't collapse.
+				out = append(out, "")
+			}
+			out = append(out, indent+"}")
+			continue
+		}
+		stmt := d.Name
+		if len(d.Args) > 0 {
+			stmt += " " + strings.Join(d.Args, " ")
+		}
+		out = append(out, indent+stmt+";")
 	}
 	return out
 }

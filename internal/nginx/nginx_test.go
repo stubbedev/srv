@@ -145,18 +145,3 @@ func TestHashComments(t *testing.T) {
 	}
 }
 
-func TestTrimLineWhitespace(t *testing.T) {
-	if got := trimLineWhitespace("a  \n\tb\t\nc"); got != "a\n\tb\nc" {
-		t.Errorf("trimLineWhitespace() = %q", got)
-	}
-}
-
-func TestParams(t *testing.T) {
-	got := params("a", "b")
-	if len(got) != 2 || got[0].Value != "a" || got[1].Value != "b" {
-		t.Errorf("params() = %+v", got)
-	}
-	if len(params()) != 0 {
-		t.Error("params() with no args should be empty")
-	}
-}
