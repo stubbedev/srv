@@ -126,7 +126,10 @@ type systemdUnitFile struct {
 
 // renderSystemdUnit builds the srv-daemon.service unit. HOME and
 // XDG_CONFIG_HOME are pinned because a systemd service context may start with
-// an empty environment.
+// an empty environment. SRV_ROOT and SRV_CONTAINER_ENGINE are carried over
+// when set: they are precedence-1 overrides (config, ops/engine), and a
+// daemon installed under one would otherwise silently point at the default
+// root/engine instead.
 func renderSystemdUnit(executable, homeDir string) (string, error) {
 	var u systemdUnitFile
 	u.Unit.Description = sd.Value{"srv daemon - Docker container network connector"}
@@ -137,7 +140,13 @@ func renderSystemdUnit(executable, homeDir string) (string, error) {
 	u.Service.ExecStart = sd.Value{executable + " daemon start --foreground"}
 	u.Service.Restart = sd.Value{"on-failure"}
 	u.Service.RestartSec = sd.Value{"5"}
-	u.Service.Environment = sd.Value{"HOME=" + homeDir, "XDG_CONFIG_HOME=" + homeDir + "/.config"}
+	env := sd.Value{"HOME=" + homeDir, "XDG_CONFIG_HOME=" + homeDir + "/.config"}
+	for _, key := range []string{"SRV_ROOT", "SRV_CONTAINER_ENGINE"} {
+		if val := os.Getenv(key); val != "" {
+			env = append(env, key+"="+val)
+		}
+	}
+	u.Service.Environment = env
 	u.Install.WantedBy = sd.Value{"default.target"}
 
 	data, err := sd.Marshal(&u)
@@ -287,17 +296,25 @@ type launchdPlist struct {
 // renderLaunchdPlist builds the LaunchAgent plist XML. The daemon is kept alive
 // across non-zero exits (KeepAlive/SuccessfulExit=false) and runs with a PATH
 // that includes the binary's own dir plus the usual Homebrew/system locations.
+// As with the systemd unit, SRV_ROOT and SRV_CONTAINER_ENGINE are carried over
+// when set so the daemon honours the overrides its installer ran under.
 func renderLaunchdPlist(executable, logPath string) (string, error) {
+	env := map[string]string{
+		"PATH": filepath.Dir(executable) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+	}
+	for _, key := range []string{"SRV_ROOT", "SRV_CONTAINER_ENGINE"} {
+		if val := os.Getenv(key); val != "" {
+			env[key] = val
+		}
+	}
 	doc := launchdPlist{
-		Label:             "dev.stubbe.srv-daemon",
-		ProgramArguments:  []string{executable, "daemon", "start", "--foreground"},
-		RunAtLoad:         true,
-		KeepAlive:         map[string]bool{"SuccessfulExit": false},
-		StandardOutPath:   logPath,
-		StandardErrorPath: logPath,
-		EnvironmentVariables: map[string]string{
-			"PATH": filepath.Dir(executable) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-		},
+		Label:                "dev.stubbe.srv-daemon",
+		ProgramArguments:     []string{executable, "daemon", "start", "--foreground"},
+		RunAtLoad:            true,
+		KeepAlive:            map[string]bool{"SuccessfulExit": false},
+		StandardOutPath:      logPath,
+		StandardErrorPath:    logPath,
+		EnvironmentVariables: env,
 	}
 	data, err := plist.MarshalIndent(doc, plist.XMLFormat, "    ")
 	if err != nil {
