@@ -376,13 +376,13 @@ func EnsureConfig(email string) error {
 	// entries are regenerated from local-domains.txt rather than wiped.
 	dnsmasqPath := filepath.Join(cfg.TraefikDir, constants.DnsmasqConfFile)
 	if _, statErr := os.Stat(dnsmasqPath); os.IsNotExist(statErr) {
-		if err := os.WriteFile(dnsmasqPath, []byte(DnsmasqConf), constants.FilePermDefault); err != nil {
+		if err := fsutil.AtomicWriteFile(dnsmasqPath, []byte(DnsmasqConf), constants.FilePermDefault); err != nil {
 			return fmt.Errorf("failed to write dnsmasq.conf: %w", err)
 		}
 		// Seed an (empty but non-empty-file) hosts file so dnsmasq's hostsdir
 		// has something to read on first start.
 		hostsPath := filepath.Join(cfg.TraefikDir, constants.DnsmasqHostsDir, constants.DnsmasqHostsFile)
-		if err := os.WriteFile(hostsPath, []byte(buildDnsmasqHosts(nil)), constants.FilePermDefault); err != nil {
+		if err := fsutil.AtomicWriteFile(hostsPath, []byte(buildDnsmasqHosts(nil)), constants.FilePermDefault); err != nil {
 			return fmt.Errorf("failed to write dnsmasq hosts file: %w", err)
 		}
 	} else {
@@ -394,7 +394,7 @@ func EnsureConfig(email string) error {
 	// Create acme.json with proper permissions
 	acmePath := filepath.Join(cfg.TraefikDir, constants.CertsSubdir, constants.ACMEJSONFile)
 	if _, err := os.Stat(acmePath); os.IsNotExist(err) {
-		if err := os.WriteFile(acmePath, []byte("{}"), constants.FilePermACME); err != nil {
+		if err := fsutil.AtomicWriteFile(acmePath, []byte("{}"), constants.FilePermACME); err != nil {
 			return fmt.Errorf("failed to create acme.json: %w", err)
 		}
 	}

@@ -1,8 +1,10 @@
 package fsutil
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -66,8 +68,53 @@ func TestAtomicWriteFileRenameFails(t *testing.T) {
 	if err := AtomicWriteFile(dest, []byte("y"), 0o644); err == nil {
 		t.Error("expected rename error over non-empty dir")
 	}
-	// On rename failure the temp file must not be left behind.
-	if _, err := os.Stat(dest + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("tmp file remains after failed rename: %v", err)
+	// On rename failure the temp file must not be left behind. With unique
+	// temp names this can only be checked by pattern, not exact path.
+	leftovers, _ := filepath.Glob(filepath.Join(dir, "dest.tmp*"))
+	if len(leftovers) != 0 {
+		t.Errorf("tmp files remain after failed rename: %v", leftovers)
+	}
+}
+
+// TestAtomicWriteFileConcurrent proves concurrent writers to one target cannot
+// tear each other's writes: each temp file is unique, so the final content is
+// always one complete payload and no temp files survive.
+func TestAtomicWriteFileConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f")
+	if err := AtomicWriteFile(path, []byte("seed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 16
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Go(func() {
+			errs[i] = AtomicWriteFile(path, fmt.Appendf(nil, "payload-%02d", i), 0o644)
+		})
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("writer %d failed: %v", i, err)
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := false
+	for i := range n {
+		if string(data) == fmt.Sprintf("payload-%02d", i) {
+			matched = true
+		}
+	}
+	if !matched {
+		t.Fatalf("torn write: %q is not any single payload", data)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(dir, "f.tmp*"))
+	if len(leftovers) != 0 {
+		t.Errorf("tmp files remain after concurrent writes: %v", leftovers)
 	}
 }

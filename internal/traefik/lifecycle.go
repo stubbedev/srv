@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/fsutil"
 )
 
 // IsRunning checks if Traefik container is running.
@@ -126,7 +127,8 @@ func writeDashboardProxyConfig(cfg *config.Config, name, domain string) error {
 	)
 
 	proxyFile := filepath.Join(cfg.TraefikConfDir(), constants.ProxyConfigPrefix+name+constants.ExtYAML)
-	return os.WriteFile(proxyFile, []byte(content), constants.FilePermDefault)
+	// Traefik watches the conf dir; a truncated read silently drops this router.
+	return fsutil.AtomicWriteFile(proxyFile, []byte(content), constants.FilePermDefault)
 }
 
 // RestartTraefik restarts the Traefik container.
