@@ -3,7 +3,6 @@ package cmd
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stubbedev/srv/internal/mkcert"
@@ -101,16 +100,6 @@ func TestIsNixOS(t *testing.T) {
 }
 
 func TestColorFlagLine(t *testing.T) {
-	id := func(s ...any) string {
-		// noop colorer
-		out := ""
-		var outSb106 strings.Builder
-		for _, x := range s {
-			outSb106.WriteString(x.(string))
-		}
-		out += outSb106.String()
-		return out
-	}
 	cases := []struct {
 		in   string
 		want string
@@ -119,7 +108,7 @@ func TestColorFlagLine(t *testing.T) {
 		{"plain text", "plain text"},
 	}
 	for _, c := range cases {
-		got := colorFlagLine(c.in, id)
+		got := colorFlagLine(c.in, func(s string) string { return s })
 		if got != c.want {
 			t.Errorf("colorFlagLine(%q) = %q, want %q", c.in, got, c.want)
 		}

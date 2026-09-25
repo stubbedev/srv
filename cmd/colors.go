@@ -3,17 +3,18 @@ package cmd
 import (
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
+	"github.com/stubbedev/srv/internal/ui"
 )
 
 // setupColoredHelp configures custom colored help output for Cobra.
 func setupColoredHelp() {
-	// Colors (auto-detects TTY for color support)
-	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
-	green := color.New(color.FgGreen, color.Bold).SprintFunc()
-	red := color.New(color.FgRed, color.Bold).SprintFunc()
-	cyan := color.New(color.FgCyan).SprintFunc()
+	// Colors (ui.SGR auto-detects TTY and honours NO_COLOR)
+	yellow := func(s string) string { return ui.SGR("1;33", s) }
+	green := func(s string) string { return ui.SGR("1;32", s) }
+	red := func(s string) string { return ui.SGR("1;31", s) }
+	cyan := func(s string) string { return ui.SGR("36", s) }
 
 	// Add template functions for coloring
 	cobra.AddTemplateFunc("styleHeading", yellow)
@@ -90,7 +91,7 @@ func splitLines(s string) []string {
 }
 
 // colorFlagLine colors the flag portion of a flag usage line.
-func colorFlagLine(line string, colorFunc func(...any) string) string {
+func colorFlagLine(line string, colorFunc func(string) string) string {
 	// Find where the flag starts and where the description starts
 	// Format is typically: "  -f, --flag string   Description here"
 	trimmed := line

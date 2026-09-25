@@ -22,8 +22,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fatih/color"
-
 	"github.com/stubbedev/srv/internal/constants"
 )
 
@@ -36,18 +34,51 @@ var (
 
 	// printMu serialises stdout/stderr writes for the parallel-operation helpers.
 	printMu sync.Mutex
-
-	// Colour functions. fatih/color disables itself automatically when the
-	// destination isn't a TTY or NO_COLOR is set, so callers can use these
-	// unconditionally — output stays clean in pipes and CI logs.
-	successC = color.New(color.FgGreen).SprintFunc()
-	errorC   = color.New(color.FgRed).SprintFunc()
-	warnC    = color.New(color.FgYellow).SprintFunc()
-	infoC    = color.New(color.FgBlue).SprintFunc()
-	dimC     = color.New(color.FgHiBlack).SprintFunc()
-	boldC    = color.New(color.Bold).SprintFunc()
-	cyanC    = color.New(color.FgCyan).SprintFunc()
 )
+
+// colorEnabled is computed once at startup: ANSI styling is emitted only when
+// stdout is a terminal, NO_COLOR is unset, and TERM is not "dumb", so callers
+// can use the style functions unconditionally — output stays clean in pipes
+// and CI logs.
+var colorEnabled = computeColorEnabled()
+
+func computeColorEnabled() bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return IsTerminal(os.Stdout)
+}
+
+// IsTerminal reports whether f is a character device (a terminal). The
+// ModeCharDevice heuristic also matches /dev/null; that only over-colours
+// output nobody sees, and avoids an ioctl dependency.
+func IsTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// SGR wraps s in the given Select Graphic Rendition sequence when colour is
+// enabled, and returns s unchanged otherwise. Exported so the help-template
+// styling in cmd shares the same enable/disable decision.
+func SGR(code, s string) string {
+	if !colorEnabled || s == "" {
+		return s
+	}
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+// Colour functions. SGR disables itself when the destination isn't a TTY or
+// NO_COLOR is set, so callers can use these unconditionally.
+func successC(s string) string { return SGR("32", s) }
+func errorC(s string) string   { return SGR("31", s) }
+func warnC(s string) string    { return SGR("33", s) }
+func infoC(s string) string    { return SGR("34", s) }
+func dimC(s string) string     { return SGR("90", s) }
+func boldC(s string) string    { return SGR("1", s) }
+func cyanC(s string) string    { return SGR("36", s) }
 
 // outStdout / outStderr are the destinations for diagnostic / result output.
 // Exposed as vars so tests can swap them.

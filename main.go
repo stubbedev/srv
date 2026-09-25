@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mattn/go-isatty"
 	"github.com/stubbedev/srv/cmd"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/ui"
@@ -38,7 +37,7 @@ func run() int {
 	// Skip cursor handling when stderr isn't a TTY (e.g. shell completion,
 	// piped output, generated completion scripts) to avoid emitting escape
 	// sequences that would pollute the consumer.
-	skipCursor := !isatty.IsTerminal(os.Stderr.Fd())
+	skipCursor := !ui.IsTerminal(os.Stderr)
 
 	if !skipCursor {
 		// Ensure cursor is always restored on exit

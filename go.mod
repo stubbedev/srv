@@ -5,10 +5,8 @@ go 1.27.0
 require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/fatih/color v1.19.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/invopop/jsonschema v0.14.0
-	github.com/mattn/go-isatty v0.0.22
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -32,7 +30,6 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/imega/luaformatter v0.0.0-20211025140405-86b0a68d6bef // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
