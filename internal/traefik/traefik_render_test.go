@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/ops"
-	"gopkg.in/yaml.v3"
 )
 
 // TestRenderTraefikTemplatePositive: ordinary network/email values land at the

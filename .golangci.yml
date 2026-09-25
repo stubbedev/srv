@@ -211,10 +211,18 @@ linters:
 
 formatters:
   # gofumpt is gofmt plus the rules gofmt left on the table; its output is still
-  # gofmt-stable, so CI's `gofmt -l` check keeps passing.
+  # gofmt-stable, so CI's `gofmt -l` check keeps passing. gci groups imports:
+  # stdlib, everything else, srv's own packages last — the same order every
+  # hand-written import block in the tree already uses, now enforced.
   enable:
     - gofumpt
-    - goimports
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/stubbedev/srv)
 
 issues:
   max-issues-per-linter: 0

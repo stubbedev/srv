@@ -9,9 +9,10 @@ import (
 	"path/filepath"
 	"sync"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/fsutil"
-	"gopkg.in/yaml.v3"
 )
 
 // Config holds the srv configuration.
