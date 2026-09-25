@@ -286,6 +286,53 @@ func TestValidateMetadataValidComplete(t *testing.T) {
 	}
 }
 
+// Hostile metadata.yml values must be rejected at this choke point: domains
+// and container names are interpolated verbatim into dnsmasq conf lines, the
+// hosts file, and Traefik Host() rules, where a newline or space would inject
+// directives or break out of the rule quoting.
+func TestValidateMetadataRejectsInjectableDomain(t *testing.T) {
+	for _, d := range []string{"a.local\naddress=/evil.local/9.9.9.9", "a b.local", "a\t.local", "a`b.local"} {
+		meta := &SiteMetadata{Domains: []string{d}}
+		if err := ValidateMetadata(meta); err == nil {
+			t.Errorf("expected err for injectable domain %q", d)
+		}
+	}
+}
+
+func TestValidateMetadataRejectsInjectableServiceName(t *testing.T) {
+	meta := &SiteMetadata{Domains: []string{"a.local"}, ServiceName: "web\nports:\n  - 1:1"}
+	if err := ValidateMetadata(meta); err == nil {
+		t.Error("expected err for injectable service name")
+	}
+}
+
+func TestValidateMetadataRejectsBadUpstreamURL(t *testing.T) {
+	meta := &SiteMetadata{
+		Domains: []string{"a.local"},
+		Routes:  []Route{{ID: "x", Path: "/a", Upstream: Upstream{Kind: "url", URL: "http://"}}},
+	}
+	if err := ValidateMetadata(meta); err == nil {
+		t.Error("expected err for upstream url without host")
+	}
+}
+
+func TestValidateMetadataRejectsInjectableRouteContainer(t *testing.T) {
+	meta := &SiteMetadata{
+		Domains: []string{"a.local"},
+		Routes:  []Route{{ID: "x", Path: "/a", Upstream: Upstream{Kind: "container", Container: "c\nextra", Port: 80}}},
+	}
+	if err := ValidateMetadata(meta); err == nil {
+		t.Error("expected err for injectable route container name")
+	}
+}
+
+func TestValidateMetadataRejectsOutOfRangePort(t *testing.T) {
+	meta := &SiteMetadata{Domains: []string{"a.local"}, Port: 70000}
+	if err := ValidateMetadata(meta); err == nil {
+		t.Error("expected err for out-of-range port")
+	}
+}
+
 // Confirm traefik import is still referenced (silences lint).
 var _ = traefik.LocalDomains
 

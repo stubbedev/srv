@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/traefik"
+	"github.com/stubbedev/srv/internal/validate"
 )
 
 // ReloadResult describes the work Reload performed for a single site.
@@ -199,10 +201,32 @@ func ValidateMetadata(meta *SiteMetadata) error {
 		if d == "" {
 			return errors.New("`domains` contains an empty entry")
 		}
+		// metadata.yml is hand-editable and the daemon picks up edits without a
+		// CLI boundary check, so format-validate here: these values flow into
+		// dnsmasq conf lines, the hosts file, and Traefik Host() rules, where a
+		// newline or space would inject directives.
+		if err := validate.Domain(d); err != nil {
+			return fmt.Errorf("domain %q: %w", d, err)
+		}
 		if seen[d] {
 			return fmt.Errorf("duplicate domain %q", d)
 		}
 		seen[d] = true
+	}
+	if meta.ServiceName != "" {
+		if err := validate.ContainerName(meta.ServiceName); err != nil {
+			return fmt.Errorf("service_name: %w", err)
+		}
+	}
+	if meta.ComposeServiceName != "" {
+		if err := validate.ContainerName(meta.ComposeServiceName); err != nil {
+			return fmt.Errorf("compose_service_name: %w", err)
+		}
+	}
+	if meta.Port != 0 {
+		if err := validate.Port(meta.Port); err != nil {
+			return fmt.Errorf("port: %w", err)
+		}
 	}
 	for _, l := range meta.Listeners {
 		if l != constants.ListenerInternal {
@@ -234,6 +258,22 @@ func ValidateMetadata(meta *SiteMetadata) error {
 			// valid
 		default:
 			return fmt.Errorf("route %q: upstream.kind must be one of localhost|container|url, got %q", r.ID, r.Upstream.Kind)
+		}
+		if r.Upstream.Container != "" {
+			if err := validate.ContainerName(r.Upstream.Container); err != nil {
+				return fmt.Errorf("route %q: upstream.container: %w", r.ID, err)
+			}
+		}
+		if r.Upstream.Port != 0 {
+			if err := validate.Port(r.Upstream.Port); err != nil {
+				return fmt.Errorf("route %q: upstream.port: %w", r.ID, err)
+			}
+		}
+		if r.Upstream.URL != "" {
+			u, perr := url.Parse(r.Upstream.URL)
+			if perr != nil || u.Host == "" {
+				return fmt.Errorf("route %q: upstream.url %q is not an absolute URL with a host", r.ID, r.Upstream.URL)
+			}
 		}
 	}
 	return nil
