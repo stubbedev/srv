@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -42,7 +43,7 @@ var metricsEnableCmd = &cobra.Command{
 
 var metricsDisableCmd = &cobra.Command{
 	Use:   "disable",
-	Short: "Stop and remove the metrics stack containers",
+	Short: "Stop the metrics stack and remove its containers and rendered files",
 	Args:  cobra.NoArgs,
 	RunE:  runMetricsDisable,
 }
@@ -141,6 +142,9 @@ func runMetricsDisable(cmd *cobra.Command, args []string) error {
 	}
 	if err := traefik.UpdateDynamicConfig(); err != nil {
 		ui.Warn("Failed to refresh Traefik dynamic config: %v", err)
+	}
+	if err := os.RemoveAll(metrics.Dir(cfg)); err != nil {
+		return fmt.Errorf("remove rendered metrics stack: %w", err)
 	}
 	ui.Success("Metrics stack stopped")
 	return nil

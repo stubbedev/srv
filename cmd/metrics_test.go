@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"errors"
+	"os"
 	"testing"
 
+	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/metrics"
 	"github.com/stubbedev/srv/internal/mkcert"
 )
 
@@ -57,8 +60,24 @@ func TestRunMetricsDisableHappy(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
+	if err := runMetricsEnable(nil, nil); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !metrics.IsConfigured(cfg) {
+		t.Fatal("expected the rendered stack on disk after enable")
+	}
 	if err := runMetricsDisable(nil, nil); err != nil {
-		t.Errorf("err: %v", err)
+		t.Fatalf("disable: %v", err)
+	}
+	if metrics.IsConfigured(cfg) {
+		t.Error("disable must remove the rendered stack, otherwise srv install and srv doctor still treat metrics as enabled")
+	}
+	if _, err := os.Stat(metrics.Dir(cfg)); !os.IsNotExist(err) {
+		t.Errorf("metrics dir should be gone after disable, stat err: %v", err)
 	}
 }
 
