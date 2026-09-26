@@ -334,7 +334,7 @@ Checks performed:
   - Docker network existence
   - Traefik container status
   - Local SSL certificate validity
-  - Local CA (mkcert) status
+  - mkcert installation
   - Site metadata validity
   - .env host-loopback references in container-backed sites
   - Ownership of ~/.config/srv (use --fix-perms to repair)
