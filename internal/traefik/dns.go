@@ -875,10 +875,11 @@ func updateDnsmasqConfigLocked() error {
 	// Flush system DNS cache so the new routing takes effect immediately.
 	FlushDNSCache()
 
-	// The embedded DNS server (internal/dnsd, hosted by the daemon) watches
-	// both generated files and re-reads them within a fraction of a second.
-	// There is no reload signal and no container to restart; when the daemon
-	// is not running, the files on disk are the source of truth it loads on
-	// next start.
+	// The embedded DNS server (internal/dnsd, hosted by the daemon) serves
+	// zones fed from the structured config in-process; these generated files
+	// are its fallback layer and are re-read from disk within a fraction of a
+	// second of this write. There is no reload signal and no container to
+	// restart; when the daemon is not running, the files on disk are the
+	// source of truth it loads on next start.
 	return nil
 }

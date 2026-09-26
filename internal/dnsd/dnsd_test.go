@@ -109,7 +109,8 @@ func TestServeZones(t *testing.T) {
 
 // startStubUpstream answers every A query with ip after delay, on an
 // ephemeral loopback UDP port. The returned string is in "ip#port" form,
-// ready for a server= line.
+// ready for a server= line. An empty ip answers with an empty NOERROR —
+// the shape of an upstream that knows nothing about the name.
 func startStubUpstream(t *testing.T, ip string, delay time.Duration) string {
 	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -120,10 +121,12 @@ func startStubUpstream(t *testing.T, ip string, delay time.Duration) string {
 		time.Sleep(delay)
 		resp := new(miekg.Msg)
 		resp.SetReply(r)
-		resp.Answer = append(resp.Answer, &miekg.A{
-			Hdr: miekg.RR_Header{Name: r.Question[0].Name, Rrtype: miekg.TypeA, Class: miekg.ClassINET, Ttl: 10},
-			A:   net.ParseIP(ip),
-		})
+		if ip != "" {
+			resp.Answer = append(resp.Answer, &miekg.A{
+				Hdr: miekg.RR_Header{Name: r.Question[0].Name, Rrtype: miekg.TypeA, Class: miekg.ClassINET, Ttl: 10},
+				A:   net.ParseIP(ip),
+			})
+		}
 		_ = w.WriteMsg(resp)
 	})}
 	go func() { _ = srv.ActivateAndServe() }()
@@ -177,7 +180,11 @@ func TestReloadPicksUpFileChanges(t *testing.T) {
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, "dnsmasq.conf")
 	hostsPath := filepath.Join(dir, "dnsmasq.hosts")
-	if err := os.WriteFile(confPath, []byte(""), 0o600); err != nil {
+	// The pre-registration query forwards upstream; a local empty-answer stub
+	// keeps that off the real network (Google's defaults under load timed out
+	// the query and failed the test).
+	upstream := startStubUpstream(t, "", 0)
+	if err := os.WriteFile(confPath, []byte("server="+upstream+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(hostsPath, []byte(""), 0o600); err != nil {
@@ -353,7 +360,7 @@ func TestParseConfAndHostsEdgeCases(t *testing.T) {
 }
 
 // wildcardCovers mirrors lookupA's suffix logic for zone-inspection tests.
-func wildcardCovers(z *zones, name string) bool {
+func wildcardCovers(z *ZoneSnapshot, name string) bool {
 	for _, w := range z.wildcards {
 		if name == strings.TrimPrefix(w.suffix, ".") || strings.HasSuffix(name, w.suffix) {
 			return true
@@ -378,5 +385,127 @@ func TestCheckNameAnsweredWithoutZones(t *testing.T) {
 	}
 	if !strings.Contains(CheckName, "srv-dns-check") {
 		t.Errorf("CheckName = %q", CheckName)
+	}
+}
+
+// TestSetZonesFeedsStructuredConfig exercises the primary layer: entries
+// pushed via SetZones answer immediately, the file layer keeps answering
+// beneath them (hand-written entries), and a primary exact entry shadows a
+// same-named file entry.
+func TestSetZonesFeedsStructuredConfig(t *testing.T) {
+	upstream := startStubUpstream(t, "10.9.9.9", 0)
+	s, addr := startTestServer(t, "server="+upstream+"\n", "127.0.0.1 hand.test\n127.0.0.1 shadow.test\n")
+
+	z := NewZoneSnapshot()
+	z.PinExact("reg.test", "127.0.0.1")
+	z.PinWildcard("wild.test", "127.0.0.1")
+	z.PinExact("shadow.test", "10.0.0.1")
+	z.PinExact("bad.test", "not-an-ip")
+	s.SetZones(z)
+
+	for name, wantIP := range map[string]string{
+		"reg.test.":      "127.0.0.1", // primary exact
+		"wild.test.":     "127.0.0.1", // primary wildcard apex
+		"a.b.wild.test.": "127.0.0.1", // primary wildcard, deep (address=/name/ semantics)
+		"shadow.test.":   "10.0.0.1",  // primary wins over the file entry
+		"hand.test.":     "127.0.0.1", // file-only entry stays visible
+		"bad.test.":      "10.9.9.9",  // invalid pin dropped, query forwarded to the stub
+	} {
+		resp := queryA(t, addr, name)
+		got := answerIP(resp)
+		if got != wantIP {
+			t.Errorf("%s = %q, want %q", name, got, wantIP)
+		}
+	}
+}
+
+// answerIP returns the first A record's IP, or "" when the answer is empty.
+func answerIP(resp *miekg.Msg) string {
+	for _, rr := range resp.Answer {
+		if a, ok := rr.(*miekg.A); ok {
+			return a.A.String()
+		}
+	}
+	return ""
+}
+
+// TestSetZonesUpstreamPrecedence pins the forwarder rules: an explicit
+// config.yml list (the primary layer's upstreams) overrides the files, an
+// empty one defers to the files' server= lines.
+func TestSetZonesUpstreamPrecedence(t *testing.T) {
+	fileUp := startStubUpstream(t, "10.0.0.1", 0)
+	s, addr := startTestServer(t, "server="+fileUp+"\n", "")
+
+	s.SetZones(NewZoneSnapshot())
+	if got := answerIP(queryA(t, addr, "unknown.test.")); got != "10.0.0.1" {
+		t.Errorf("primary without upstreams: forwarded to %q, want the file's 10.0.0.1", got)
+	}
+
+	cfgUp := startStubUpstream(t, "10.0.0.2", 0)
+	z := NewZoneSnapshot()
+	z.SetUpstream(cfgUp)
+	s.SetZones(z)
+	if got := answerIP(queryA(t, addr, "unknown.test.")); got != "10.0.0.2" {
+		t.Errorf("primary with upstreams: forwarded to %q, want the primary's 10.0.0.2", got)
+	}
+}
+
+// TestSetZonesRemovalFallsThroughToFiles: a name the structured config no
+// longer lists stops being served locally (the file layer is expected to
+// re-render without it; here the stub upstream answers instead, proving the
+// query left the local zones).
+func TestSetZonesRemovalFallsThroughToFiles(t *testing.T) {
+	upstream := startStubUpstream(t, "10.0.0.1", 0)
+	s, addr := startTestServer(t, "server="+upstream+"\n", "127.0.0.1 file.test\n")
+
+	z := NewZoneSnapshot()
+	z.PinExact("both.test", "127.0.0.1")
+	s.SetZones(z)
+	if got := answerIP(queryA(t, addr, "both.test.")); got != "127.0.0.1" {
+		t.Fatalf("both.test = %q, want the primary's 127.0.0.1", got)
+	}
+
+	s.SetZones(NewZoneSnapshot())
+	if got := answerIP(queryA(t, addr, "both.test.")); got != "10.0.0.1" {
+		t.Errorf("removed both.test = %q, want the forwarded %q (no longer a local zone)", got, "10.0.0.1")
+	}
+	if got := answerIP(queryA(t, addr, "file.test.")); got != "127.0.0.1" {
+		t.Errorf("file.test = %q, want the fallback's 127.0.0.1", got)
+	}
+}
+
+// TestReloadKeepsPrimaryLayer: a file reload must not drop the structured
+// snapshot installed by SetZones.
+func TestReloadKeepsPrimaryLayer(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "dnsmasq.conf")
+	hostsPath := filepath.Join(dir, "dnsmasq.hosts")
+	for _, p := range []string{confPath, hostsPath} {
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := New("127.0.0.1", 0, confPath, hostsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Shutdown)
+	go func() { _ = s.Serve() }()
+	addr := s.Addr()
+	waitReady(t, addr)
+
+	z := NewZoneSnapshot()
+	z.PinExact("reg.test", "127.0.0.1")
+	s.SetZones(z)
+	if err := os.WriteFile(hostsPath, []byte("127.0.0.1 late.test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"reg.test.", "late.test."} {
+		if got := answerIP(queryA(t, addr, name)); got != "127.0.0.1" {
+			t.Errorf("%s = %q after reload, want 127.0.0.1 (primary and fallback must coexist)", name, got)
+		}
 	}
 }

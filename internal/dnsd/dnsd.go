@@ -6,15 +6,20 @@
 // one moving part (and one third-party image) too many.
 //
 // File formats are unchanged from the dnsmasq era and remain the on-disk
-// contract:
+// fallback contract:
 //
 //	dnsmasq.conf   address=/<name>/<ip>   wildcard entry: <name> and all subdomains
 //	               server=<ip[#port]>     upstream forwarders, in order
 //	dnsmasq.hosts  <ip> <name>            exact entries (hosts file syntax)
 //
-// The server re-reads both files on change (fsnotify, debounced) and on
-// SIGHUP, so every writer — the daemon in-process, a `srv add` from a
-// terminal, a hand edit during debugging — converges without restarts.
+// Zones reach the server through two layers. The primary layer is a snapshot
+// built from the structured config — the site yaml data and the local-domains
+// registry — that the daemon pushes in-process via SetZones, so a
+// registration answers without waiting for a file render. The fallback layer
+// is the two generated files, parsed on start, on change (fsnotify,
+// debounced) and on SIGHUP; it keeps the escape hatch of hand-written
+// entries during debugging working. Queries consult the primary layer first
+// and fall through to file entries the structured config does not know.
 package dnsd
 
 import (
@@ -22,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -54,9 +60,10 @@ const reloadDebounce = 250 * time.Millisecond
 // for change events the platform never delivered.
 const pollInterval = time.Second
 
-// zones is the immutable snapshot the handler reads. Reload swaps the pointer;
+// ZoneSnapshot is one immutable set of zones. The handler reads the combined
+// snapshot through an atomic pointer: SetZones and Reload swap the pointer,
 // queries never block on a mutex.
-type zones struct {
+type ZoneSnapshot struct {
 	// exact maps a fully-qualified name to its A record.
 	exact map[string]string
 	// wildcards are suffix matchers: entry "example.com." answers
@@ -77,11 +84,59 @@ type upstream struct {
 	port int
 }
 
+// NewZoneSnapshot returns an empty snapshot for callers that build zones
+// from the structured config (the daemon feeds these via Server.SetZones).
+// Upstreams are left unset: an empty upstream list defers to the file layer
+// and its defaults, so only a resolver list explicitly configured in
+// config.yml overrides what the files declare.
+func NewZoneSnapshot() *ZoneSnapshot {
+	return &ZoneSnapshot{exact: map[string]string{}}
+}
+
+// PinExact adds an A record matching name exactly — the structured twin of
+// an "<ip> <name>" hosts-file line. Entries with an unparseable IP are
+// dropped so a snapshot can never hold a record the query path cannot
+// serve.
+func (z *ZoneSnapshot) PinExact(name, ip string) {
+	if net.ParseIP(ip) == nil || name == "" {
+		return
+	}
+	z.exact[strings.ToLower(dnsName(name))] = ip
+}
+
+// PinWildcard answers name and every subdomain — the structured twin of
+// dnsmasq's address=/name/ directive that parseConf renders from the files.
+func (z *ZoneSnapshot) PinWildcard(name, ip string) {
+	if net.ParseIP(ip) == nil || name == "" {
+		return
+	}
+	z.wildcards = append(z.wildcards, wildcard{
+		suffix: "." + strings.ToLower(dnsName(name)),
+		ip:     ip,
+	})
+}
+
+// SetUpstream registers one forwarder, "ip" or "ip#port" — the same grammar
+// as dnsmasq's server= lines in the fallback files. Reports whether the spec
+// was valid; invalid entries are dropped.
+func (z *ZoneSnapshot) SetUpstream(spec string) bool {
+	up, ok := parseUpstreamSpec(spec)
+	if !ok {
+		return false
+	}
+	z.upstream = append(z.upstream, up)
+	return true
+}
+
 // Server is the embedded DNS responder.
 type Server struct {
-	conn      *miekg.Server
-	tcp       *miekg.Server
-	zones     atomic.Pointer[zones]
+	conn *miekg.Server
+	tcp  *miekg.Server
+	// zones is the combined serving snapshot; primary is the structured
+	// feed installed by SetZones, fallback the parsed zone files.
+	zones     atomic.Pointer[ZoneSnapshot]
+	primary   atomic.Pointer[ZoneSnapshot]
+	fallback  atomic.Pointer[ZoneSnapshot]
 	confPath  string
 	hostsPath string
 
@@ -213,11 +268,11 @@ func fileStampOf(path string) (fileStamp, bool) {
 	return fileStamp{size: fi.Size(), mod: fi.ModTime()}, true
 }
 
-// Watch reloads the zone files whenever they change, until ctx is done. It
-// blocks; run it in a goroutine. The reload immediately after the watchers
-// are installed closes the startup race: a zone file rewritten between New
-// and Add produces events nobody was watching for, so the watcher's first
-// act is to sync once from disk.
+// Watch reloads the fallback zone files whenever they change, until ctx is
+// done. It blocks; run it in a goroutine. The reload immediately after the
+// watchers are installed closes the startup race: a zone file rewritten
+// between New and Add produces events nobody was watching for, so the
+// watcher's first act is to sync once from disk.
 func (s *Server) Watch() error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -305,23 +360,71 @@ func (s *Server) Watch() error {
 	}
 }
 
-// Reload re-reads both zone files and swaps the serving snapshot. The server
-// keeps answering from the previous snapshot while the files are read.
+// SetZones installs a snapshot built from the structured config as the
+// primary layer — the daemon pushes one on start and whenever the
+// local-domains registry, a DNS-alias redirect, or config.yml changes — and
+// swaps the serving snapshot. The file-derived layer stays loaded beneath
+// it, so hand-written zone entries keep answering and a primary that no
+// longer lists a name falls back to whatever the files still say.
+func (s *Server) SetZones(z *ZoneSnapshot) {
+	s.primary.Store(z)
+	s.zones.Store(combine(z, s.fallback.Load()))
+}
+
+// Reload re-reads both zone files into the fallback layer and swaps the
+// serving snapshot. The server keeps answering from the previous snapshot
+// while the files are read.
 func (s *Server) Reload() error {
 	z, err := loadZones(s.confPath, s.hostsPath)
 	if err != nil {
 		return err
 	}
-	s.zones.Store(z)
+	s.fallback.Store(z)
+	s.zones.Store(combine(s.primary.Load(), z))
 	return nil
+}
+
+// combine overlays the structured snapshot on the file-derived one and
+// returns the snapshot queries are served from. Primary entries win per
+// name; file-only entries stay visible underneath. Primary upstreams apply
+// only when the structured config explicitly declares some, so hand-written
+// server= lines keep working while config.yml names none.
+func combine(primary, fallback *ZoneSnapshot) *ZoneSnapshot {
+	if primary == nil {
+		return fallback
+	}
+	if fallback == nil {
+		return primary
+	}
+	merged := &ZoneSnapshot{
+		exact:     make(map[string]string, len(primary.exact)+len(fallback.exact)),
+		wildcards: make([]wildcard, 0, len(primary.wildcards)+len(fallback.wildcards)),
+	}
+	maps.Copy(merged.exact, fallback.exact)
+	maps.Copy(merged.exact, primary.exact)
+	seen := make(map[string]bool, len(primary.wildcards))
+	for _, w := range primary.wildcards {
+		merged.wildcards = append(merged.wildcards, w)
+		seen[w.suffix] = true
+	}
+	for _, w := range fallback.wildcards {
+		if !seen[w.suffix] {
+			merged.wildcards = append(merged.wildcards, w)
+		}
+	}
+	merged.upstream = primary.upstream
+	if len(merged.upstream) == 0 {
+		merged.upstream = fallback.upstream
+	}
+	return merged
 }
 
 // loadZones parses the dnsmasq-format conf and hosts files into a zone
 // snapshot. Missing files yield empty zones (a fresh install serves nothing
 // but the health check and upstream forwarding); malformed lines inside an
 // otherwise parseable file are skipped so one bad line cannot take DNS down.
-func loadZones(confPath, hostsPath string) (*zones, error) {
-	z := &zones{exact: map[string]string{}}
+func loadZones(confPath, hostsPath string) (*ZoneSnapshot, error) {
+	z := &ZoneSnapshot{exact: map[string]string{}}
 
 	if data, err := os.ReadFile(hostsPath); err == nil {
 		parseHosts(string(data), z)
@@ -345,7 +448,7 @@ func loadZones(confPath, hostsPath string) (*zones, error) {
 // on the line is registered, as dnsmasq does. Only entries pointing at the
 // loopback are kept: srv's registry never contains anything else, and
 // silently becoming an A record for a foreign host entry would be surprising.
-func parseHosts(data string, z *zones) {
+func parseHosts(data string, z *ZoneSnapshot) {
 	for line := range strings.SplitSeq(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -364,7 +467,7 @@ func parseHosts(data string, z *zones) {
 // parseConf reads the generated dnsmasq.conf: address=/name/ip (wildcard:
 // name and every subdomain), server=ip[#port] upstreams. Unrecognized lines
 // are skipped.
-func parseConf(data string, z *zones) {
+func parseConf(data string, z *ZoneSnapshot) {
 	for line := range strings.SplitSeq(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -382,22 +485,30 @@ func parseConf(data string, z *zones) {
 				ip:     ip,
 			})
 		case strings.HasPrefix(line, "server="):
-			srv := strings.TrimPrefix(line, "server=")
-			host, port, hasPort := strings.Cut(srv, "#")
-			p := 53
-			if hasPort {
-				n, err := strconv.Atoi(port)
-				if err != nil || n < 1 || n > 65535 {
-					continue
-				}
-				p = n
+			if up, ok := parseUpstreamSpec(strings.TrimPrefix(line, "server=")); ok {
+				z.upstream = append(z.upstream, up)
 			}
-			if net.ParseIP(host) == nil {
-				continue
-			}
-			z.upstream = append(z.upstream, upstream{host: host, port: p})
 		}
 	}
+}
+
+// parseUpstreamSpec splits a "host[#port]" forwarder spec, the grammar of
+// dnsmasq's server= lines and of config.yml's upstream_dns entries. The port
+// defaults to 53.
+func parseUpstreamSpec(spec string) (upstream, bool) {
+	host, port, hasPort := strings.Cut(spec, "#")
+	p := 53
+	if hasPort {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return upstream{}, false
+		}
+		p = n
+	}
+	if net.ParseIP(host) == nil {
+		return upstream{}, false
+	}
+	return upstream{host: host, port: p}, true
 }
 
 // defaultUpstream is used when the conf declares no server= lines: the same
@@ -467,7 +578,7 @@ func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
 // lookupA resolves one name against the snapshot: exact entries first, then
 // wildcard suffixes (dnsmasq semantics: address=/name/ covers the apex and
 // every subdomain).
-func lookupA(z *zones, name string) (string, bool) {
+func lookupA(z *ZoneSnapshot, name string) (string, bool) {
 	if ip, ok := z.exact[name]; ok {
 		return ip, true
 	}
@@ -492,7 +603,7 @@ func appendA(m *miekg.Msg, name, ip string) {
 // at once; the first response wins. The worst case is one upstreamTimeout no
 // matter how many servers are configured or how many are dead — a healthy
 // upstream's answer never waits behind a dead one's timeout.
-func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *zones) {
+func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *ZoneSnapshot) {
 	client := &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
 	replies := make(chan *miekg.Msg, len(z.upstream))
 	for _, up := range z.upstream {

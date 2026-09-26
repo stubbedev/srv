@@ -48,6 +48,9 @@ type Daemon struct {
 	// static hosts the embedded static file server (daemon-served sites) so
 	// the metadata watcher can refresh its host table. Nil until bound.
 	static atomic.Pointer[httpd.Server]
+	// dns hosts the embedded DNS server so the structured zone source can
+	// push fresh snapshots as the server is (re)bound. Nil until bound.
+	dns atomic.Pointer[dnsd.Server]
 	// WatchMetadata controls whether the daemon also watches site metadata.yml
 	// files and hot-reloads them. Set via `srv daemon start --no-watch=false`.
 	WatchMetadata bool
@@ -180,9 +183,11 @@ func (d *Daemon) migrateLegacyFallbacks() {
 
 // startEmbeddedDNS binds the loopback at the unprivileged embedded port
 // (constants.PortDNS — the daemon is a user service and cannot bind 53) and
-// serves the local-domain zones. It never fails the daemon: DNS is one of its
-// jobs, not its reason to run. A bind failure (port held by something else)
-// is retried on a slow timer so an upgrade converges without a daemon restart.
+// serves the local-domain zones: a snapshot built from the structured config
+// (see dns_zones.go) over the generated zone files as the fallback layer. It
+// never fails the daemon: DNS is one of its jobs, not its reason to run. A
+// bind failure (port held by something else) is retried on a slow timer so
+// an upgrade converges without a daemon restart.
 func (d *Daemon) startEmbeddedDNS() {
 	if d.cfg == nil || d.cfg.TraefikDir == "" {
 		return
@@ -196,6 +201,8 @@ func (d *Daemon) startEmbeddedDNS() {
 		if err := traefik.SetupDNS(); err != nil {
 			d.log("DNS routing refresh failed (run 'srv dns setup'): %v", err)
 		}
+
+		d.startDNSZoneSource()
 
 		confPath := filepath.Join(d.cfg.TraefikDir, constants.DnsmasqConfFile)
 		hostsPath := filepath.Join(d.cfg.TraefikDir, constants.DnsmasqHostsDir, constants.DnsmasqHostsFile)
@@ -217,6 +224,8 @@ func (d *Daemon) startEmbeddedDNS() {
 				continue
 			}
 			d.log("Embedded DNS listening on %s (zones: %s)", server.Addr(), d.cfg.TraefikDir)
+			d.dns.Store(server)
+			d.refreshDNSZones()
 
 			watchDone := make(chan struct{})
 			go func() {
