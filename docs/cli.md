@@ -43,7 +43,7 @@ Available on every command:
 - [`srv logs`](#srv-logs) — Show site logs
 - [`srv mcp`](#srv-mcp) — Start the srv MCP server (stdio, or --http for a shared daemon)
 - [`srv metrics`](#srv-metrics) — Manage the optional metrics stack (prometheus + grafana)
-  - [`srv metrics disable`](#srv-metrics-disable) — Stop and remove the metrics stack containers
+  - [`srv metrics disable`](#srv-metrics-disable) — Stop the metrics stack and remove its containers and rendered files
   - [`srv metrics enable`](#srv-metrics-enable) — Render the metrics compose stack and start containers
   - [`srv metrics status`](#srv-metrics-status) — Show whether the metrics stack is running
 - [`srv network`](#srv-network) — Manage extra Docker networks attached to a site
@@ -595,13 +595,13 @@ srv metrics
 
 Subcommands:
 
-- `srv metrics disable` — Stop and remove the metrics stack containers
+- `srv metrics disable` — Stop the metrics stack and remove its containers and rendered files
 - `srv metrics enable` — Render the metrics compose stack and start containers
 - `srv metrics status` — Show whether the metrics stack is running
 
 ## `srv metrics disable`
 
-Stop and remove the metrics stack containers
+Stop the metrics stack and remove its containers and rendered files
 
 Usage:
 
