@@ -116,7 +116,7 @@ func New(bindAddr string, port int, confPath, hostsPath string) (*Server, error)
 	mux := miekg.NewServeMux()
 	mux.HandleFunc(".", s.handleQuery)
 	s.conn = &miekg.Server{PacketConn: pc, Handler: mux}
-	ln, err := net.Listen("tcp", udpAddr.String())
+	ln, err := listenCfg.Listen(context.Background(), "tcp", udpAddr.String())
 	if err != nil {
 		_ = pc.Close()
 		cancel()
