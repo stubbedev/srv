@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/platform"
 )
 
@@ -22,7 +23,19 @@ func daemonStaticURL() string {
 
 func newDaemonProject(t *testing.T) (root, projectDir string) {
 	t.Helper()
+	// Add pings the engine and checks the srv network unconditionally,
+	// daemon-served site or not. Without the stub these tests reached the
+	// developer's real Docker socket — they only passed where Docker was up
+	// and failed inside the nix sandbox. The stubbed network must be the name
+	// config.Load hands Add, and that name is a hostname hash, so it is read
+	// back from the test root rather than guessed.
+	stubEngine(t)
 	root = withSRVRoot(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(docker.SwapNewClientWithNetwork(cfg.NetworkName))
 	projectDir = filepath.Join(root, "page")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
