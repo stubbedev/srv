@@ -36,7 +36,13 @@ func TestCAROOTUnixDefault(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// With XDG_DATA_HOME unset the fallback is the platform data dir: the XDG
+	// layout on unix, Library/Application Support on darwin — the same default
+	// the standalone mkcert uses there.
 	want := filepath.Join(home, ".local", "share", "mkcert")
+	if runtime.GOOS == "darwin" {
+		want = filepath.Join(home, "Library", "Application Support", "mkcert")
+	}
 	if got := CAROOT(); got != want {
 		t.Errorf("CAROOT() = %q, want %q", got, want)
 	}
