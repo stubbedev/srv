@@ -20,4 +20,6 @@ deploy
 # OS files
 .DS_Store
 
-result/
+# Nix build output — the ./result symlink `nix build` creates; a bare pattern
+# because `result/` would not match it (a symlink is not a directory).
+result

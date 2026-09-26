@@ -37,10 +37,10 @@ build-release:
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     go build -ldflags "-X github.com/stubbedev/srv/cmd.Version=$VERSION -X github.com/stubbedev/srv/cmd.Commit=$COMMIT -X github.com/stubbedev/srv/cmd.BuildDate=$BUILD_DATE" -o {{BINARY}} .
 
-# Format Go code (golangci-lint v2 formatters — gofumpt + goimports, per
+# Format Go code (golangci-lint v2 formatters — gofumpt + gci, per
 # .golangci.yml). gofumpt is gofmt plus the rules gofmt left on the table;
-# goimports is what makes an applied lint fix compile, since the fixers rewrite
-# expressions but never the import block.
+# gci rewrites the import block, which is what makes an applied lint fix
+# compile, since the fixers swap imports but never regroup them.
 fmt:
     golangci-lint fmt ./...
 

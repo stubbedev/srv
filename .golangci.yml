@@ -121,6 +121,8 @@ linters:
       # Concatenation over Sprintf for the two-operand case as well — this is
       # the single biggest win the linter has, and it reads fine.
       strconcat: true
+      # fmt.Sprintf("%s", x) is just x.
+      sprintf1: true
     prealloc:
       simple: true
       range-loops: true
@@ -164,6 +166,10 @@ linters:
         - commentFormatting
 
   exclusions:
+    # Skip go-generated files (// Code generated … DO NOT EDIT) in both the
+    # linter and formatter gates; vendored third_party/ code is handled by the
+    # path rule below.
+    generated: lax
     presets:
       - common-false-positives
       - legacy
@@ -223,6 +229,8 @@ formatters:
         - standard
         - default
         - prefix(github.com/stubbedev/srv)
+  exclusions:
+    generated: lax
 
 issues:
   max-issues-per-linter: 0
