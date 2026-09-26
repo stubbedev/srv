@@ -50,6 +50,10 @@ const upstreamTimeout = 3 * time.Second
 // (CREATE + RENAME + CHMOD on both files) into one reload.
 const reloadDebounce = 250 * time.Millisecond
 
+// pollInterval is how often Watch re-stats the zone files as a safety net
+// for change events the platform never delivered.
+const pollInterval = time.Second
+
 // zones is the immutable snapshot the handler reads. Reload swaps the pointer;
 // queries never block on a mutex.
 type zones struct {
@@ -76,6 +80,7 @@ type upstream struct {
 // Server is the embedded DNS responder.
 type Server struct {
 	conn      *miekg.Server
+	tcp       *miekg.Server
 	zones     atomic.Pointer[zones]
 	confPath  string
 	hostsPath string
@@ -111,8 +116,16 @@ func New(bindAddr string, port int, confPath, hostsPath string) (*Server, error)
 	mux := miekg.NewServeMux()
 	mux.HandleFunc(".", s.handleQuery)
 	s.conn = &miekg.Server{PacketConn: pc, Handler: mux}
+	ln, err := net.Listen("tcp", udpAddr.String())
+	if err != nil {
+		_ = pc.Close()
+		cancel()
+		return nil, fmt.Errorf("bind DNS tcp %s: %w", udpAddr, err)
+	}
+	s.tcp = &miekg.Server{Listener: ln, Handler: mux}
 	if err := s.Reload(); err != nil {
 		_ = pc.Close()
+		_ = ln.Close()
 		cancel()
 		return nil, err
 	}
@@ -158,7 +171,16 @@ func pingAddr(addr string) bool {
 // Serve blocks serving queries until Shutdown. The returned error is nil on
 // graceful shutdown.
 func (s *Server) Serve() error {
+	tcpDone := make(chan struct{})
+	go func() {
+		defer close(tcpDone)
+		if err := s.tcp.ActivateAndServe(); err != nil && s.ctx.Err() == nil {
+			log.Printf("dnsd: tcp serve: %v", err)
+		}
+	}()
 	err := s.conn.ActivateAndServe()
+	_ = s.tcp.ShutdownContext(context.Background())
+	<-tcpDone
 	close(s.done)
 	if s.ctx.Err() != nil {
 		// Shutdown in progress: any socket error here is the expected close
@@ -173,8 +195,22 @@ func (s *Server) Shutdown() {
 	s.closeOnce.Do(func() {
 		s.cancel()
 		_ = s.conn.ShutdownContext(context.Background())
+		_ = s.tcp.ShutdownContext(context.Background())
 	})
 	<-s.done
+}
+
+type fileStamp struct {
+	size int64
+	mod  time.Time
+}
+
+func fileStampOf(path string) (fileStamp, bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}, false
+	}
+	return fileStamp{size: fi.Size(), mod: fi.ModTime()}, true
 }
 
 // Watch reloads the zone files whenever they change, until ctx is done. It
@@ -210,13 +246,26 @@ func (s *Server) Watch() error {
 		<-debounce.C
 	}
 	pending := false
+	confStamp, _ := fileStampOf(s.confPath)
+	hostsStamp, _ := fileStampOf(s.hostsPath)
+	markDirty := func() {
+		if !pending {
+			pending = true
+			debounce.Reset(reloadDebounce)
+		}
+	}
 	refresh := func() {
 		if err := s.Reload(); err != nil {
 			// A half-written or hand-mangled file must not kill the server;
 			// keep the last good zones and surface the problem.
 			log.Printf("dnsd: reload failed, keeping previous zones: %v", err)
+			return
 		}
+		confStamp, _ = fileStampOf(s.confPath)
+		hostsStamp, _ = fileStampOf(s.hostsPath)
 	}
+	poll := time.NewTicker(pollInterval)
+	defer poll.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -232,15 +281,21 @@ func (s *Server) Watch() error {
 			if name != filepath.Base(s.confPath) && name != filepath.Base(s.hostsPath) {
 				continue
 			}
-			if !pending {
-				pending = true
-				debounce.Reset(reloadDebounce)
-			}
+			markDirty()
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return nil
 			}
 			log.Printf("dnsd: watch error: %v", err)
+		case <-poll.C:
+			if cur, ok := fileStampOf(s.confPath); ok && cur != confStamp {
+				confStamp = cur
+				markDirty()
+			}
+			if cur, ok := fileStampOf(s.hostsPath); ok && cur != hostsStamp {
+				hostsStamp = cur
+				markDirty()
+			}
 		case <-debounce.C:
 			if pending {
 				pending = false
@@ -406,7 +461,7 @@ func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
 		}
 	}
 
-	forwardUpstream(w, r, m, z, name)
+	forwardUpstream(w, r, m, z)
 }
 
 // lookupA resolves one name against the snapshot: exact entries first, then
@@ -433,24 +488,32 @@ func appendA(m *miekg.Msg, name, ip string) {
 	})
 }
 
-// forwardUpstream relays the original question to the configured servers in
-// order, first response wins. Total worst case is len(upstream) *
-// upstreamTimeout; the client (Go's resolver) applies its own deadline.
-func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *zones, name string) {
+// forwardUpstream relays the original question to the configured servers all
+// at once; the first response wins. The worst case is one upstreamTimeout no
+// matter how many servers are configured or how many are dead — a healthy
+// upstream's answer never waits behind a dead one's timeout.
+func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *zones) {
 	client := &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
+	replies := make(chan *miekg.Msg, len(z.upstream))
 	for _, up := range z.upstream {
-		addr := net.JoinHostPort(up.host, strconv.Itoa(up.port))
-		resp, _, err := client.Exchange(r.Copy(), addr)
-		if err != nil {
-			continue
+		go func(up upstream) {
+			defer func() { replies <- nil }()
+			addr := net.JoinHostPort(up.host, strconv.Itoa(up.port))
+			resp, _, err := client.Exchange(r.Copy(), addr)
+			if err == nil {
+				replies <- resp
+			}
+		}(up)
+	}
+	for range z.upstream {
+		if resp := <-replies; resp != nil {
+			_ = w.WriteMsg(resp)
+			return
 		}
-		_ = w.WriteMsg(resp)
-		return
 	}
 	// No upstream answered. For a name srv owns this is unreachable (lookupA
 	// matched); for anything else the honest answer is SERVFAIL rather than a
 	// forged empty answer for a name we know nothing about.
-	_ = name
 	reply.Rcode = miekg.RcodeServerFailure
 	reply.Answer = nil
 	_ = w.WriteMsg(reply)

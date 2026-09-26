@@ -1,6 +1,8 @@
 package dnsd
 
 import (
+	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +14,6 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 )
 
-// startTestServer writes the given zone files and starts a server on an
-// ephemeral loopback port, returning its address.
 func startTestServer(t *testing.T, conf, hosts string) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -104,6 +104,72 @@ func TestServeZones(t *testing.T) {
 		if got != wantIP {
 			t.Errorf("%s = %q, want %q", name, got, wantIP)
 		}
+	}
+}
+
+// startStubUpstream answers every A query with ip after delay, on an
+// ephemeral loopback UDP port. The returned string is in "ip#port" form,
+// ready for a server= line.
+func startStubUpstream(t *testing.T, ip string, delay time.Duration) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &miekg.Server{PacketConn: pc, Handler: miekg.HandlerFunc(func(w miekg.ResponseWriter, r *miekg.Msg) {
+		time.Sleep(delay)
+		resp := new(miekg.Msg)
+		resp.SetReply(r)
+		resp.Answer = append(resp.Answer, &miekg.A{
+			Hdr: miekg.RR_Header{Name: r.Question[0].Name, Rrtype: miekg.TypeA, Class: miekg.ClassINET, Ttl: 10},
+			A:   net.ParseIP(ip),
+		})
+		_ = w.WriteMsg(resp)
+	})}
+	go func() { _ = srv.ActivateAndServe() }()
+	t.Cleanup(func() { _ = srv.ShutdownContext(context.Background()) })
+	_, port, err := net.SplitHostPort(pc.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "127.0.0.1#" + port
+}
+
+func TestForwardUpstreamFirstAnswerWins(t *testing.T) {
+	slow := startStubUpstream(t, "10.0.0.1", 1500*time.Millisecond)
+	fast := startStubUpstream(t, "10.0.0.2", 0)
+	_, addr := startTestServer(t, "server="+slow+"\nserver="+fast+"\n", "")
+
+	start := time.Now()
+	resp := queryA(t, addr, "unknown.test.")
+	elapsed := time.Since(start)
+	if len(resp.Answer) != 1 {
+		t.Fatalf("answers = %d, want the fast upstream's single record", len(resp.Answer))
+	}
+	if a := resp.Answer[0].(*miekg.A); a.A.String() != "10.0.0.2" {
+		t.Errorf("answer = %s, want 10.0.0.2 from the fast upstream", a.A.String())
+	}
+	if elapsed >= 1500*time.Millisecond {
+		t.Errorf("answer took %v; upstreams should be queried concurrently, not in order", elapsed)
+	}
+}
+
+func TestServeOverTCP(t *testing.T) {
+	s, _ := startTestServer(t, "", "127.0.0.1 tcp.test\n")
+	addr := s.tcp.Listener.Addr().String()
+
+	m := new(miekg.Msg)
+	m.SetQuestion(miekg.Fqdn("tcp.test."), miekg.TypeA)
+	client := &miekg.Client{Timeout: 2 * time.Second, Net: "tcp"}
+	resp, _, err := client.Exchange(m, addr)
+	if err != nil {
+		t.Fatalf("tcp query: %v", err)
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("answers = %d, want 1", len(resp.Answer))
+	}
+	if a := resp.Answer[0].(*miekg.A); a.A.String() != "127.0.0.1" {
+		t.Errorf("tcp.test. = %s, want 127.0.0.1", a.A.String())
 	}
 }
 
