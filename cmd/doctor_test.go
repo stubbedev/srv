@@ -197,7 +197,7 @@ func TestCheckDNSWithDomains(t *testing.T) {
 
 func TestCheckCertificatesMkcertInstalled(t *testing.T) {
 	setupSrvRoot(t)
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	_ = checkCertificates()
 }
 

@@ -50,7 +50,7 @@ func TestRunMetricsEnableHappy(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	if err := runMetricsEnable(nil, nil); err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -79,15 +79,4 @@ func TestRunMetricsDisableHappy(t *testing.T) {
 	if _, err := os.Stat(metrics.Dir(cfg)); !os.IsNotExist(err) {
 		t.Errorf("metrics dir should be gone after disable, stat err: %v", err)
 	}
-}
-
-// stubMkcertRunner returns enough output for traefik certificate paths to
-// succeed when invoked from cmd-level tests.
-type stubMkcertRunner struct{}
-
-func (stubMkcertRunner) Stream(args ...string) error           { return nil }
-func (stubMkcertRunner) Output(args ...string) ([]byte, error) { return []byte("/tmp/mkcert\n"), nil }
-
-func (stubMkcertRunner) Combined(args ...string) ([]byte, error) {
-	return []byte("Created a new local CA"), nil
 }

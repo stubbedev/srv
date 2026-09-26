@@ -208,8 +208,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Step 4: Set up dashboard HTTPS proxy (traefik.local)
 	steps.Next("Setting up dashboard proxy (%s)", traefik.DashboardLocalURL())
 	if err := traefik.CheckMkcert(); err != nil {
-		steps.Skip("Dashboard proxy skipped (mkcert not available)")
-		ui.Dim("Install mkcert to enable %s", traefik.DashboardLocalURL())
+		steps.Skip("Dashboard proxy skipped (local CA unavailable)")
+		ui.Dim("%v — needed to enable %s", err, traefik.DashboardLocalURL())
 	} else {
 		if !traefik.IsCAInstalled() {
 			if err := installCAWithRetry(); err != nil {
@@ -322,12 +322,12 @@ func stopValetIfActive() error {
 	return nil
 }
 
-// installCAWithRetry runs `mkcert -install`. With --yes it retries up to two
-// times on sudo denial or a missing system-trust outcome (mkcert's own sudo
-// re-prompt absorbs each retry). Without --yes a single attempt is made; any
-// failure becomes a hard error. srv without a trusted local CA can't serve
-// usable *.test URLs, so the install must fail loudly rather than warn and
-// continue.
+// installCAWithRetry installs the local CA into the trust stores. With --yes
+// it retries up to two times on sudo denial or a missing system-trust outcome
+// (sudo re-prompts on each attempt). Without --yes a single attempt is made;
+// any failure becomes a hard error. srv without a trusted local CA can't
+// serve usable *.test URLs, so the install must fail loudly rather than warn
+// and continue.
 func installCAWithRetry() error {
 	maxAttempts := 1
 	if installFlags.yes {

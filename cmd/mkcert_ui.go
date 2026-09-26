@@ -11,11 +11,10 @@ import (
 	"github.com/stubbedev/srv/internal/ui"
 )
 
-// reportCAInstall renders a clean, distro-aware status for the outcome of
-// `mkcert -install`. mkcert prints multi-line warnings (and emoji-laden
-// notes) to stderr that are noisy and confusing on platforms where it cannot
-// auto-trust the CA — so we suppress that output upstream and surface a
-// single, actionable message here.
+// reportCAInstall renders a clean, distro-aware status for the outcome of the
+// CA install. The vendored mkcert engine reports structured results instead
+// of the noisy multi-line console output the standalone tool printed, and the
+// actionable branches below map each outcome to a single message.
 //
 // quiet=true suppresses the success line (used in `srv install` where the
 // step framework already prints the headline).

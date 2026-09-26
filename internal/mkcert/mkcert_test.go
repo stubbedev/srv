@@ -1,282 +1,306 @@
 package mkcert
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
-	"strings"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
-// stubRunner is a controllable CommandRunner for tests.
-type stubRunner struct {
-	streamErr   error
-	outOut      []byte
-	outErr      error
-	combinedOut []byte
-	combinedErr error
-
-	calls []string
+// carootSandbox points CAROOT at a fresh temp dir for the duration of the
+// test, so CA files never land in the developer's real ~/.local/share/mkcert.
+func carootSandbox(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("CAROOT", dir)
+	return dir
 }
 
-func (s *stubRunner) Stream(args ...string) error {
-	s.calls = append(s.calls, "Stream:"+strings.Join(args, ","))
-	return s.streamErr
-}
-
-func (s *stubRunner) Output(args ...string) ([]byte, error) {
-	s.calls = append(s.calls, "Output:"+strings.Join(args, ","))
-	return s.outOut, s.outErr
-}
-
-func (s *stubRunner) Combined(args ...string) ([]byte, error) {
-	s.calls = append(s.calls, "Combined:"+strings.Join(args, ","))
-	return s.combinedOut, s.combinedErr
-}
-
-func TestParseInstallOutputCreatedCA(t *testing.T) {
-	in := "Created a new local CA \\u200b💥\nUsing the local CA at \"x\"\n"
-	res := parseInstallOutput(in)
-	if !res.NewCA {
-		t.Error("expected NewCA")
-	}
-	if res.RawOutput != in {
-		t.Error("RawOutput should be passthrough")
+func TestCAROOTEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CAROOT", dir)
+	if got := CAROOT(); got != dir {
+		t.Errorf("CAROOT() = %q, want %q", got, dir)
 	}
 }
 
-func TestParseInstallOutputSystemTrust(t *testing.T) {
-	in := "The local CA is now installed in the system trust store! ⚡️"
-	res := parseInstallOutput(in)
-	if !res.SystemTrustOK {
-		t.Error("SystemTrustOK should be true")
+func TestCAROOTUnixDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix layout")
+	}
+	t.Setenv("CAROOT", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".local", "share", "mkcert")
+	if got := CAROOT(); got != want {
+		t.Errorf("CAROOT() = %q, want %q", got, want)
 	}
 }
 
-func TestParseInstallOutputSystemUnsupported(t *testing.T) {
-	in := "Installing to the system store is not yet supported on this Linux 😣"
-	res := parseInstallOutput(in)
-	if !res.SystemUnsupported {
-		t.Error("SystemUnsupported should be true")
+func TestCAROOTXDGDataHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix layout")
+	}
+	t.Setenv("CAROOT", "")
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	want := filepath.Join(xdg, "mkcert")
+	if got := CAROOT(); got != want {
+		t.Errorf("CAROOT() = %q, want %q", got, want)
 	}
 }
 
-func TestParseInstallOutputBrowserUnavailable(t *testing.T) {
-	in := "Note: Firefox support is not available on your platform. ℹ️"
-	res := parseInstallOutput(in)
-	if !res.BrowserUnavailable {
-		t.Error("BrowserUnavailable should be true")
-	}
-}
-
-func TestParseInstallOutputBrowserTrustFirefox(t *testing.T) {
-	in := "The local CA is now installed in the Firefox and/or Chrome/Chromium trust store"
-	res := parseInstallOutput(in)
-	if !res.BrowserTrustOK {
-		t.Error("BrowserTrustOK should be true for Firefox line")
-	}
-}
-
-func TestParseInstallOutputBrowserTrustChrome(t *testing.T) {
-	in := "The local CA is now installed in the Chrome trust store (requires browser restart)"
-	res := parseInstallOutput(in)
-	if !res.BrowserTrustOK {
-		t.Error("BrowserTrustOK should be true for Chrome line")
-	}
-}
-
-func TestParseInstallOutputBrowserRestart(t *testing.T) {
-	in := "Now installed in the trust store — please browser restart to take effect"
-	res := parseInstallOutput(in)
-	if !res.BrowserTrustOK {
-		t.Error("BrowserTrustOK should be true for restart hint")
-	}
-}
-
-func TestParseInstallOutputCertutilMissing(t *testing.T) {
-	cases := []string{
-		`Warning: no "certutil" tool installed.`,
-		`warning: "certutil" is not available; install nss-tools`,
-	}
-	for _, in := range cases {
-		res := parseInstallOutput(in)
-		if !res.CertutilMissing {
-			t.Errorf("CertutilMissing should be true for %q", in)
-		}
-	}
-}
-
-func TestParseInstallOutputSudoDenied(t *testing.T) {
-	cases := []string{
-		`sudo: Authentication failed, try again.`,
-		`sudo-rs: 3 incorrect authentication attempts`,
-		`sudo: a password is required`,
-	}
-	for _, in := range cases {
-		res := parseInstallOutput(in)
-		if !res.SudoDenied {
-			t.Errorf("SudoDenied should be true for %q", in)
-		}
-	}
-}
-
-func TestParseInstallOutputCombination(t *testing.T) {
-	in := strings.Join([]string{
-		"Created a new local CA at \"~/.mkcert\"",
-		"The local CA is now installed in the system trust store!",
-		"The local CA is now installed in the Firefox trust store!",
-	}, "\n")
-	res := parseInstallOutput(in)
-	if !res.NewCA || !res.SystemTrustOK || !res.BrowserTrustOK {
-		t.Errorf("combined parse failed: %+v", res)
-	}
-}
-
-func TestParseInstallOutputEmpty(t *testing.T) {
-	res := parseInstallOutput("")
-	if res.NewCA || res.SystemTrustOK || res.BrowserTrustOK ||
-		res.SystemUnsupported || res.BrowserUnavailable || res.CertutilMissing {
-		t.Errorf("empty input should yield zero result, got %+v", res)
-	}
-	if res.RawOutput != "" {
-		t.Errorf("RawOutput = %q, want empty", res.RawOutput)
-	}
-}
-
-func TestAvailableTrueWhenLookPathSucceeds(t *testing.T) {
-	t.Cleanup(SwapLookPath(func(string) (string, error) { return "/fake/bin/mkcert", nil }))
+func TestAvailableRequiresCAROOT(t *testing.T) {
+	carootSandbox(t)
 	if !Available() {
-		t.Error("Available() should be true when lookPath returns a hit")
+		t.Error("resolvable CAROOT should mean available")
 	}
-}
-
-func TestAvailableFalseWhenLookPathFails(t *testing.T) {
-	t.Cleanup(SwapLookPath(func(string) (string, error) { return "", errors.New("not found") }))
+	t.Setenv("CAROOT", "")
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
 	if Available() {
-		t.Error("Available() should be false when lookPath returns an error")
+		t.Error("no resolvable CA directory should mean unavailable")
 	}
 }
 
-func TestErrNotInstalledMessage(t *testing.T) {
-	if ErrNotInstalled == nil {
-		t.Fatal("ErrNotInstalled should be non-nil")
-	}
-	if !strings.Contains(ErrNotInstalled.Error(), "mkcert") {
-		t.Errorf("err msg = %q", ErrNotInstalled.Error())
-	}
-}
+func TestLoadCACreatesCA(t *testing.T) {
+	dir := carootSandbox(t)
 
-func TestSwapRunnerRestores(t *testing.T) {
-	prev := Runner
-	stub := &stubRunner{}
-	restore := SwapRunner(stub)
-	if Runner != stub {
-		t.Fatal("SwapRunner did not install stub")
-	}
-	restore()
-	if Runner != prev {
-		t.Errorf("restore did not revert")
-	}
-}
-
-func TestRunDelegates(t *testing.T) {
-	stub := &stubRunner{streamErr: errors.New("boom")}
-	t.Cleanup(SwapRunner(stub))
-	if err := Run("-foo", "x"); err == nil || err.Error() != "boom" {
-		t.Errorf("Run err = %v", err)
-	}
-	if len(stub.calls) != 1 || stub.calls[0] != "Stream:-foo,x" {
-		t.Errorf("calls = %v", stub.calls)
-	}
-}
-
-func TestRunQuietDelegates(t *testing.T) {
-	stub := &stubRunner{outOut: []byte("ignored"), outErr: nil}
-	t.Cleanup(SwapRunner(stub))
-	if err := RunQuiet("-cert"); err != nil {
-		t.Errorf("err: %v", err)
-	}
-	if len(stub.calls) != 1 || stub.calls[0] != "Output:-cert" {
-		t.Errorf("calls = %v", stub.calls)
-	}
-}
-
-func TestRunQuietForwardsErr(t *testing.T) {
-	stub := &stubRunner{outErr: errors.New("exit 1")}
-	t.Cleanup(SwapRunner(stub))
-	if err := RunQuiet(); err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestOutputDelegates(t *testing.T) {
-	stub := &stubRunner{outOut: []byte("/root/ca"), outErr: nil}
-	t.Cleanup(SwapRunner(stub))
-	got, err := Output("-CAROOT")
+	ca, err := loadCA()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "/root/ca" {
-		t.Errorf("got %q", got)
+	if !ca.created {
+		t.Error("first load should create the CA")
 	}
-}
-
-func TestInstallParsesAndAttachesCARootPath(t *testing.T) {
-	stub := &stubRunner{
-		combinedOut: []byte("Created a new local CA at \"x\"\nThe local CA is now installed in the system trust store!"),
-		outOut:      []byte("  /etc/mkcert  \n"),
+	if !ca.caCert.IsCA {
+		t.Error("generated certificate is not a CA")
 	}
-	t.Cleanup(SwapRunner(stub))
+	if ca.caKey == nil {
+		t.Fatal("CA key missing")
+	}
 
-	res, err := Install()
+	if _, err := os.Stat(filepath.Join(dir, rootName)); err != nil {
+		t.Errorf("rootCA.pem missing: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	keyInfo, err := os.Stat(filepath.Join(dir, rootKeyName))
 	if err != nil {
-		t.Errorf("Install err: %v", err)
+		t.Fatal(err)
 	}
-	if !res.NewCA || !res.SystemTrustOK {
-		t.Errorf("parse incorrect: %+v", res)
-	}
-	if res.CARootPath == "" {
-		t.Error("CARootPath empty")
-	}
-	if !strings.HasSuffix(res.CARootPath, "rootCA.pem") {
-		t.Errorf("CARootPath = %q", res.CARootPath)
+	if got := keyInfo.Mode().Perm(); got != 0o400 {
+		t.Errorf("CA key perms = %o, want 400", got)
 	}
 }
 
-func TestInstallReturnsRunErr(t *testing.T) {
-	stub := &stubRunner{combinedErr: errors.New("exit 2")}
-	t.Cleanup(SwapRunner(stub))
-	_, err := Install()
+func TestLoadCAReusesExisting(t *testing.T) {
+	carootSandbox(t)
+	first, err := loadCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.created {
+		t.Error("second load must reuse the existing CA")
+	}
+	if !first.caCert.Equal(second.caCert) {
+		t.Error("CA certificate changed between loads")
+	}
+}
+
+func TestIssueCertSANsAndValidity(t *testing.T) {
+	carootSandbox(t)
+	certPath := filepath.Join(t.TempDir(), "app.test.crt")
+	keyPath := filepath.Join(t.TempDir(), "app.test.key")
+
+	domains := []string{"app.test", "*.app.test", "127.0.0.1"}
+	if err := IssueCert(certPath, keyPath, domains); err != nil {
+		t.Fatal(err)
+	}
+
+	cert := readCert(t, certPath)
+	for _, name := range []string{"app.test", "*.app.test"} {
+		if err := cert.VerifyHostname(name); err != nil {
+			t.Errorf("cert does not cover %q: %v", name, err)
+		}
+	}
+	if len(cert.IPAddresses) != 1 || cert.IPAddresses[0].String() != "127.0.0.1" {
+		t.Errorf("IP SANs = %v, want [127.0.0.1]", cert.IPAddresses)
+	}
+	validity := cert.NotAfter.Sub(cert.NotBefore)
+	// 2 years and 3 months, within a day of drift.
+	if validity < 815*24*time.Hour || validity > 827*24*time.Hour {
+		t.Errorf("validity = %v, want ~825 days (macOS limit)", validity)
+	}
+	if cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		t.Error("missing digital signature key usage")
+	}
+}
+
+func TestIssueCertFilePerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permissions")
+	}
+	carootSandbox(t)
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "app.test.crt")
+	keyPath := filepath.Join(dir, "app.test.key")
+	if err := IssueCert(certPath, keyPath, []string{"app.test"}); err != nil {
+		t.Fatal(err)
+	}
+	certInfo, err := os.Stat(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := certInfo.Mode().Perm(); got != 0o644 {
+		t.Errorf("cert perms = %o, want 644", got)
+	}
+	keyInfo, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("key perms = %o, want 600", got)
+	}
+}
+
+func TestIssueCertSignedByLocalCA(t *testing.T) {
+	dir := carootSandbox(t)
+	certPath := filepath.Join(t.TempDir(), "app.test.crt")
+	if err := IssueCert(certPath, filepath.Join(t.TempDir(), "app.test.key"), []string{"app.test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	caPEM, err := os.ReadFile(filepath.Join(dir, rootName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caBlock, _ := pem.Decode(caPEM)
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leaf := readCert(t, certPath)
+	if err := leaf.CheckSignatureFrom(caCert); err != nil {
+		t.Errorf("leaf is not signed by the local CA: %v", err)
+	}
+}
+
+func TestIssueCertInvalidHostname(t *testing.T) {
+	carootSandbox(t)
+	err := IssueCert(filepath.Join(t.TempDir(), "a.crt"), filepath.Join(t.TempDir(), "a.key"), []string{"not a domain!"})
 	if err == nil {
-		t.Error("expected err")
+		t.Fatal("expected err for invalid hostname")
 	}
 }
 
-func TestInstallSwallowsCARootError(t *testing.T) {
-	stub := &stubRunner{
-		combinedOut: []byte("Created a new local CA"),
-		outErr:      errors.New("caroot fail"),
+func TestIssueCertKeylessCAMode(t *testing.T) {
+	dir := carootSandbox(t)
+	if _, err := loadCA(); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(SwapRunner(stub))
-	res, err := Install()
+	// Simulate keyless mode: only the certificate is present.
+	if err := os.Remove(filepath.Join(dir, rootKeyName)); err != nil {
+		t.Fatal(err)
+	}
+	err := IssueCert(filepath.Join(t.TempDir(), "a.crt"), filepath.Join(t.TempDir(), "a.key"), []string{"app.test"})
+	if err == nil {
+		t.Fatal("expected err when the CA key is missing")
+	}
+}
+
+func TestIssueCertSharedOutputFile(t *testing.T) {
+	carootSandbox(t)
+	combined := filepath.Join(t.TempDir(), "combined.pem")
+	if err := IssueCert(combined, combined, []string{"app.test"}); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := os.ReadFile(combined)
 	if err != nil {
-		t.Errorf("Install err: %v", err)
+		t.Fatal(err)
 	}
-	if res.CARootPath != "" {
-		t.Errorf("CARootPath should be empty when caroot fails: %q", res.CARootPath)
-	}
-	if !res.NewCA {
-		t.Error("NewCA should still parse")
+	block, _ := pem.Decode(rest)
+	if block == nil {
+		t.Fatal("combined file missing certificate block")
 	}
 }
 
-func TestDefaultRunnerErrorsWhenMkcertMissing(t *testing.T) {
-	t.Cleanup(SwapLookPath(func(string) (string, error) { return "", errors.New("not found") }))
-	if err := (defaultRunner{}.Stream("--help")); !errors.Is(err, ErrNotInstalled) {
-		t.Errorf("Stream err = %v, want ErrNotInstalled", err)
+func TestSwapEngine(t *testing.T) {
+	carootSandbox(t)
+	restore := SwapEngine(stubEngine{available: false})
+	defer restore()
+	if Available() {
+		t.Error("swapped engine's Available not honored")
 	}
-	if _, err := (defaultRunner{}.Output("-CAROOT")); !errors.Is(err, ErrNotInstalled) {
-		t.Errorf("Output err = %v, want ErrNotInstalled", err)
+}
+
+type stubEngine struct {
+	available bool
+}
+
+func (s stubEngine) Available() bool { return s.available }
+func (stubEngine) Install() (InstallResult, error) {
+	return InstallResult{}, errors.New("not implemented")
+}
+func (stubEngine) Uninstall() error                         { return errors.New("not implemented") }
+func (stubEngine) IssueCert(string, string, []string) error { return errors.New("not implemented") }
+
+func TestStoreEnabled(t *testing.T) {
+	t.Setenv("TRUST_STORES", "")
+	for _, store := range []string{"system", "nss", "java"} {
+		if !storeEnabled(store) {
+			t.Errorf("%s should be enabled by default", store)
+		}
 	}
-	if _, err := (defaultRunner{}.Combined("-CAROOT")); !errors.Is(err, ErrNotInstalled) {
-		t.Errorf("Combined err = %v, want ErrNotInstalled", err)
+	t.Setenv("TRUST_STORES", "system,nss")
+	if !storeEnabled("system") || !storeEnabled("nss") {
+		t.Error("listed stores should be enabled")
 	}
+	if storeEnabled("java") {
+		t.Error("unlisted store should be disabled")
+	}
+}
+
+func TestIsSudoDenied(t *testing.T) {
+	cases := map[string]bool{
+		"sudo: a password is required":               true,
+		"3 incorrect authentication attempts":        true,
+		"sudo: no password was provided":             false,
+		"sudo-rs: authentication failed":             true,
+		"tee: /etc/anchors/x.pem: Permission denied": false,
+		"": false,
+	}
+	for out, want := range cases {
+		if got := isSudoDenied([]byte(out)); got != want {
+			t.Errorf("isSudoDenied(%q) = %v, want %v", out, got, want)
+		}
+	}
+}
+
+func readCert(t *testing.T, path string) *x509.Certificate {
+	t.Helper()
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		t.Fatal("no PEM block in certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert
 }

@@ -3,7 +3,7 @@ package traefik
 import (
 	"errors"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,46 +20,41 @@ func mustLoadCfg(t *testing.T) *config.Config {
 	return cfg
 }
 
-// mkcertStub implements mkcert.CommandRunner. Records calls; configurable err.
-type mkcertStub struct {
-	streamErr error
-	outErr    error
-	combErr   error
-	calls     []string
-}
-
-func (m *mkcertStub) Stream(args ...string) error {
-	m.calls = append(m.calls, "Stream:"+strings.Join(args, ","))
-	return m.streamErr
-}
-
-func (m *mkcertStub) Output(args ...string) ([]byte, error) {
-	m.calls = append(m.calls, "Output:"+strings.Join(args, ","))
-	return []byte("/root/mkcert\n"), m.outErr
-}
-
-func (m *mkcertStub) Combined(args ...string) ([]byte, error) {
-	m.calls = append(m.calls, "Combined:"+strings.Join(args, ","))
-	return []byte("Created a new local CA"), m.combErr
-}
-
 func TestCheckMkcertAvailable(t *testing.T) {
-	// We can't make mkcert.Available() return false without unloading the
-	// binary. Just call to exercise the path.
-	_ = CheckMkcert()
+	// TestMain points CAROOT into the temp SRV_ROOT, so the vendored engine
+	// is available without any host dependency.
+	if err := CheckMkcert(); err != nil {
+		t.Errorf("CheckMkcert() = %v, want nil", err)
+	}
 }
 
-func TestIsCAInstalledOutputErr(t *testing.T) {
-	stub := &mkcertStub{outErr: errors.New("missing binary")}
-	t.Cleanup(mkcert.SwapRunner(stub))
+func TestCheckMkcertNoCAROOT(t *testing.T) {
+	t.Cleanup(mkcert.SwapEngine(mkcert.SystemEngine()))
+	t.Setenv("CAROOT", "")
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := CheckMkcert(); err == nil {
+		t.Error("expected err when no CA directory can be resolved")
+	}
+}
+
+func TestIsCAInstalledTracksRootCAFile(t *testing.T) {
+	caroot := t.TempDir()
+	t.Setenv("CAROOT", caroot)
 	if IsCAInstalled() {
-		t.Error("err should yield false")
+		t.Error("empty CAROOT should not count as installed")
+	}
+	if err := os.WriteFile(filepath.Join(caroot, "rootCA.pem"), []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !IsCAInstalled() {
+		t.Error("existing rootCA.pem should count as installed")
 	}
 }
 
 func TestInstallCA(t *testing.T) {
-	stub := &mkcertStub{}
-	t.Cleanup(mkcert.SwapRunner(stub))
+	engine := &stubMkcertEngine{}
+	t.Cleanup(mkcert.SwapEngine(engine))
 	res, err := InstallCA()
 	if err != nil {
 		t.Fatal(err)
@@ -67,11 +62,14 @@ func TestInstallCA(t *testing.T) {
 	if !res.NewCA {
 		t.Error("NewCA flag missing")
 	}
+	if !res.SystemTrustOK {
+		t.Error("SystemTrustOK flag missing")
+	}
 }
 
 func TestInstallCAErr(t *testing.T) {
-	stub := &mkcertStub{combErr: errors.New("exit 1")}
-	t.Cleanup(mkcert.SwapRunner(stub))
+	engine := &stubMkcertEngine{installErr: errors.New("exit 1")}
+	t.Cleanup(mkcert.SwapEngine(engine))
 	_, err := InstallCA()
 	if err == nil {
 		t.Error("expected err")
@@ -86,33 +84,41 @@ func TestGenerateLocalCertNoDomains(t *testing.T) {
 
 func TestGenerateLocalCertSuccess(t *testing.T) {
 	setupSrvRoot(t)
-	stub := &mkcertStub{}
-	t.Cleanup(mkcert.SwapRunner(stub))
 	if err := GenerateLocalCert("blog", []string{"blog.local"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if len(stub.calls) == 0 {
-		t.Error("expected mkcert call")
+	if !LocalCertsExist("blog", "blog.local") {
+		t.Error("expected cert and key on disk")
 	}
 }
 
 func TestGenerateLocalCertWildcardAddsSAN(t *testing.T) {
 	setupSrvRoot(t)
-	stub := &mkcertStub{}
-	t.Cleanup(mkcert.SwapRunner(stub))
 	if err := GenerateLocalCert("blog", []string{"blog.com"}, true); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(stub.calls, " ")
-	if !strings.Contains(joined, "*.blog.com") {
-		t.Errorf("wildcard SAN missing: %v", stub.calls)
+	cert := parseLocalCert(t, "blog", "blog.com")
+	want := []string{"blog.com", "*.blog.com"}
+	if len(cert.DNSNames) != len(want) {
+		t.Fatalf("DNSNames = %v, want %v", cert.DNSNames, want)
+	}
+	for _, name := range want {
+		if err := cert.VerifyHostname(name); err != nil {
+			t.Errorf("cert does not cover %q (SANs: %v): %v", name, cert.DNSNames, err)
+		}
 	}
 }
 
-func TestGenerateLocalCertMkcertErr(t *testing.T) {
+func TestGenerateLocalCertInvalidDomain(t *testing.T) {
 	setupSrvRoot(t)
-	stub := &mkcertStub{outErr: errors.New("exit 1")}
-	t.Cleanup(mkcert.SwapRunner(stub))
+	if err := GenerateLocalCert("blog", []string{"not a domain!"}, false); err == nil {
+		t.Error("expected err for invalid hostname")
+	}
+}
+
+func TestGenerateLocalCertEngineErr(t *testing.T) {
+	setupSrvRoot(t)
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{issueErr: errors.New("exit 1")}))
 	if err := GenerateLocalCert("blog", []string{"blog.local"}, false); err == nil {
 		t.Error("expected err")
 	}
@@ -126,8 +132,6 @@ func TestEnsureLocalCertNoDomains(t *testing.T) {
 
 func TestEnsureLocalCertGeneratesWhenMissing(t *testing.T) {
 	setupSrvRoot(t)
-	stub := &mkcertStub{}
-	t.Cleanup(mkcert.SwapRunner(stub))
 	renewed, err := EnsureLocalCert("blog", []string{"blog.local"}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -139,13 +143,10 @@ func TestEnsureLocalCertGeneratesWhenMissing(t *testing.T) {
 
 func TestEnsureLocalCertSkipsWhenCovered(t *testing.T) {
 	setupSrvRoot(t)
-	stub := &mkcertStub{}
-	t.Cleanup(mkcert.SwapRunner(stub))
 	// Generate first.
 	if _, err := EnsureLocalCert("blog", []string{"blog.local"}, false); err != nil {
 		t.Fatal(err)
 	}
-	stub.calls = nil
 
 	// Write a real cert covering the domain so EnsureLocalCert can verify SAN.
 	cfg := mustLoadCfg(t)

@@ -14,20 +14,7 @@ import (
 	"time"
 
 	"github.com/stubbedev/srv/internal/config"
-	"github.com/stubbedev/srv/internal/mkcert"
 )
-
-type caRootStub struct {
-	out []byte
-}
-
-func (caRootStub) Stream(args ...string) error             { return nil }
-func (s caRootStub) Output(args ...string) ([]byte, error) { return s.out, nil }
-func (caRootStub) Combined(args ...string) ([]byte, error) { return nil, nil }
-
-func mkcertSwapRunner(r mkcert.CommandRunner) func() {
-	return mkcert.SwapRunner(r)
-}
 
 // writePEMCert produces a self-signed cert with the supplied SANs and writes
 // it to certPath in PEM form. Lifetime can be set via the validity offsets
@@ -175,19 +162,42 @@ func TestRemoveLocalCertsKeyRemoveErrors(t *testing.T) {
 }
 
 func TestIsCAInstalledNoCAROOTFile(t *testing.T) {
-	stub := &caRootStub{out: []byte("/tmp/nonexistent-srv-test")}
-	t.Cleanup(mkcertSwapRunner(stub))
+	t.Setenv("CAROOT", t.TempDir())
 	if IsCAInstalled() {
 		t.Error("CA file missing → expected false")
 	}
 }
 
 func TestIsCAInstalledEmptyCAROOT(t *testing.T) {
-	stub := &caRootStub{out: []byte("  \n")}
-	t.Cleanup(mkcertSwapRunner(stub))
+	t.Setenv("CAROOT", "")
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
 	if IsCAInstalled() {
 		t.Error("empty CAROOT → expected false")
 	}
+}
+
+// parseLocalCert parses the issued leaf certificate for (siteName, domain)
+// from the site certs dir.
+func parseLocalCert(t *testing.T, siteName, domain string) *x509.Certificate {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM, err := os.ReadFile(filepath.Join(cfg.SiteCertsDir(siteName), domain+".crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("no PEM block in issued certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert
 }
 
 func TestRemoveLocalCertsExisting(t *testing.T) {

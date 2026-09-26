@@ -82,7 +82,7 @@ func resetProxyAddFlags() {
 func TestRunProxyAddLocalhost(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	resetProxyAddFlags()
 	proxyAddFlags.domain = "blog.local"
 	proxyAddFlags.port = "8080"
@@ -121,7 +121,7 @@ func TestRunProxyAddExisting(t *testing.T) {
 func TestRunProxyAddContainer(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	resetProxyAddFlags()
 	proxyAddFlags.domain = "redis.local"
 	proxyAddFlags.container = "redis:6379"
@@ -137,7 +137,7 @@ func TestRunProxyAddContainer(t *testing.T) {
 func TestRunProxyAddWildcard(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	resetProxyAddFlags()
 	proxyAddFlags.domain = "blog.local"
 	proxyAddFlags.port = "8080"
@@ -152,7 +152,7 @@ func TestRunProxyAddWildcard(t *testing.T) {
 func TestRunProxyAddFallback(t *testing.T) {
 	setupSrvRoot(t)
 	t.Cleanup(docker.SwapNewClientOK())
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
 	resetProxyAddFlags()
 	proxyAddFlags.domain = "blog.local"
@@ -173,7 +173,7 @@ func TestRunProxyAddForceOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(docker.SwapNewClientOK())
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	resetProxyAddFlags()
 	proxyAddFlags.domain = "blog.local"
 	proxyAddFlags.port = "8080"
@@ -187,7 +187,7 @@ func TestRunProxyAddForceOverwrite(t *testing.T) {
 
 func TestRunRedirectAddHTTP(t *testing.T) {
 	setupSrvRoot(t)
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	resetRedirectFlags()
 	redirectAddFlags.domain = "old.com"
 	redirectAddFlags.to = "https://new.com"

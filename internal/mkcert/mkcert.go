@@ -1,193 +1,105 @@
-// Package mkcert shells out to the system `mkcert` binary. Users must have
-// it on $PATH (`brew install mkcert`, `nix profile install nixpkgs#mkcert`,
-// distro package manager) — srv no longer vendors / embeds it.
 package mkcert
 
-import (
-	"bytes"
-	"context"
-	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-)
+// Version is the revision of the vendored upstream mkcert implementation.
+const Version = "v1.4.4-1-g1c1dc4e"
 
-// ErrNotInstalled is returned when `mkcert` is not on $PATH.
-var ErrNotInstalled = errors.New("mkcert not installed (`brew install mkcert` / `nix profile install nixpkgs#mkcert` / distro package)")
-
-// CommandRunner runs the mkcert binary. The signature mirrors the three
-// production call shapes (stream / output-only / output+stderr) so a test
-// can stub all of them with one struct.
-type CommandRunner interface {
-	// Stream runs mkcert with stdin/stdout/stderr attached.
-	Stream(args ...string) error
-	// Output runs mkcert and returns stdout. Stderr is ignored.
-	Output(args ...string) ([]byte, error)
-	// Combined runs mkcert and returns the merged stdout+stderr along with
-	// the run error.
-	Combined(args ...string) ([]byte, error)
-}
-
-// defaultRunner is the production CommandRunner; it shells out to the
-// system `mkcert` binary via os/exec.
-type defaultRunner struct{}
-
-func (defaultRunner) Stream(args ...string) error {
-	path, err := mkcertPath()
-	if err != nil {
-		return err
-	}
-	cmd := exec.CommandContext(context.Background(), path, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
-}
-
-func (defaultRunner) Output(args ...string) ([]byte, error) {
-	path, err := mkcertPath()
-	if err != nil {
-		return nil, err
-	}
-	return exec.CommandContext(context.Background(), path, args...).Output()
-}
-
-func (defaultRunner) Combined(args ...string) ([]byte, error) {
-	path, err := mkcertPath()
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.CommandContext(context.Background(), path, args...)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	runErr := cmd.Run()
-	return buf.Bytes(), runErr
-}
-
-// Runner is the active CommandRunner. Tests can replace this via SwapRunner.
-var Runner CommandRunner = defaultRunner{}
-
-// SwapRunner installs r and returns a function that restores the previous
-// runner. Intended for use with t.Cleanup.
-func SwapRunner(r CommandRunner) func() {
-	prev := Runner
-	Runner = r
-	return func() { Runner = prev }
-}
-
-// mkcertPath returns the resolved $PATH location of the mkcert binary, or
-// ErrNotInstalled if it isn't on the host.
-func mkcertPath() (string, error) {
-	path, err := lookPath("mkcert")
-	if err != nil {
-		return "", ErrNotInstalled
-	}
-	return path, nil
-}
-
-// Run executes mkcert with the given arguments. stdout/stderr are inherited.
-func Run(args ...string) error {
-	return Runner.Stream(args...)
-}
-
-// RunQuiet executes mkcert suppressing its stderr. mkcert prints advisory
-// warnings to stderr (e.g. "the local CA is not installed in the system
-// trust store") that are stale or misleading when srv has already handled
-// CA installation. Only a non-zero exit code is treated as an error.
-func RunQuiet(args ...string) error {
-	_, err := Runner.Output(args...)
-	return err
-}
-
-// Output executes mkcert and returns its stdout.
-func Output(args ...string) ([]byte, error) {
-	return Runner.Output(args...)
-}
-
-// lookPath is the exec.LookPath indirection so tests can fake the host's PATH.
-var lookPath = exec.LookPath
-
-// SwapLookPath replaces the lookPath used by Available + mkcertPath. Returns a
-// restore func; tests use it via t.Cleanup.
-func SwapLookPath(fn func(string) (string, error)) func() {
-	prev := lookPath
-	lookPath = fn
-	return func() { lookPath = prev }
-}
-
-// Available reports whether mkcert is on $PATH.
-func Available() bool {
-	_, err := lookPath("mkcert")
-	return err == nil
-}
-
-// InstallResult describes the outcome of running `mkcert -install`. mkcert
-// prints multiple status lines covering the local CA, system trust store, and
-// NSS (Firefox/Chrome) database. We parse these so the caller can render a
-// single clean message instead of leaking mkcert's raw output.
+// InstallResult describes the outcome of installing the local CA into the
+// platform trust stores. It carries the same signal the standalone `mkcert
+// -install` used to print as multi-line console output, so srv can render a
+// single clean message per outcome.
 type InstallResult struct {
-	CARootPath         string // Path to rootCA.pem (only set when known)
-	SystemTrustOK      bool   // CA installed in OS trust store
-	BrowserTrustOK     bool   // CA installed in NSS DB (Firefox/Chrome)
+	CARootPath         string // Path to rootCA.pem (always set on a successful load)
+	SystemTrustOK      bool   // CA installed (or already present) in the OS trust store
+	BrowserTrustOK     bool   // CA installed in the NSS DB (Firefox/Chrome)
 	SystemUnsupported  bool   // System trust store install not supported on this platform
-	BrowserUnavailable bool   // Firefox/Chrome NSS support unavailable (no profiles or no certutil)
+	BrowserUnavailable bool   // NSS support unavailable on this platform
 	CertutilMissing    bool   // certutil binary not found, needed for browser trust
 	NewCA              bool   // A fresh local CA was created during this run
 	SudoDenied         bool   // sudo password prompt failed or was refused; CA install aborted
-	RawOutput          string // Captured combined output (for debugging)
+	RawOutput          string // Human-readable log of what the engine did (for debugging)
 }
 
-// Install runs `mkcert -install` and parses its output into an InstallResult.
-// stdout/stderr are captured rather than streamed to the user.
-func Install() (InstallResult, error) {
-	out, runErr := Runner.Combined("-install")
-	res := parseInstallOutput(string(out))
-	if caRoot, cerr := caRootDir(); cerr == nil {
-		res.CARootPath = filepath.Join(caRoot, "rootCA.pem")
-	}
-	return res, runErr
+// Engine performs the local-CA operations. The production implementation
+// drives the host system (files, trust stores, sudo); tests swap in fakes via
+// SwapEngine.
+type Engine interface {
+	// Available reports whether local TLS issuance can work on this host.
+	Available() bool
+	// Install creates the local CA if needed and enrolls it in the system and
+	// NSS trust stores.
+	Install() (InstallResult, error)
+	// Uninstall removes the local CA from the trust stores (it does not
+	// delete the CA files).
+	Uninstall() error
+	// IssueCert issues a certificate for domains (hostnames, wildcards, IPs)
+	// at the given PEM paths.
+	IssueCert(certPath, keyPath string, domains []string) error
 }
 
-// parseInstallOutput is the pure-logic half of Install — given the combined
-// stdout/stderr of `mkcert -install`, it returns the populated result struct
-// (without the CARootPath, which requires another mkcert invocation).
-func parseInstallOutput(out string) InstallResult {
-	res := InstallResult{RawOutput: out}
-	for line := range strings.SplitSeq(out, "\n") {
-		switch {
-		case strings.Contains(line, "Created a new local CA"):
-			res.NewCA = true
-		case strings.Contains(line, "now installed in the system trust store"):
-			res.SystemTrustOK = true
-		case strings.Contains(line, "Installing to the system store is not yet supported"):
-			res.SystemUnsupported = true
-		case strings.Contains(line, "support is not available on your platform"):
-			res.BrowserUnavailable = true
-		case strings.Contains(line, "now installed in the Firefox") ||
-			strings.Contains(line, "now installed in the Chrome") ||
-			(strings.Contains(line, "trust store") && strings.Contains(line, "browser restart")):
-			res.BrowserTrustOK = true
-		case strings.Contains(line, "no \"certutil\" tool") ||
-			strings.Contains(line, "warning: \"certutil\" is not available"):
-			res.CertutilMissing = true
-		case strings.Contains(line, "Authentication failed") ||
-			strings.Contains(line, "incorrect authentication attempts") ||
-			strings.Contains(line, "sudo: a password is required") ||
-			strings.Contains(line, "sudo-rs:"):
-			res.SudoDenied = true
-		}
-	}
-	return res
+// engine is the active Engine. Tests replace it via SwapEngine.
+var engine Engine = systemEngine{}
+
+// SwapEngine installs e and returns a function that restores the previous
+// engine. Intended for use with t.Cleanup.
+func SwapEngine(e Engine) func() {
+	prev := engine
+	engine = e
+	return func() { engine = prev }
 }
 
-// caRootDir returns the mkcert CAROOT directory by invoking the binary.
-// Falls back to the empty string on error.
-func caRootDir() (string, error) {
-	out, err := Runner.Output("-CAROOT")
+// SystemEngine returns the production engine backed by the host system.
+// Test doubles embed it to keep real behavior for the operations they don't
+// stub.
+func SystemEngine() Engine { return systemEngine{} }
+
+// Available reports whether local TLS issuance can work on this host: the
+// implementation is compiled in, so the only requirement is a resolvable CA
+// directory.
+func Available() bool { return engine.Available() }
+
+// Install creates the local CA if needed and enrolls it in the platform trust
+// stores.
+func Install() (InstallResult, error) { return engine.Install() }
+
+// Uninstall removes the local CA from the platform trust stores without
+// deleting the CA files.
+func Uninstall() error { return engine.Uninstall() }
+
+// IssueCert issues a certificate for domains at the given PEM paths,
+// creating the local CA first if needed.
+func IssueCert(certPath, keyPath string, domains []string) error {
+	return engine.IssueCert(certPath, keyPath, domains)
+}
+
+// systemEngine is the production Engine.
+type systemEngine struct{}
+
+func (systemEngine) Available() bool { return CAROOT() != "" }
+
+func (systemEngine) Install() (InstallResult, error) {
+	ca, err := loadCA()
 	if err != nil {
-		return "", err
+		return InstallResult{}, err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return ca.install()
+}
+
+func (systemEngine) Uninstall() error {
+	ca, err := loadCA()
+	if err != nil {
+		return err
+	}
+	return ca.uninstall()
+}
+
+func (systemEngine) IssueCert(certPath, keyPath string, domains []string) error {
+	hosts, err := validateHostnames(domains)
+	if err != nil {
+		return err
+	}
+	ca, err := loadCA()
+	if err != nil {
+		return err
+	}
+	return ca.makeCert(hosts, certPath, keyPath)
 }

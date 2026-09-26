@@ -35,7 +35,7 @@ func TestRunAddStaticHappy(t *testing.T) {
 	cfg := mustLoadConfig(t)
 	t.Cleanup(docker.SwapNewClientWithNetwork(cfg.NetworkName))
 	t.Cleanup(docker.SwapComposeExec(func(string, bool, ...string) error { return nil }))
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 
 	resetAddFlags()
 	addFlags.domain = "blog.local"

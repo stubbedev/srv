@@ -20,6 +20,7 @@ import (
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/firewall"
 	"github.com/stubbedev/srv/internal/metrics"
+	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/site"
@@ -497,25 +498,27 @@ func checkMetrics() int {
 	return 1
 }
 
-// checkCertificates verifies mkcert installation and certificate status.
+// checkCertificates verifies the local CA and certificate status. The mkcert
+// engine is vendored into srv, so the only failure mode left is a host with
+// no resolvable CA directory.
 func checkCertificates() int {
 	issues := 0
 	ui.Bold("Local SSL Certificates")
 
 	if err := traefik.CheckMkcert(); err != nil {
-		ui.IndentedWarn(1, "mkcert is not installed")
-		ui.IndentedDim(1, "Install mkcert for local HTTPS support")
+		ui.IndentedWarn(1, "local CA unavailable")
+		ui.IndentedDim(1, "%v", err)
 		ui.Blank()
 		return 1
 	}
 
-	ui.IndentedSuccess(1, "mkcert is installed")
+	ui.IndentedSuccess(1, "local TLS engine ready (mkcert vendored)")
 
 	if traefik.IsCAInstalled() {
-		ui.IndentedSuccess(1, "CA is installed in system trust store")
+		ui.IndentedSuccess(1, "local CA created (%s)", mkcert.CAROOT())
 	} else {
-		ui.IndentedWarn(1, "CA not installed")
-		ui.IndentedDim(1, "CA will be auto-installed on first 'srv add --local'")
+		ui.IndentedWarn(1, "local CA not created yet")
+		ui.IndentedDim(1, "CA will be created and trusted on first 'srv install' or 'srv add --local'")
 		issues++
 	}
 

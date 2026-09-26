@@ -35,7 +35,7 @@ func TestSetupDashboardProxyHappy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "traefik", "conf"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(mkcert.SwapRunner(mkcertHappyStub{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	swapShell(t, shelltest.New(nil))
 	if err := SetupDashboardProxy(); err != nil {
 		t.Errorf("err: %v", err)
@@ -45,13 +45,4 @@ func TestSetupDashboardProxyHappy(t *testing.T) {
 func TestCheckPortConflicts(t *testing.T) {
 	swapShell(t, shelltest.New(nil))
 	_ = CheckPortConflicts() // just exercise it; result depends on host
-}
-
-// mkcertHappyStub satisfies mkcert.CommandRunner with successful defaults.
-type mkcertHappyStub struct{}
-
-func (mkcertHappyStub) Stream(args ...string) error           { return nil }
-func (mkcertHappyStub) Output(args ...string) ([]byte, error) { return []byte("/tmp/ca\n"), nil }
-func (mkcertHappyStub) Combined(args ...string) ([]byte, error) {
-	return []byte("Created a new local CA"), nil
 }

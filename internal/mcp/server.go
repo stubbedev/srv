@@ -30,7 +30,7 @@ func SetVersion(v string) {
 // state.
 const serverInstructions = `srv manages a Traefik + TLS edge: site routing, local (mkcert) and production
 (Let's Encrypt) certificates, and local DNS. Prefer these tools over shelling
-out to traefik, mkcert, openssl, docker, or hand-editing files under
+out to traefik, openssl, docker, or hand-editing files under
 ~/.config/srv — the tools keep metadata.yml, the Traefik dynamic config, and
 dnsmasq in sync, which manual edits do not.
 

@@ -27,8 +27,8 @@
             version = version;
             src = self;
 
-            # go-sum: db4251b8ba8a3642ccdf12bd5a292a75fea3647f1ebb901291368a94f21314b8
-            vendorHash = "sha256-vDOKYEyDK7TapeYCIAhJf2UMgTQAVpqL3Nuv4ti11mo=";
+            # go-sum: 36672b4f5c71c2ca16552201e97491d0bb7ac2b6d55332f44569d78890c37efc
+            vendorHash = "sha256-NgP9kD+qnDqhHgQGLSRCrpLWKNdJuQlrEHX3VJvGN0s=";
 
             ldflags = [
               "-s"
@@ -37,10 +37,6 @@
               "-X main.Commit=${self.shortRev or self.dirtyShortRev or "dirty"}"
               "-X main.BuildDate=1970-01-01T00:00:00Z"
             ];
-
-            # srv shells out to the system `mkcert` binary at runtime — propagate
-            # it as a runtime dep so `nix run` users get a working CA tool.
-            propagatedBuildInputs = [ pkgs.mkcert ];
 
             meta = {
               description = "CLI tool for managing local development sites with Traefik reverse proxy";
@@ -57,7 +53,6 @@
             go_1_27
             gopls
             golangci-lint
-            mkcert
           ];
         };
       }

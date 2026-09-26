@@ -124,7 +124,7 @@ func TestRunRedirectRemoveDNSOnly(t *testing.T) {
 }
 
 func mkcertSwapForCmd() func() {
-	return mkcert.SwapRunner(stubMkcertRunner{})
+	return mkcert.SwapEngine(&stubMkcertEngine{})
 }
 
 func resetRedirectFlags() {

@@ -15,30 +15,38 @@ import (
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
 
-// mkcertStub stands in for the mkcert binary. Output is the method cert
-// generation goes through (mkcert.RunQuiet), so it is the one a failure test
-// drives.
-type mkcertStub struct{ outErr error }
-
-func (m mkcertStub) Stream(...string) error { return nil }
-func (m mkcertStub) Output(...string) ([]byte, error) {
-	return []byte("/root/mkcert\n"), m.outErr
+// mkcertStub is the mkcert.Engine fake for this package: it delegates
+// certificate issuance to the real vendored engine (CAROOT is pointed into
+// the temp SRV_ROOT by addEnv) and stubs trust-store installs. Failure tests
+// set issueErr.
+type mkcertStub struct {
+	issueErr error
 }
 
-func (m mkcertStub) Combined(...string) ([]byte, error) {
-	return []byte("Created a new local CA"), nil
+func (m *mkcertStub) Available() bool { return true }
+
+func (m *mkcertStub) Install() (mkcert.InstallResult, error) {
+	return mkcert.InstallResult{NewCA: true, SystemTrustOK: true}, nil
+}
+
+func (m *mkcertStub) Uninstall() error { return nil }
+
+func (m *mkcertStub) IssueCert(certPath, keyPath string, domains []string) error {
+	if m.issueErr != nil {
+		return m.issueErr
+	}
+	return mkcert.SystemEngine().IssueCert(certPath, keyPath, domains)
 }
 
 func addEnv(t *testing.T) *config.Config {
 	t.Helper()
-	t.Setenv("SRV_ROOT", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("SRV_ROOT", root)
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
 
-	// SwapRunner alone is not enough: CheckMkcert asks exec.LookPath directly,
-	// which fails in a sandboxed build (nix) where mkcert is not installed.
-	t.Cleanup(mkcert.SwapLookPath(func(string) (string, error) { return "/usr/bin/mkcert", nil }))
-	t.Cleanup(mkcert.SwapRunner(mkcertStub{}))
+	t.Setenv("CAROOT", filepath.Join(root, "caroot"))
+	t.Cleanup(mkcert.SwapEngine(&mkcertStub{}))
 	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
 	// Without these the reload paths reach a real `docker compose` and
 	// recreate the developer's own srv_dns / srv_proxy containers mid-test.
@@ -129,7 +137,7 @@ func TestAddTemporaryRendersA302(t *testing.T) {
 // cert failure is fatal rather than a warning.
 func TestAddHTTPFailsWhenCertGenerationFails(t *testing.T) {
 	cfg := addEnv(t)
-	t.Cleanup(mkcert.SwapRunner(mkcertStub{outErr: errors.New("mkcert exploded")}))
+	t.Cleanup(mkcert.SwapEngine(&mkcertStub{issueErr: errors.New("mkcert exploded")}))
 
 	if _, err := Add(cfg, AddSpec{Domain: "old.test", To: "https://new.test"}); err == nil {
 		t.Fatal("Add() = nil, want the cert failure to be fatal")
@@ -144,7 +152,7 @@ func TestAddHTTPFailsWhenCertGenerationFails(t *testing.T) {
 // A DNS-only alias never terminates TLS, so it must not require mkcert at all.
 func TestAddDNSOnlySkipsCertIssuance(t *testing.T) {
 	cfg := addEnv(t)
-	t.Cleanup(mkcert.SwapRunner(mkcertStub{outErr: errors.New("mkcert must not be called")}))
+	t.Cleanup(mkcert.SwapEngine(&mkcertStub{issueErr: errors.New("mkcert must not be called")}))
 
 	res, err := Add(cfg, AddSpec{Domain: "alias.test", To: "target.test", DNSOnly: true})
 	if err != nil {

@@ -46,7 +46,7 @@ brew tap stubbedev/tap
 brew install stubbedev/tap/srv
 ```
 
-This installs the binary, pulls in `mkcert` as a dependency, and registers a
+This installs the binary and registers a
 `brew services` recipe. To run the watch daemon in the background:
 
 ```bash
@@ -72,7 +72,8 @@ or manual-download only.
 
 **Runtime requirements:**
 - A container runtime with a Docker-compatible API — Docker, Podman, Colima, OrbStack or Rancher Desktop; srv detects which (see [Container runtimes](#container-runtimes))
-- [mkcert](https://github.com/FiloSottile/mkcert) — for local TLS. Install via `brew install mkcert`, `nix profile install nixpkgs#mkcert`, or your distro package manager. srv shells out to it; no embedded copy.
+
+Local TLS needs no extra tooling: the [mkcert](https://github.com/FiloSottile/mkcert) engine is vendored into srv, so it creates and trusts its local CA (same CAROOT layout as the mkcert tool) without a system mkcert binary.
 
 ## Container runtimes
 

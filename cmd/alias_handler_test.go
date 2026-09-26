@@ -24,7 +24,7 @@ func setupSrvRoot(t *testing.T) string {
 	// Fake mkcert so certificate-generating handlers don't invoke the real
 	// `mkcert -install` (which prompts for sudo on NixOS) or pollute the
 	// developer's user-scoped CAROOT directory.
-	t.Cleanup(mkcert.SwapRunner(stubMkcertRunner{}))
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
 	if err := os.MkdirAll(filepath.Join(root, "traefik", "conf"), 0o755); err != nil {
 		t.Fatal(err)
 	}

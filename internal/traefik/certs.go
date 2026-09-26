@@ -27,25 +27,22 @@ import (
 // itself intact; the lock keeps the rendered content fresh.
 var dynamicConfigMu sync.Mutex
 
-// CheckMkcert verifies mkcert is available on $PATH.
+// CheckMkcert verifies local TLS issuance is possible: the mkcert engine is
+// vendored into srv, so the only requirement is a resolvable CA directory.
 func CheckMkcert() error {
 	if !mkcert.Available() {
-		return errors.New("mkcert not found on $PATH. Install it: `brew install mkcert` / `nix profile install nixpkgs#mkcert` / your distro package manager")
+		return errors.New("cannot resolve a directory for the local CA (set $CAROOT, or ensure $HOME is set)")
 	}
 	return nil
 }
 
-// IsCAInstalled checks if the mkcert CA is installed.
+// IsCAInstalled checks if the mkcert CA has been created locally.
 func IsCAInstalled() bool {
-	output, err := mkcert.Output("-CAROOT")
-	if err != nil {
-		return false
-	}
-	caRoot := strings.TrimSpace(string(output))
+	caRoot := mkcert.CAROOT()
 	if caRoot == "" {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(caRoot, constants.RootCAFile))
+	_, err := os.Stat(filepath.Join(caRoot, constants.RootCAFile))
 	return err == nil
 }
 
@@ -103,10 +100,11 @@ func RemoveLocalCerts(siteName, domain string) error {
 	return nil
 }
 
-// GenerateLocalCert generates an SSL certificate for a site using mkcert.
-// The first element of domains is the primary (used to name the cert files on
-// disk); all elements are added as SANs. When wildcard is true, each domain
-// also gets a "*.<domain>" SAN so single-level subdomains are covered.
+// GenerateLocalCert generates an SSL certificate for a site using the
+// vendored mkcert engine. The first element of domains is the primary (used
+// to name the cert files on disk); all elements are added as SANs. When
+// wildcard is true, each domain also gets a "*.<domain>" SAN so single-level
+// subdomains are covered.
 func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 	if len(domains) == 0 {
 		return errors.New("no domains supplied for cert generation")
@@ -128,9 +126,9 @@ func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 		return err
 	}
 
-	// 0700: the directory holds private keys. mkcert writes the *.key files
-	// 0600, but a private cert dir keeps the .crt files and the listing itself
-	// from being world-readable too.
+	// 0700: the directory holds private keys. The engine writes the *.key
+	// files 0600, but a private cert dir keeps the .crt files and the listing
+	// itself from being world-readable too.
 	certDir := cfg.SiteCertsDir(siteName)
 	if err := os.MkdirAll(certDir, constants.DirPermPrivate); err != nil {
 		return fmt.Errorf("failed to create certs directory: %w", err)
@@ -140,21 +138,15 @@ func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 	certFile := filepath.Join(certDir, primary+constants.ExtCert)
 	keyFile := filepath.Join(certDir, primary+constants.ExtKey)
 
-	args := []string{
-		"-cert-file", certFile,
-		"-key-file", keyFile,
-	}
+	var sans []string
 	for _, d := range domains {
-		args = append(args, d)
+		sans = append(sans, d)
 		if wildcard {
-			args = append(args, "*."+d)
+			sans = append(sans, "*."+d)
 		}
 	}
 
-	// RunQuiet suppresses mkcert's advisory stderr warnings (e.g. the "not
-	// installed in system trust store" note that fires immediately after
-	// install due to mkcert's cached cert pool — see FiloSottile/mkcert#234).
-	if err := mkcert.RunQuiet(args...); err != nil {
+	if err := mkcert.IssueCert(certFile, keyFile, sans); err != nil {
 		return fmt.Errorf("failed to generate certificate for %s: %w", primary, err)
 	}
 

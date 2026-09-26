@@ -17,8 +17,6 @@ class Srv < Formula
   version "0.0.0"
   license "MIT"
 
-  depends_on "mkcert"
-
   on_macos do
     on_arm do
       url "https://github.com/stubbedev/srv/releases/download/v#{version}/srv-#{version}-darwin-arm64.tar.gz"

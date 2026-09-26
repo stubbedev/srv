@@ -65,13 +65,12 @@ func SkipIfNoEngine(t *testing.T) {
 	}
 }
 
-// SkipIfNoMkcert skips when mkcert isn't installed. `srv proxy add` always
-// issues a local cert, so mkcert is a hard dependency for the routing test.
+// SkipIfNoMkcert gates the routing suites on local TLS being possible. The
+// mkcert engine is vendored into the srv binary, so there is no external
+// binary to look for anymore; the gate stays as a named hook so suites keep
+// expressing "this test needs local TLS".
 func SkipIfNoMkcert(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("mkcert"); err != nil {
-		t.Skip("mkcert not installed")
-	}
 }
 
 // SkipIfPortsBusy skips when any Traefik port is already serving — probed by
