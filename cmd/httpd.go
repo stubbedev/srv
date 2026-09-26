@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -46,6 +47,8 @@ func init() {
 
 func runHTTPD(cmd *cobra.Command, args []string) error {
 	server := httpd.New(net.JoinHostPort(httpdFlags.bind, strconv.Itoa(httpdFlags.port)))
+	log := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"}).With().Timestamp().Logger()
+	server.Logger = &log
 	if err := server.Reload(); err != nil {
 		return fmt.Errorf("load daemon-served sites: %w", err)
 	}

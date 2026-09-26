@@ -1,6 +1,8 @@
 package httpd
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
 )
 
 // newTestServer builds a Server over a temp project directory and returns it
@@ -222,6 +226,47 @@ func TestSecurityHeaders(t *testing.T) {
 		if h.Get(name) == "" {
 			t.Errorf("missing security header %s", name)
 		}
+	}
+}
+
+func TestAccessLogging(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "index.html", "hi")
+	var buf bytes.Buffer
+	zl := zerolog.New(&buf)
+	s := New("127.0.0.1:0")
+	s.Logger = &zl
+	s.SetTargets(map[string]Target{"s.test": {Name: "s.test", Root: root}}, nil)
+
+	get(t, s, "s.test", "/")
+	get(t, s, "s.test", "/missing")
+
+	var events []map[string]any
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		var e map[string]any
+		if err := json.Unmarshal([]byte(line), &e); err == nil {
+			events = append(events, e)
+		}
+	}
+	if len(events) != 2 {
+		t.Fatalf("want 2 access events, got %d: %s", len(events), buf.String())
+	}
+	hit := events[0]
+	if hit["site"] != "s.test" || hit["method"] != "GET" || hit["path"] != "/" || hit["status"] != float64(http.StatusOK) {
+		t.Errorf("unexpected hit event: %v", hit)
+	}
+	if hit["level"] != "info" {
+		t.Errorf("hit level = %v, want info", hit["level"])
+	}
+	miss := events[1]
+	if miss["path"] != "/missing" || miss["status"] != float64(http.StatusNotFound) {
+		t.Errorf("unexpected miss event: %v", miss)
+	}
+	if miss["level"] != "warn" {
+		t.Errorf("miss level = %v, want warn", miss["level"])
+	}
+	if _, ok := hit["dur_ms"].(float64); !ok {
+		t.Errorf("dur_ms missing or not a number: %v", hit["dur_ms"])
 	}
 }
 

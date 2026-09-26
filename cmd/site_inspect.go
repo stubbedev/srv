@@ -5,6 +5,7 @@ package cmd
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
@@ -355,6 +357,14 @@ func init() {
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
+	// Daemon-served logs live in the daemon's log file, not docker: stream
+	// them before the engine preflight so this works with the engine stopped.
+	if !logsFlags.all {
+		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
+			return streamDaemonSiteLogs(s.Name, logsFlags.follow, parseTailFlag(logsFlags.tail))
+		}
+	}
+
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
@@ -372,10 +382,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
 	}
 
-	if s.DaemonServed {
-		return fmt.Errorf("site '%s' is served in-process by the srv daemon and has no container logs — see 'srv daemon logs'", s.Name)
-	}
-
 	// Build args
 	composeArgs := []string{"logs"}
 	if logsFlags.follow {
@@ -391,27 +397,70 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	return docker.Compose(s.ComposeDir, composeArgs...)
 }
 
-// runLogsAll multiplexes `docker compose logs` for every non-broken site,
-// prefixing each output line with the site name. Stops when stdin closes
-// (Ctrl-C) or when --follow is off and every per-site tail completes.
+// parseTailFlag converts the shared --tail string flag; empty or invalid
+// means "no limit".
+func parseTailFlag(tail string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(tail))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// runLogsAll multiplexes `docker compose logs` for every container-backed
+// site and streams the daemon log for every daemon-served site, prefixing
+// each output line with the site name. Stops when stdin closes (Ctrl-C) or
+// when --follow is off and every per-site tail completes.
 func runLogsAll() error {
 	sites, err := site.ListBasic()
 	if err != nil {
 		return err
 	}
 	var running []site.Site
+	var daemonSites []site.Site
 	for _, s := range sites {
-		// Daemon-served sites log to the daemon log, not docker compose.
-		if !s.IsBroken && !s.DaemonServed {
+		if s.IsBroken {
+			continue
+		}
+		// Daemon-served sites stream their access lines from the daemon log.
+		if s.DaemonServed {
+			daemonSites = append(daemonSites, s)
+		} else {
 			running = append(running, s)
 		}
 	}
-	if len(running) == 0 {
+	if len(running) == 0 && len(daemonSites) == 0 {
 		ui.Dim("No sites registered")
 		return nil
 	}
+	if len(running) > 0 {
+		if err := docker.EnsureRunning(); err != nil {
+			return err
+		}
+	}
+	tail := parseTailFlag(logsFlags.tail)
 
 	var wg sync.WaitGroup
+	for _, s := range daemonSites {
+		wg.Go(func() {
+			cfg, err := config.Load()
+			if err != nil {
+				ui.Warn("[%s] %v", s.Name, err)
+				return
+			}
+			lines, err := daemonSiteLogLines(daemon.LogPath(cfg), s.Name, tail)
+			if err != nil {
+				ui.Warn("[%s] %v", s.Name, err)
+				return
+			}
+			printDaemonSiteLogLines(lines, s.Name)
+			if logsFlags.follow {
+				if err := followDaemonSiteLog(daemon.LogPath(cfg), s.Name); err != nil {
+					ui.Warn("[%s] log stream ended: %v", s.Name, err)
+				}
+			}
+		})
+	}
 	for _, s := range running {
 		wg.Go(func() {
 			composeArgs := []string{"logs"}

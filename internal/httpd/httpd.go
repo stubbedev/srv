@@ -17,12 +17,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/stubbedev/srv/internal/site"
 )
 
 // Target is one daemon-served site: the project directory to serve plus the
 // static options mirrored from the nginx renderer.
 type Target struct {
+	Name  string
 	Root  string
 	SPA   bool
 	Cache bool
@@ -42,6 +45,10 @@ type Server struct {
 	exact     map[string]Target
 	wildcards []wildcard
 	srv       *http.Server
+	// Logger, when set, receives one structured access event per request,
+	// tagged with the site name. The daemon points it at the daemon log file;
+	// `srv logs <site>` filters those lines back out.
+	Logger *zerolog.Logger
 }
 
 // New creates a server bound to addr. Targets start empty; call Reload once
@@ -84,7 +91,7 @@ func (s *Server) Reload() error {
 		if !st.DaemonServed || st.IsBroken || st.Dir == "" {
 			continue
 		}
-		t := Target{Root: st.Dir, SPA: st.SPA, Cache: st.Cache, CORS: st.CORS}
+		t := Target{Name: st.Name, Root: st.Dir, SPA: st.SPA, Cache: st.Cache, CORS: st.CORS}
 		for _, d := range st.Domains {
 			d = strings.ToLower(d)
 			exact[d] = t
@@ -119,7 +126,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no daemon-served site for this host", http.StatusNotFound)
 		return
 	}
-	t.serve(w, r)
+	if s.Logger == nil {
+		t.serve(w, r)
+		return
+	}
+	lw := &logResponseWriter{ResponseWriter: w, status: http.StatusOK}
+	start := time.Now()
+	t.serve(lw, r)
+	s.logRequest(t.Name, r, lw.status, lw.bytes, time.Since(start))
+}
+
+// logRequest emits one access event; the level follows the response class so
+// a noisy 404 scanner can be filtered out of the daemon log by level.
+func (s *Server) logRequest(siteName string, r *http.Request, status int, bytes int64, dur time.Duration) {
+	var event *zerolog.Event
+	switch {
+	case status >= 500:
+		event = s.Logger.Error()
+	case status >= 400:
+		event = s.Logger.Warn()
+	default:
+		event = s.Logger.Info()
+	}
+	event.Str("site", siteName).
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Int("status", status).
+		Int64("bytes", bytes).
+		Float64("dur_ms", float64(dur.Microseconds())/1000).
+		Msg("request")
 }
 
 // lookup resolves a hostname to its target via the exact table first, then
@@ -327,4 +362,23 @@ func (w *statusPreservingWriter) WriteHeader(code int) {
 		code = w.code
 	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// logResponseWriter records the status and byte count of one request for the
+// access log.
+type logResponseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+}
+
+func (w *logResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *logResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	w.bytes += int64(n)
+	return n, err
 }
