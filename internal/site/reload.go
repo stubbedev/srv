@@ -116,6 +116,16 @@ func reload(name string, force bool) (*ReloadResult, error) {
 	// a container restart is required to pick up new Traefik labels.
 	switch meta.Type {
 	case SiteTypeStatic:
+		if meta.DaemonServed {
+			// Daemon-served sites have no container: the Traefik file-provider
+			// route to the daemon's embedded static server IS the deployment.
+			// No restart is ever needed — Traefik hot-loads the file and the
+			// daemon re-serves content from the project directory on every hit.
+			if err := writeDaemonRouteConfig(cfg, name, meta); err != nil {
+				return res, fmt.Errorf("refresh traefik routing: %w", err)
+			}
+			break
+		}
 		regenWarnings, err := WriteStaticSiteConfig(name, *meta, true)
 		res.Warnings = append(res.Warnings, regenWarnings...)
 		if err != nil {
@@ -198,6 +208,12 @@ func reload(name string, force bool) (*ReloadResult, error) {
 func ValidateMetadata(meta *SiteMetadata) error {
 	if meta == nil {
 		return errors.New("metadata is nil")
+	}
+	if meta.DaemonServed && meta.Type != SiteTypeStatic {
+		return errors.New("daemon_served is only valid for static sites")
+	}
+	if meta.DaemonServed && len(meta.Volumes) > 0 {
+		return errors.New("daemon_served sites have no container, so `volumes` cannot be attached")
 	}
 	if len(meta.Domains) == 0 {
 		return errors.New("`domains` must list at least one hostname")

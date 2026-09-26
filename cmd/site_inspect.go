@@ -236,7 +236,11 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	_ = meta // metadata is still used elsewhere by callers; keep reference live.
 	switch s.Type {
 	case site.SiteTypeStatic:
-		ui.Print("  Type:    %s", "static (nginx)")
+		if s.DaemonServed {
+			ui.Print("  Type:    %s", "static (srv daemon, no container)")
+		} else {
+			ui.Print("  Type:    %s", "static (nginx)")
+		}
 	case site.SiteTypeDockerfile:
 		ui.Print("  Type:    %s", "dockerfile (custom build)")
 		if s.Port != 0 {
@@ -368,6 +372,10 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
 	}
 
+	if s.DaemonServed {
+		return fmt.Errorf("site '%s' is served in-process by the srv daemon and has no container logs — see 'srv daemon logs'", s.Name)
+	}
+
 	// Build args
 	composeArgs := []string{"logs"}
 	if logsFlags.follow {
@@ -393,7 +401,8 @@ func runLogsAll() error {
 	}
 	var running []site.Site
 	for _, s := range sites {
-		if !s.IsBroken {
+		// Daemon-served sites log to the daemon log, not docker compose.
+		if !s.IsBroken && !s.DaemonServed {
 			running = append(running, s)
 		}
 	}

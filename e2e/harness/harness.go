@@ -41,6 +41,9 @@ var requiredPorts = []int{
 	constants.PortHTTPS,
 	constants.PortInternal,
 	constants.PortDashboard,
+	// The daemon's embedded static file server: Traefik routes daemon-served
+	// sites to this loopback listener, so it must be free to bind.
+	constants.PortStatic,
 }
 
 // Engine is the container engine this leg of the suite drives, taken from

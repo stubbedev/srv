@@ -41,6 +41,7 @@ type AddOptions struct {
 	SPA          bool          `json:"spa,omitempty"           jsonschema:"description=static sites: SPA fallback to index.html"`                                   // static-site options
 	Cache        bool          `json:"cache,omitempty"         jsonschema:"description=static sites: asset caching headers"`
 	CORS         bool          `json:"cors,omitempty"          jsonschema:"description=static sites: permissive CORS headers"`
+	Daemon       bool          `json:"daemon,omitempty"        jsonschema:"description=static sites: serve from the srv daemon itself — no nginx container and no Docker; one embedded server hosts every daemon-served site"`
 	Volumes      []VolumeMount `json:"volumes,omitempty"       jsonschema:"description=extra host bind-mounts,nullable"`      // extra bind-mounts
 	Force        bool          `json:"force,omitempty"         jsonschema:"description=overwrite an existing site"`           // overwrite an existing site
 	Start        bool          `json:"start,omitempty"         jsonschema:"description=bring the containers up after adding"` // bring containers up after adding
@@ -71,6 +72,7 @@ type addSetup struct {
 	isStatic           bool
 	isDockerfile       bool
 	dockerfileInfo     *DockerfileSiteInfo
+	daemonServed       bool
 }
 
 func (s *addSetup) allDomains() []string {
@@ -146,6 +148,21 @@ func resolveAddSetup(opts AddOptions) (*addSetup, error) {
 
 	if err := detectType(s, opts.TypeOverride); err != nil {
 		return nil, err
+	}
+
+	if opts.Daemon {
+		if !s.isStatic {
+			return nil, errors.New("daemon serving is only available for static sites — a directory without a docker-compose.yml or Dockerfile")
+		}
+		if opts.Port != 0 && opts.Port != constants.DefaultContainerPort {
+			// The CLI passes the default container port when --port is omitted,
+			// so anything beyond it counts as an explicit port request.
+			return nil, errors.New("port is a container port and daemon-served sites have no container")
+		}
+		if len(opts.Volumes) > 0 {
+			return nil, errors.New("volumes are container bind-mounts and daemon-served sites have no container")
+		}
+		s.daemonServed = true
 	}
 
 	// Compose sites need a service selected (and possibly a profile).
@@ -340,6 +357,7 @@ func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err erro
 		Cache:              s.opts.Cache,
 		CORS:               s.opts.CORS,
 		Volumes:            s.opts.Volumes,
+		DaemonServed:       s.daemonServed,
 	}
 	if s.isDockerfile && s.dockerfileInfo != nil {
 		meta.DockerfilePort = s.dockerfileInfo.Port
@@ -351,6 +369,10 @@ func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err erro
 	}
 
 	switch {
+	case s.daemonServed:
+		if err := writeDaemonRouteConfig(cfg, s.siteName, &meta); err != nil {
+			return warnings, fmt.Errorf("write traefik config: %w", err)
+		}
 	case s.isDockerfile:
 		if err := WriteDockerfileSiteConfig(s.siteName, meta, s.dockerfileInfo, s.opts.Force); err != nil {
 			return warnings, fmt.Errorf("write Dockerfile site config: %w", err)
@@ -407,6 +429,14 @@ func issueLocalCert(siteName string, domains []string, wildcard bool) (warnings 
 
 // startAfterAdd brings the new site's containers up. Best-effort warnings.
 func startAfterAdd(cfg *config.Config, s *addSetup) (warnings []string) {
+	if s.daemonServed {
+		// StartSite skips Docker for daemon-served sites: starting is just
+		// (re)rendering the Traefik route to the daemon's embedded server.
+		if err := StartSite(s.siteName, false); err != nil {
+			return append(warnings, fmt.Sprintf("start site: %v", err))
+		}
+		return warnings
+	}
 	composeDir := s.sitePath
 	if s.isStatic || s.isDockerfile {
 		composeDir = SiteConfigDir(cfg, s.siteName)

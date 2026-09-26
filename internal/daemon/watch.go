@@ -120,10 +120,12 @@ func (d *Daemon) handleWatchEvent(w *fsnotify.Watcher, state *watchState, event 
 
 	// A site directory was removed: drop its watch and per-site debounce/reload
 	// state so the watcher does not leak inotify descriptors and the reloadMu
-	// map does not grow without bound as sites churn.
+	// map does not grow without bound as sites churn. The static server's host
+	// table is refreshed too so a removed site stops being served immediately.
 	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 && isDirectChild(d.cfg.SitesDir, event.Name) {
 		_ = w.Remove(event.Name)
 		state.forgetSite(filepath.Base(event.Name))
+		d.refreshStaticSites()
 		return
 	}
 
@@ -189,6 +191,12 @@ func (d *Daemon) reloadSite(state *watchState, siteName string) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
+
+	// Refresh the static server's host table no matter how Reload fares: a
+	// CLI reload can short-circuit on an unchanged metadata hash while the
+	// table is still missing a just-added site, and a deleted site must stop
+	// being served even though its Reload now errors.
+	defer d.refreshStaticSites()
 
 	res, err := site.Reload(siteName)
 	if err != nil {

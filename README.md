@@ -899,6 +899,7 @@ _Path: `~/.config/srv/sites/<name>/metadata.yml`_
 | `spa` | boolean | no | Single-page-app mode (fall back to /index.html). |
 | `cache` | boolean | no | Emit aggressive caching headers for static assets. |
 | `cors` | boolean | no | Emit permissive CORS headers. |
+| `daemon_served` | boolean | no | Serve the static files from the srv daemon itself — no nginx container and no Docker; one embedded server hosts every daemon-served site. |
 | `dockerfile_port` | integer | no | Port discovered from the Dockerfile EXPOSE directive. |
 
 #### Proxy — `proxy-<name>.yml`

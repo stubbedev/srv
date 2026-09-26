@@ -91,6 +91,13 @@ type SiteMetadata struct {
 	SPA   bool `jsonschema:"description=Single-page-app mode (fall back to /index.html)."   yaml:"spa,omitempty"`
 	Cache bool `jsonschema:"description=Emit aggressive caching headers for static assets." yaml:"cache,omitempty"`
 	CORS  bool `jsonschema:"description=Emit permissive CORS headers."                      yaml:"cors,omitempty"`
+	// DaemonServed marks a static site served by the srv daemon's embedded
+	// HTTP server instead of an nginx container: no container, no compose
+	// project, and no Docker dependency. Traefik routes the site's domains to
+	// the daemon's loopback listener (constants.PortStatic), which multiplexes
+	// all daemon-served sites by Host header — one server for every static
+	// site, the way the embedded DNS server serves every local domain.
+	DaemonServed bool `jsonschema:"description=Serve the static files from the srv daemon itself — no nginx container and no Docker; one embedded server hosts every daemon-served site." yaml:"daemon_served,omitempty"`
 	// Dockerfile site options
 	DockerfilePort int `jsonschema:"description=Port discovered from the Dockerfile EXPOSE directive." yaml:"dockerfile_port,omitempty"`
 }

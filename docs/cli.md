@@ -92,7 +92,9 @@ to route traffic to the specified service. No files are created in the
 project directory - all config is stored in ~/.config/srv.
 
 If no docker-compose.yml is found, srv will serve the directory as static
-files using nginx.
+files using nginx. With --daemon, the files are served directly by the srv
+daemon's embedded HTTP server instead — no nginx container and no Docker
+(one embedded server hosts every daemon-served site, multiplexed by Host).
 
 SSL certificates:
   - Use --local to generate a local certificate with mkcert
@@ -102,6 +104,7 @@ Examples:
   srv add /path/to/site --domain example.com          # Production with Let's Encrypt
   srv add /path/to/site --domain myapp.test --local   # Local dev with mkcert
   srv add /path/to/static --domain site.test --local  # Static files with nginx
+  srv add /path/to/page --domain start.local --local --daemon   # Served by the srv daemon itself
 ```
 
 Usage:
@@ -115,6 +118,7 @@ srv add PATH [flags]
 | `--alias` | `[]` | Additional hostname mapped to the same site (repeatable) |
 | `--cache` | `true` | Enable caching headers for static assets |
 | `--cors` | `false` | Enable CORS headers (allow all origins) |
+| `--daemon` | `false` | Serve static files from the srv daemon itself (no nginx container, no Docker) |
 | `--domain`, `-d` | — | Domain/hostname (e.g., example.com or myapp.test) |
 | `--force`, `-f` | `false` | Overwrite existing configuration |
 | `--internal-http` | `false` | Expose the site on the internal plain-HTTP entrypoint (port 88) in addition to HTTPS |

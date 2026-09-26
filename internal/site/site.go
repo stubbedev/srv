@@ -42,6 +42,10 @@ type Site struct {
 	Port               int      // Port (for compose sites)
 	ComposeDir         string   // Directory containing docker-compose.yml (may differ from Dir for static sites)
 	ExtraNetworks      []string // Additional external Docker networks the site joins
+	DaemonServed       bool     // Served by the daemon's embedded HTTP server (no container)
+	SPA                bool     // Static site options, honoured by both the nginx renderer and the daemon server
+	Cache              bool
+	CORS               bool
 }
 
 // Domain returns the canonical (first) hostname for the site, or "" if none.
@@ -77,6 +81,10 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	s.Port = meta.Port
 	s.Dir = meta.ProjectPath
 	s.ExtraNetworks = append([]string(nil), meta.ExtraNetworks...)
+	s.DaemonServed = meta.DaemonServed
+	s.SPA = meta.SPA
+	s.Cache = meta.Cache
+	s.CORS = meta.CORS
 
 	// Fallback: if ComposeServiceName is empty, use ServiceName (backward compatibility)
 	if s.ComposeServiceName == "" && s.ServiceName != "" {
@@ -92,6 +100,16 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	// Determine compose directory based on site type
 	switch meta.Type {
 	case SiteTypeStatic, SiteTypeDockerfile:
+		if meta.DaemonServed {
+			// No containers exist, so "running" simply means the Traefik
+			// route config is in place; no Docker probe is needed.
+			if _, err := os.Stat(traefik.SiteRouteConfigPath(cfg, entry.Name())); err == nil {
+				s.Status = constants.StatusRunning
+			} else {
+				s.Status = constants.StatusStopped
+			}
+			return s, false
+		}
 		// srv-managed sites have their compose file in the srv config dir
 		s.ComposeDir = SiteConfigDir(cfg, entry.Name())
 	default:

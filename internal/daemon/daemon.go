@@ -6,11 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/dnsd"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/httpd"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
@@ -42,6 +45,9 @@ type Daemon struct {
 	// signal, metadata-watcher, and Docker-event goroutines.
 	logFile         *os.File
 	lastRefreshTime time.Time // guards against refresh storms
+	// static hosts the embedded static file server (daemon-served sites) so
+	// the metadata watcher can refresh its host table. Nil until bound.
+	static atomic.Pointer[httpd.Server]
 	// WatchMetadata controls whether the daemon also watches site metadata.yml
 	// files and hot-reloads them. Set via `srv daemon start --no-watch=false`.
 	WatchMetadata bool
@@ -141,6 +147,12 @@ func (d *Daemon) Run() error {
 	// per daemon start; failures are logged and the next start retries.
 	d.migrateLegacyFallbacks()
 
+	// Embedded static file server: daemon-served sites ("srv add --daemon")
+	// are served straight from this process — one listener multiplexes every
+	// one of them by Host header, the way the embedded DNS server serves
+	// every local domain. Same contract: never fatal, retried on a timer.
+	d.startStaticServer()
+
 	// Watch Docker events
 	return d.watchEvents()
 }
@@ -229,6 +241,58 @@ func (d *Daemon) startEmbeddedDNS() {
 			}
 		}
 	}()
+}
+
+// startStaticServer binds the daemon's embedded static file server on the
+// host loopback (constants.PortStatic — unprivileged, like the DNS port) and
+// serves every daemon-served static site from it. Traefik terminates TLS for
+// the site's domains and forwards here; the daemon holds the files.
+func (d *Daemon) startStaticServer() {
+	if d.cfg == nil || d.cfg.Root == "" {
+		return
+	}
+	go func() {
+		addr := net.JoinHostPort(constants.LocalhostIP, constants.PortStaticStr)
+		for d.ctx.Err() == nil {
+			srv := httpd.New(addr)
+			if err := srv.Reload(); err != nil {
+				d.log("Static server target refresh failed: %v", err)
+			}
+			d.static.Store(srv)
+			d.log("Embedded static server listening on %s", addr)
+
+			served := make(chan error, 1)
+			go func() { served <- srv.Serve() }()
+
+			select {
+			case <-d.ctx.Done():
+				srv.Shutdown()
+				return
+			case err := <-served:
+				if d.ctx.Err() != nil {
+					return
+				}
+				// Transient failure (bind conflict, EMFILE): back off and
+				// rebind so an upgrade converges without a daemon restart.
+				d.log("Embedded static server stopped (%v); restarting in 10s", err)
+			}
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+		}
+	}()
+}
+
+// refreshStaticSites re-reads the daemon-served host table after site
+// metadata changed. Cheap: one directory scan + the site's metadata.ymls.
+func (d *Daemon) refreshStaticSites() {
+	if srv := d.static.Load(); srv != nil {
+		if err := srv.Reload(); err != nil {
+			d.log("Static server reload: %v", err)
+		}
+	}
 }
 
 // log writes a timestamped message to the log file.

@@ -185,6 +185,27 @@ func buildTraefikLabels(name string, domains []string, isLocal, wildcard bool, p
 	return labels
 }
 
+// writeDaemonRouteConfig renders the Traefik file-provider route that points
+// a daemon-served site's domains at the daemon's embedded static file server.
+// Shared by Add and Reload so both surfaces deploy the site identically.
+func writeDaemonRouteConfig(cfg *config.Config, name string, meta *SiteMetadata) error {
+	// Daemon-served adds never touch Docker, so the Traefik conf dir may not
+	// exist yet on a fresh machine — create it rather than inherit whatever
+	// `srv install` happened to do first.
+	if err := os.MkdirAll(cfg.TraefikConfDir(), constants.DirPermDefault); err != nil {
+		return fmt.Errorf("create traefik conf dir: %w", err)
+	}
+	return traefik.WriteSiteRouteConfig(cfg, traefik.SiteRouteConfig{
+		Name:         name,
+		Domains:      meta.Domains,
+		Port:         constants.PortStatic,
+		IsLocal:      meta.IsLocal,
+		Wildcard:     meta.Wildcard,
+		Listeners:    meta.Listeners,
+		DaemonServed: true,
+	})
+}
+
 // HasListener reports whether the supplied listener name is enabled on the
 // site. Comparison is case-insensitive.
 func HasListener(listeners []string, name string) bool {

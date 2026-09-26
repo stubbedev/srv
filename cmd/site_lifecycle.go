@@ -56,6 +56,23 @@ func init() {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// Daemon-served sites live in the srv daemon, not Docker: their whole
+	// lifecycle runs before the Docker preflight, so they work with the
+	// engine down or even uninstalled.
+	if !startFlags.all {
+		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
+			ui.Info("Starting %s...", s.Name)
+			if err := site.StartSite(s.Name, false); err != nil {
+				return err
+			}
+			ui.Success("Site '%s' started", s.Name)
+			if d := s.Domain(); d != "" {
+				ui.Info("https://%s", d)
+			}
+			return nil
+		}
+	}
+
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
@@ -163,6 +180,9 @@ func startAllSites() error {
 
 	ui.Info("Starting %d site(s)...", len(sites))
 	if err := runBatchSiteOperation(sites, "start", func(s *site.Site) error {
+		if s.DaemonServed {
+			return site.StartSite(s.Name, false)
+		}
 		// Reload per-site artifacts before compose up so label/Dockerfile
 		// edits land. Cheap when nothing changed (metadata-hash short-circuit).
 		if _, err := site.Reload(s.Name); err != nil {
@@ -224,6 +244,18 @@ func init() {
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
+	// See runStart: daemon-served sites never touch Docker.
+	if !stopFlags.all {
+		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
+			ui.Info("Stopping %s...", s.Name)
+			if err := site.StopSite(s.Name); err != nil {
+				return err
+			}
+			ui.Success("Site '%s' stopped", s.Name)
+			return nil
+		}
+	}
+
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
@@ -264,6 +296,9 @@ func stopAllSites() error {
 
 	ui.Info("Stopping %d site(s)...", len(sites))
 	if err := runBatchSiteOperation(sites, "stop", func(s *site.Site) error {
+		if s.DaemonServed {
+			return site.StopSite(s.Name)
+		}
 		return docker.ComposeStop(s.ComposeDir)
 	}); err != nil {
 		return err
@@ -308,6 +343,18 @@ func init() {
 }
 
 func runRestart(cmd *cobra.Command, args []string) error {
+	// See runStart: daemon-served sites never touch Docker.
+	if !restartFlags.all {
+		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
+			ui.Info("Restarting %s...", s.Name)
+			if err := site.RestartSite(s.Name, false); err != nil {
+				return err
+			}
+			ui.Success("Site '%s' restarted", s.Name)
+			return nil
+		}
+	}
+
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
@@ -366,6 +413,9 @@ func restartAllSites() error {
 
 	ui.Info("Restarting %d site(s)...", len(sites))
 	if err := runBatchSiteOperation(sites, "restart", func(s *site.Site) error {
+		if s.DaemonServed {
+			return site.RestartSite(s.Name, false)
+		}
 		return docker.ComposeRestart(s.ComposeDir)
 	}); err != nil {
 		return err

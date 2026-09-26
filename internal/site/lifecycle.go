@@ -18,6 +18,20 @@ import (
 // artifacts (Reload), then `docker compose up` (with --build when build=true)
 // and connects a compose service to the srv network.
 func StartSite(name string, build bool) error {
+	s, err := requireSite(name)
+	if err != nil {
+		return err
+	}
+	if s.DaemonServed {
+		// No containers: starting is (re)rendering the Traefik route to the
+		// daemon's embedded static server. Forced because Stop removed the
+		// route file while metadata stayed unchanged — a hash short-circuit
+		// would silently leave the site unrouted.
+		if _, err := ForceReload(s.Name); err != nil {
+			return fmt.Errorf("start site: %w", err)
+		}
+		return nil
+	}
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
@@ -26,10 +40,6 @@ func StartSite(name string, build bool) error {
 		return err
 	}
 	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
-		return err
-	}
-	s, err := requireSite(name)
-	if err != nil {
 		return err
 	}
 
@@ -71,11 +81,21 @@ func StartSite(name string, build bool) error {
 
 // StopSite stops a single site's containers.
 func StopSite(name string) error {
-	if err := docker.EnsureRunning(); err != nil {
-		return err
-	}
 	s, err := requireSite(name)
 	if err != nil {
+		return err
+	}
+	if s.DaemonServed {
+		// Removing the Traefik route is the whole stop: the router vanishes
+		// and the domains 404 exactly like a stopped container's vanished
+		// labels. No Docker involved.
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		return traefik.RemoveSiteRouteConfig(cfg, name)
+	}
+	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
 	if err := docker.ComposeStop(s.ComposeDir); err != nil {
@@ -86,6 +106,16 @@ func StopSite(name string) error {
 
 // RestartSite restarts a single site's containers, regenerating artifacts first.
 func RestartSite(name string, build bool) error {
+	s, err := requireSite(name)
+	if err != nil {
+		return err
+	}
+	if s.DaemonServed {
+		if _, err := ForceReload(s.Name); err != nil {
+			return fmt.Errorf("restart site: %w", err)
+		}
+		return nil
+	}
 	if err := docker.EnsureRunning(); err != nil {
 		return err
 	}
@@ -94,10 +124,6 @@ func RestartSite(name string, build bool) error {
 		return err
 	}
 	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
-		return err
-	}
-	s, err := requireSite(name)
-	if err != nil {
 		return err
 	}
 	if _, err := Reload(s.Name); err != nil {
@@ -132,12 +158,20 @@ func RemoveSite(name string) (warnings []string, err error) {
 	}
 
 	if !s.IsBroken {
-		if err := docker.ComposeDown(s.ComposeDir); err != nil {
-			warnings = append(warnings, fmt.Sprintf("stop containers: %v", err))
-		}
-		if s.Type == SiteTypeCompose {
+		if s.DaemonServed {
+			// The route file is the deployment for a daemon-served site; it
+			// must go with the site or Traefik keeps routing to the daemon.
 			if err := traefik.RemoveSiteRouteConfig(cfg, name); err != nil {
 				warnings = append(warnings, fmt.Sprintf("remove traefik config: %v", err))
+			}
+		} else {
+			if err := docker.ComposeDown(s.ComposeDir); err != nil {
+				warnings = append(warnings, fmt.Sprintf("stop containers: %v", err))
+			}
+			if s.Type == SiteTypeCompose {
+				if err := traefik.RemoveSiteRouteConfig(cfg, name); err != nil {
+					warnings = append(warnings, fmt.Sprintf("remove traefik config: %v", err))
+				}
 			}
 		}
 		if err := traefik.RemoveRoutesConfig(cfg, name); err != nil {

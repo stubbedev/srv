@@ -181,6 +181,10 @@
       "type": "boolean",
       "description": "Emit permissive CORS headers."
     },
+    "daemon_served": {
+      "type": "boolean",
+      "description": "Serve the static files from the srv daemon itself — no nginx container and no Docker; one embedded server hosts every daemon-served site."
+    },
     "dockerfile_port": {
       "type": "integer",
       "description": "Port discovered from the Dockerfile EXPOSE directive."

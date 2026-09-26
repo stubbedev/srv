@@ -31,9 +31,10 @@ var addFlags struct {
 	skipValidation bool
 	typeOverride   string // Force site type: dockerfile/static/compose
 	// Static site options
-	spa   bool
-	cache bool
-	cors  bool
+	spa    bool
+	cache  bool
+	cors   bool
+	daemon bool // Serve from the daemon's embedded static server (no container)
 	// Compose profile selection
 	profile string
 	// Extra mounts
@@ -50,7 +51,9 @@ to route traffic to the specified service. No files are created in the
 project directory - all config is stored in ~/.config/srv.
 
 If no docker-compose.yml is found, srv will serve the directory as static
-files using nginx.
+files using nginx. With --daemon, the files are served directly by the srv
+daemon's embedded HTTP server instead — no nginx container and no Docker
+(one embedded server hosts every daemon-served site, multiplexed by Host).
 
 SSL certificates:
   - Use --local to generate a local certificate with mkcert
@@ -59,7 +62,8 @@ SSL certificates:
 Examples:
   srv add /path/to/site --domain example.com          # Production with Let's Encrypt
   srv add /path/to/site --domain myapp.test --local   # Local dev with mkcert
-  srv add /path/to/static --domain site.test --local  # Static files with nginx`,
+  srv add /path/to/static --domain site.test --local  # Static files with nginx
+  srv add /path/to/page --domain start.local --local --daemon   # Served by the srv daemon itself`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			_ = cmd.Help()
@@ -100,6 +104,7 @@ func init() {
 	addCmd.Flags().BoolVar(&addFlags.spa, "spa", true, "Enable SPA mode (fallback to index.html)")
 	addCmd.Flags().BoolVar(&addFlags.cache, "cache", true, "Enable caching headers for static assets")
 	addCmd.Flags().BoolVar(&addFlags.cors, "cors", false, "Enable CORS headers (allow all origins)")
+	addCmd.Flags().BoolVar(&addFlags.daemon, "daemon", false, "Serve static files from the srv daemon itself (no nginx container, no Docker)")
 	// Compose profile (required when the selected service has multiple)
 	addCmd.Flags().StringVar(&addFlags.profile, "profile", "", "Docker Compose profile (required when the selected service declares multiple)")
 	// Extra bind-mounts
@@ -144,6 +149,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		SPA:          addFlags.spa,
 		Cache:        addFlags.cache,
 		CORS:         addFlags.cors,
+		Daemon:       addFlags.daemon,
 		Volumes:      mounts,
 		Force:        addFlags.force,
 		Start:        true,
