@@ -52,6 +52,11 @@ const CheckName = "srv-dns-check.test."
 // upstreamTimeout bounds one forward attempt to an upstream server.
 const upstreamTimeout = 3 * time.Second
 
+// shutdownGrace bounds every wait in Shutdown: graceful first, then sockets
+// are force-closed. A wedged serve loop or handler must never stall daemon
+// stop (or a failing test's cleanup) past this bound.
+const shutdownGrace = 2 * time.Second
+
 // reloadDebounce coalesces the event burst an atomic rename produces
 // (CREATE + RENAME + CHMOD on both files) into one reload.
 const reloadDebounce = 250 * time.Millisecond
@@ -234,8 +239,13 @@ func (s *Server) Serve() error {
 		}
 	}()
 	err := s.conn.ActivateAndServe()
-	_ = s.tcp.ShutdownContext(context.Background())
-	<-tcpDone
+	tcpCtx, tcpCancel := context.WithTimeout(context.Background(), shutdownGrace)
+	_ = s.tcp.ShutdownContext(tcpCtx)
+	tcpCancel()
+	select {
+	case <-tcpDone:
+	case <-time.After(shutdownGrace):
+	}
 	close(s.done)
 	if s.ctx.Err() != nil {
 		// Shutdown in progress: any socket error here is the expected close
@@ -249,10 +259,26 @@ func (s *Server) Serve() error {
 func (s *Server) Shutdown() {
 	s.closeOnce.Do(func() {
 		s.cancel()
-		_ = s.conn.ShutdownContext(context.Background())
-		_ = s.tcp.ShutdownContext(context.Background())
+		udpCtx, udpCancel := context.WithTimeout(context.Background(), shutdownGrace)
+		_ = s.conn.ShutdownContext(udpCtx)
+		udpCancel()
+		tcpCtx, tcpCancel := context.WithTimeout(context.Background(), shutdownGrace)
+		_ = s.tcp.ShutdownContext(tcpCtx)
+		tcpCancel()
 	})
-	<-s.done
+	select {
+	case <-s.done:
+	case <-time.After(shutdownGrace):
+		// The graceful path did not unwind Serve (a wedged handler or serve
+		// loop): closing the sockets makes ActivateAndServe return, and Serve
+		// then closes done on its own.
+		_ = s.conn.PacketConn.Close()
+		_ = s.tcp.Listener.Close()
+		select {
+		case <-s.done:
+		case <-time.After(shutdownGrace):
+		}
+	}
 }
 
 type fileStamp struct {

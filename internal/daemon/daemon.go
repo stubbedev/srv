@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/dnsd"
@@ -264,6 +266,10 @@ func (d *Daemon) startStaticServer() {
 		addr := net.JoinHostPort(constants.LocalhostIP, constants.PortStaticStr)
 		for d.ctx.Err() == nil {
 			srv := httpd.New(addr)
+			if d.logFile != nil {
+				zl := zerolog.New(d.logFile).With().Timestamp().Logger()
+				srv.Logger = &zl
+			}
 			if err := srv.Reload(); err != nil {
 				d.log("Static server target refresh failed: %v", err)
 			}
