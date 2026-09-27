@@ -72,7 +72,7 @@ Available on every command:
 - [`srv start`](#srv-start) — Start a site
 - [`srv stop`](#srv-stop) — Stop a site
 - [`srv uninstall`](#srv-uninstall) — Completely remove srv from the system
-- [`srv update`](#srv-update) — Update Traefik and DNS images
+- [`srv update`](#srv-update) — Update the Traefik image
 - [`srv validate`](#srv-validate) — Validate a site's metadata.yml without applying changes
 - [`srv version`](#srv-version) — Show version info
 - [`srv volume`](#srv-volume) — Manage extra host bind-mounts attached to a site
@@ -1144,13 +1144,14 @@ srv uninstall [flags]
 
 ## `srv update`
 
-Update Traefik and DNS images
+Update the Traefik image
 
 ```
-Pull the latest Traefik and DNS images and restart the containers.
+Pull the latest Traefik image and recreate its container.
 
-This ensures you're running the latest versions with security
-patches and new features.
+DNS is served by the srv daemon's embedded server, not a container, so
+Traefik is the one image this stack still pulls. This ensures you're
+running the latest version with security patches and new features.
 ```
 
 Usage:

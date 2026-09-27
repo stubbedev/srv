@@ -169,7 +169,7 @@ func genConfig() string {
 	targets := []target{
 		{"Site — `metadata.yml`", "sites/<name>/metadata.yml", &site.SiteMetadata{}},
 		{"Proxy — `proxy-<name>.yml`", "proxies/proxy-<name>.yml", &proxy.Metadata{}},
-		{"DNS-only redirect", "traefik/conf.d/redirect-<name>.yml", &redirect.DNSOnlyConfig{}},
+		{"DNS-only redirect", "traefik/conf/redirect-<name>.yml", &redirect.DNSOnlyConfig{}},
 		{"User config — `config.yml`", "config.yml", &config.UserConfig{}},
 	}
 

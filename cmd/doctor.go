@@ -802,11 +802,12 @@ func sudoChownTree(root string) error {
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update Traefik and DNS images",
-	Long: `Pull the latest Traefik and DNS images and restart the containers.
+	Short: "Update the Traefik image",
+	Long: `Pull the latest Traefik image and recreate its container.
 
-This ensures you're running the latest versions with security
-patches and new features.`,
+DNS is served by the srv daemon's embedded server, not a container, so
+Traefik is the one image this stack still pulls. This ensures you're
+running the latest version with security patches and new features.`,
 	RunE: runUpdate,
 }
 
