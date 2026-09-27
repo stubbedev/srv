@@ -1,6 +1,7 @@
 package httpd
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/stubbedev/srv/internal/racedetect"
+	"github.com/stubbedev/srv/internal/allocbudget"
 )
 
 // discardWriter is a minimal ResponseWriter that allocates nothing itself,
@@ -48,19 +49,13 @@ func benchServer(tb testing.TB, logged bool) (*Server, *http.Request) {
 const serveHitAllocBudget = 11
 
 func TestServeHTTPAllocationBudget(t *testing.T) {
-	if racedetect.Enabled {
-		t.Skip("allocation counts are meaningless under -race")
-	}
 	for _, logged := range []bool{false, true} {
 		s, req := benchServer(t, logged)
 		w := &discardWriter{h: http.Header{}}
-		got := testing.AllocsPerRun(200, func() {
+		allocbudget.Check(t, fmt.Sprintf("file hit, logged=%v", logged), serveHitAllocBudget, func() {
 			w.reset()
 			s.ServeHTTP(w, req)
 		})
-		if got > serveHitAllocBudget {
-			t.Errorf("logged=%v: %v allocs per request, budget %d", logged, got, serveHitAllocBudget)
-		}
 	}
 }
 

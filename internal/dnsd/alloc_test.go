@@ -1,12 +1,13 @@
 package dnsd
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
 	miekg "github.com/miekg/dns"
 
-	"github.com/stubbedev/srv/internal/racedetect"
+	"github.com/stubbedev/srv/internal/allocbudget"
 )
 
 // nopResponseWriter satisfies miekg.ResponseWriter. Like the real writers
@@ -84,12 +85,8 @@ func TestLocalAnswersAllocateNothing(t *testing.T) {
 			}
 		}
 
-		if racedetect.Enabled {
-			continue // allocation counts are meaningless under -race
-		}
-		if n := testing.AllocsPerRun(500, func() { s.handleQuery(w, tc.q) }); n != 0 {
-			t.Errorf("%s type %d: %v allocs per query, want 0", tc.q.Question[0].Name, tc.q.Question[0].Qtype, n)
-		}
+		name := fmt.Sprintf("%s type %d", tc.q.Question[0].Name, tc.q.Question[0].Qtype)
+		allocbudget.Check(t, name, 0, func() { s.handleQuery(w, tc.q) })
 	}
 }
 
