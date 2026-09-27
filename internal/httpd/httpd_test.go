@@ -28,7 +28,7 @@ func newTestServer(t *testing.T, targets map[string]Target, wildcards map[string
 	return s, root
 }
 
-func writeFile(t *testing.T, dir, name, content string) {
+func writeFile(t testing.TB, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

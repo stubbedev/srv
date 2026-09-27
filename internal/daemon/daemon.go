@@ -6,12 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -23,6 +23,7 @@ import (
 	"github.com/stubbedev/srv/internal/dnsd"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/httpd"
+	"github.com/stubbedev/srv/internal/logfile"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
@@ -32,6 +33,11 @@ import (
 // LogFile is the name of the daemon log file.
 const LogFile = "daemon.log"
 
+// StderrLogFile receives the daemon process's own stdout/stderr under
+// launchd (Go runtime panics). It is not rotated: nothing writes it in normal
+// operation.
+const StderrLogFile = "daemon.stderr.log"
+
 // refreshCooldown is the minimum interval between automatic container-mapping
 // refreshes triggered by untracked container start events.
 const refreshCooldown = 5 * time.Second
@@ -40,19 +46,28 @@ const refreshCooldown = 5 * time.Second
 type Daemon struct {
 	cfg         *config.Config
 	networkName string
-	containers  map[string]string // container name -> site name mapping
-	ctx         context.Context
-	cancel      context.CancelFunc
-	logMu       sync.Mutex // serialises concurrent log() writes from the
-	// signal, metadata-watcher, and Docker-event goroutines.
-	logFile         *os.File
-	lastRefreshTime time.Time // guards against refresh storms
+	// containers maps container name -> site name. Swapped whole on refresh
+	// and read lock-free by the event loop; never mutate a loaded map.
+	containers atomic.Pointer[map[string]string]
+	ctx        context.Context
+	cancel     context.CancelFunc
+	// logFile is the daemon log. Its Write is safe for concurrent use, so the
+	// signal, watcher, event and HTTP goroutines share it without a lock here.
+	logFile *logfile.Writer
+	// lastRefreshTime throttles miss-driven mapping refreshes when the
+	// metadata watcher is off; sitesDirStamp records the sites directory
+	// state the mapping was last built from.
+	lastRefreshTime time.Time
+	sitesDirStamp   time.Time
 	// static hosts the embedded static file server (daemon-served sites) so
 	// the metadata watcher can refresh its host table. Nil until bound.
 	static atomic.Pointer[httpd.Server]
 	// dns hosts the embedded DNS server so the structured zone source can
 	// push fresh snapshots as the server is (re)bound. Nil until bound.
 	dns atomic.Pointer[dnsd.Server]
+	// watching is set once the metadata watcher runs and pushes mapping
+	// refreshes itself.
+	watching atomic.Bool
 	// WatchMetadata controls whether the daemon also watches site metadata.yml
 	// files and hot-reloads them. Set via `srv daemon start --no-watch=false`.
 	WatchMetadata bool
@@ -67,14 +82,15 @@ func New() (*Daemon, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Daemon{
+	d := &Daemon{
 		cfg:           cfg,
 		networkName:   cfg.NetworkName,
-		containers:    make(map[string]string),
 		ctx:           ctx,
 		cancel:        cancel,
 		WatchMetadata: true,
-	}, nil
+	}
+	d.setContainers(map[string]string{})
+	return d, nil
 }
 
 // LogPath returns the path to the log file.
@@ -103,7 +119,7 @@ func Stop() error {
 func (d *Daemon) Run() error {
 	// Open log file
 	logPath := LogPath(d.cfg)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, constants.FilePermDefault)
+	logFile, err := logfile.Open(logPath, constants.FilePermDefault)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -152,6 +168,11 @@ func (d *Daemon) Run() error {
 	// per daemon start; failures are logged and the next start retries.
 	d.migrateLegacyFallbacks()
 
+	// Daemon-served routes are rendered by this binary's rules (the compress
+	// middleware, the embedded server's address); re-render them once per
+	// start so an upgrade applies to existing sites without a manual reload.
+	d.rerenderDaemonRoutes()
+
 	// Embedded static file server: daemon-served sites ("srv add --daemon")
 	// are served straight from this process — one listener multiplexes every
 	// one of them by Host header, the way the embedded DNS server serves
@@ -179,6 +200,23 @@ func (d *Daemon) migrateLegacyFallbacks() {
 		}
 		for _, w := range proxy.MigrateLegacyFallback(d.cfg, meta) {
 			d.log("Fallback migration: %s", w)
+		}
+	}
+}
+
+// rerenderDaemonRoutes force-reloads every daemon-served site. Best-effort:
+// failures are logged and the previous route file keeps serving.
+func (d *Daemon) rerenderDaemonRoutes() {
+	sites, err := listSites()
+	if err != nil {
+		return
+	}
+	for _, s := range sites {
+		if !s.DaemonServed || s.IsBroken {
+			continue
+		}
+		if _, err := site.ForceReload(s.Name); err != nil {
+			d.log("Route refresh %s: %v", s.Name, err)
 		}
 	}
 }
@@ -310,33 +348,80 @@ func (d *Daemon) refreshStaticSites() {
 	}
 }
 
-// log writes a timestamped message to the log file.
+// log writes a timestamped message to the log file. Daemon messages are rare
+// and matter when something goes wrong, so each is flushed at once; only the
+// high-volume access log rides the writer's flush interval.
 func (d *Daemon) log(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	d.logMu.Lock()
-	defer d.logMu.Unlock()
-	if d.logFile != nil {
-		_, _ = fmt.Fprintf(d.logFile, "[%s] %s\n", timestamp, msg)
+	if d.logFile == nil {
+		return
 	}
+	// One Write per line: the writer keeps each line contiguous on disk.
+	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
+	_, _ = d.logFile.Write([]byte(line))
+	_ = d.logFile.Flush()
 }
 
-// refreshContainerMapping rebuilds the container name to site name mapping.
+// refreshContainerMapping rebuilds the container name to site name mapping
+// and swaps it in. The metadata watcher calls it whenever a site is added,
+// removed or edited, so the Docker event path only has to read the map.
+// It logs only when the mapping changed.
 func (d *Daemon) refreshContainerMapping() error {
-	sites, err := site.ListBasic()
+	sites, err := listSites()
 	if err != nil {
 		return err
 	}
 
-	d.containers = make(map[string]string)
+	next := make(map[string]string)
 	for _, s := range sites {
 		if s.ServiceName != "" && s.Type == site.SiteTypeCompose {
-			d.containers[s.ServiceName] = s.Name
+			next[s.ServiceName] = s.Name
 		}
 	}
-
-	d.log("Loaded %d container mappings", len(d.containers))
+	if prev := d.containers.Load(); prev == nil || !maps.Equal(*prev, next) {
+		d.log("Loaded %d container mappings", len(next))
+	}
+	d.setContainers(next)
 	return nil
+}
+
+// listSites reads every registered site; tests swap it to count disk scans.
+var listSites = site.ListBasic
+
+// setContainers installs a container mapping. The map must not be mutated
+// afterwards: the event loop reads it without a lock.
+func (d *Daemon) setContainers(m map[string]string) { d.containers.Store(&m) }
+
+// containerSite looks a container up in the current mapping.
+func (d *Daemon) containerSite(name string) (string, bool) {
+	m := d.containers.Load()
+	if m == nil {
+		return "", false
+	}
+	site, ok := (*m)[name]
+	return site, ok
+}
+
+// mappingMayBeStale reports whether a container the mapping does not know
+// could belong to a site the mapping has not seen yet. With the metadata
+// watcher running, edits and removals are pushed; only a brand-new site
+// directory (its metadata may land before the watch on it exists) can be
+// missed, and a new directory changes the sites directory's mtime — one
+// stat, instead of re-reading every site's metadata for every foreign
+// container start. Without the watcher, fall back to a throttled refresh.
+func (d *Daemon) mappingMayBeStale() bool {
+	if d.watching.Load() {
+		st, err := os.Stat(d.cfg.SitesDir)
+		if err != nil || st.ModTime().Equal(d.sitesDirStamp) {
+			return false
+		}
+		d.sitesDirStamp = st.ModTime()
+		return true
+	}
+	if time.Since(d.lastRefreshTime) < refreshCooldown {
+		return false
+	}
+	d.lastRefreshTime = time.Now()
+	return true
 }
 
 // isDockerAvailable checks if the Docker daemon is reachable. Tests swap
@@ -448,17 +533,15 @@ func (d *Daemon) handleContainerStart(event docker.Event) {
 		return
 	}
 
-	// Check if this container is one we're tracking
-	siteName, tracked := d.containers[containerName]
+	// Check if this container is one we're tracking. Most starts on a busy
+	// host are foreign containers; they must cost a map probe, not disk I/O.
+	siteName, tracked := d.containerSite(containerName)
 	if !tracked {
-		// Refresh mappings in case a new site was added, but throttle to avoid
-		// hammering disk I/O on busy systems with many non-srv containers.
-		if time.Since(d.lastRefreshTime) >= refreshCooldown {
-			_ = d.refreshContainerMapping()
-			d.lastRefreshTime = time.Now()
+		if !d.mappingMayBeStale() {
+			return
 		}
-		siteName, tracked = d.containers[containerName]
-		if !tracked {
+		_ = d.refreshContainerMapping()
+		if siteName, tracked = d.containerSite(containerName); !tracked {
 			return
 		}
 	}

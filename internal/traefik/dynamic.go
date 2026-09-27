@@ -91,10 +91,16 @@ type dynReplacePathRegex struct {
 	Replacement string `yaml:"replacement"`
 }
 
+// dynCompress is the compress middleware with Traefik's defaults: gzip, br
+// and zstd negotiated from Accept-Encoding, already-encoded and
+// incompressible types left alone. It marshals as `compress: {}`.
+type dynCompress struct{}
+
 // dynMiddleware is a Traefik middleware. Exactly one field is set per instance.
 type dynMiddleware struct {
 	RedirectRegex    *dynRedirectRegex    `yaml:"redirectRegex,omitempty"`
 	ReplacePathRegex *dynReplacePathRegex `yaml:"replacePathRegex,omitempty"`
+	Compress         *dynCompress         `yaml:"compress,omitempty"`
 }
 
 // dynHTTP is the `http` block: routers, services, and optional middlewares.

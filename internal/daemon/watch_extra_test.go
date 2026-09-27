@@ -57,9 +57,7 @@ func TestStartMetadataWatcher(t *testing.T) {
 	}
 	// Set up minimal log file path.
 	logPath := filepath.Join(d.cfg.Root, "test.log")
-	f, _ := os.Create(logPath)
-	defer f.Close()
-	d.logFile = f
+	useTestLog(t, d, logPath)
 
 	if err := os.MkdirAll(d.cfg.SitesDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -159,9 +157,7 @@ func TestReloadSiteMissing(t *testing.T) {
 	}
 	defer d.cancel()
 	logPath := filepath.Join(d.cfg.Root, "x.log")
-	f, _ := os.Create(logPath)
-	defer f.Close()
-	d.logFile = f
+	useTestLog(t, d, logPath)
 	state := &watchState{timers: map[string]*time.Timer{}}
 	d.reloadSite(state, "ghost")
 }

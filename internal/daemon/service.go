@@ -360,7 +360,10 @@ func installLaunchd() error {
 		return fmt.Errorf("failed to create LaunchAgents directory: %w", err)
 	}
 
-	logPath := LogPath(cfg)
+	// launchd holds its own descriptor on stdout/stderr. Pointing it at the
+	// rotating daemon log would leave it writing into a rotated generation,
+	// so panics and runtime output get a file of their own.
+	logPath := filepath.Join(cfg.Root, StderrLogFile)
 
 	plistContent := renderLaunchdPlist(executable, logPath)
 

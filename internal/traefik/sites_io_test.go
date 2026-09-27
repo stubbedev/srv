@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestWriteSiteRouteConfigLocal(t *testing.T) {
@@ -124,5 +126,48 @@ func TestReadSiteRouteDomainBadYAML(t *testing.T) {
 	}
 	if got := ReadSiteRouteDomain(cfg, "bad"); got != "" {
 		t.Errorf("bad YAML -> %q, want empty", got)
+	}
+}
+
+// Daemon-served sites get a compress middleware on every router (the nginx
+// renderer gzips; the daemon's server does not), container sites do not.
+func TestWriteSiteRouteConfigDaemonServedCompresses(t *testing.T) {
+	cfg := newTraefikCfg(t)
+	read := func(route SiteRouteConfig) DynConfig {
+		t.Helper()
+		if err := WriteSiteRouteConfig(cfg, route); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(SiteRouteConfigPath(cfg, route.Name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dc DynConfig
+		if err := yaml.Unmarshal(data, &dc); err != nil {
+			t.Fatalf("%v\n%s", err, data)
+		}
+		return dc
+	}
+
+	dc := read(SiteRouteConfig{
+		Name: "docs", Domains: []string{"docs.test"}, IsLocal: true,
+		Listeners: []string{"internal"}, DaemonServed: true,
+	})
+	mw, ok := dc.HTTP.Middlewares["site-docs-compress"]
+	if !ok || mw.Compress == nil {
+		t.Fatalf("compress middleware missing: %+v", dc.HTTP.Middlewares)
+	}
+	if len(dc.HTTP.Routers) != 2 {
+		t.Fatalf("routers = %d, want websecure + internal", len(dc.HTTP.Routers))
+	}
+	for name, r := range dc.HTTP.Routers {
+		if len(r.Middlewares) != 1 || r.Middlewares[0] != "site-docs-compress" {
+			t.Errorf("router %s middlewares = %v, want the compress middleware", name, r.Middlewares)
+		}
+	}
+
+	dc = read(SiteRouteConfig{Name: "app", Domains: []string{"app.test"}, ServiceName: "app", Port: 80, IsLocal: true})
+	if len(dc.HTTP.Middlewares) != 0 {
+		t.Errorf("container site got middlewares %v; its app owns its encoding", dc.HTTP.Middlewares)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/logfile"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -44,7 +45,7 @@ func TestNewDaemon(t *testing.T) {
 	if !d.WatchMetadata {
 		t.Error("WatchMetadata should default true")
 	}
-	if d.containers == nil {
+	if d.containers.Load() == nil {
 		t.Error("containers map nil")
 	}
 }
@@ -53,12 +54,7 @@ func TestDaemonLogWritesTimestamped(t *testing.T) {
 	root := setupSrvRoot(t)
 	d := &Daemon{cfg: &config.Config{Root: root}}
 	logPath := filepath.Join(root, "test.log")
-	f, err := os.Create(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	d.logFile = f
+	useTestLog(t, d, logPath)
 	d.log("hello %s", "world")
 	data, _ := os.ReadFile(logPath)
 	body := string(data)
@@ -80,12 +76,7 @@ func TestDaemonLogConcurrent(t *testing.T) {
 	root := setupSrvRoot(t)
 	d := &Daemon{cfg: &config.Config{Root: root}}
 	logPath := filepath.Join(root, "concurrent.log")
-	f, err := os.Create(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	d.logFile = f
+	useTestLog(t, d, logPath)
 
 	const goroutines, perGoroutine = 8, 50
 	var wg sync.WaitGroup
@@ -113,12 +104,12 @@ func TestRefreshContainerMappingNoSites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.containers["existing"] = "site"
+	d.setContainers(map[string]string{"existing": "site"})
 	if err := d.refreshContainerMapping(); err != nil {
 		t.Fatal(err)
 	}
-	if len(d.containers) != 0 {
-		t.Errorf("expected empty map, got %v", d.containers)
+	if m := *d.containers.Load(); len(m) != 0 {
+		t.Errorf("expected empty map, got %v", m)
 	}
 }
 
@@ -127,12 +118,10 @@ func TestHandleContainerStartUntrackedNoop(t *testing.T) {
 	d := &Daemon{
 		cfg:         &config.Config{Root: root},
 		networkName: "n",
-		containers:  map[string]string{},
 	}
+	d.setContainers(map[string]string{})
 	logPath := filepath.Join(root, "x.log")
-	f, _ := os.Create(logPath)
-	defer f.Close()
-	d.logFile = f
+	useTestLog(t, d, logPath)
 	d.lastRefreshTime = time.Now() // suppress refresh attempt
 	d.handleContainerStart(docker.Event{
 		Actor: docker.EventActor{Attributes: map[string]string{"name": "ghost"}},
@@ -148,8 +137,8 @@ func TestHandleContainerStartNoName(t *testing.T) {
 	d := &Daemon{
 		cfg:         &config.Config{Root: t.TempDir()},
 		networkName: "n",
-		containers:  map[string]string{},
 	}
+	d.setContainers(map[string]string{})
 	d.handleContainerStart(docker.Event{}) // no name attribute
 }
 
@@ -196,11 +185,9 @@ func TestHandleContainerStartTracked(t *testing.T) {
 	d := &Daemon{
 		cfg:         &config.Config{Root: root},
 		networkName: "n",
-		containers:  map[string]string{"web": "blog"},
 	}
-	f, _ := os.Create(filepath.Join(root, "x.log"))
-	defer f.Close()
-	d.logFile = f
+	d.setContainers(map[string]string{"web": "blog"})
+	useTestLog(t, d, filepath.Join(root, "x.log"))
 	d.lastRefreshTime = time.Now()
 	d.handleContainerStart(docker.Event{
 		Actor: docker.EventActor{Attributes: map[string]string{"name": "web"}},
@@ -324,8 +311,8 @@ func TestRefreshContainerMappingWithSites(t *testing.T) {
 	if err := d.refreshContainerMapping(); err != nil {
 		t.Fatal(err)
 	}
-	if d.containers["blog-web"] != "blog" {
-		t.Errorf("got %v", d.containers)
+	if site, _ := d.containerSite("blog-web"); site != "blog" {
+		t.Errorf("got %v", *d.containers.Load())
 	}
 }
 
@@ -333,4 +320,15 @@ func newDaemonForTest(t *testing.T) (*Daemon, error) {
 	t.Helper()
 	setupSrvRoot(t)
 	return New()
+}
+
+// useTestLog points d's log at a fresh logfile.Writer on path.
+func useTestLog(t *testing.T, d *Daemon, path string) {
+	t.Helper()
+	w, err := logfile.Open(path, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	d.logFile = w
 }

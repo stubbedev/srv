@@ -58,6 +58,7 @@ func (d *Daemon) startMetadataWatcher() (*fsnotify.Watcher, error) {
 		d.log("Warning: failed to seed metadata watcher: %v", err)
 	}
 	d.log("Metadata watcher started (watching %d site dirs)", state.count)
+	d.watching.Store(true)
 
 	go d.watchLoop(w, state)
 	return w, nil
@@ -114,6 +115,9 @@ func (d *Daemon) handleWatchEvent(w *fsnotify.Watcher, state *watchState, event 
 				state.count++
 				state.mu.Unlock()
 			}
+			// A metadata.yml written before the watch above existed produced
+			// no event; read the new site now so its containers are known.
+			_ = d.refreshContainerMapping()
 		}
 		return
 	}
@@ -126,6 +130,7 @@ func (d *Daemon) handleWatchEvent(w *fsnotify.Watcher, state *watchState, event 
 		_ = w.Remove(event.Name)
 		state.forgetSite(filepath.Base(event.Name))
 		d.refreshStaticSites()
+		_ = d.refreshContainerMapping()
 		return
 	}
 
@@ -197,6 +202,9 @@ func (d *Daemon) reloadSite(state *watchState, siteName string) {
 	// table is still missing a just-added site, and a deleted site must stop
 	// being served even though its Reload now errors.
 	defer d.refreshStaticSites()
+	// The site's service name may have changed; keep the event loop's
+	// container mapping in step with every metadata change.
+	defer func() { _ = d.refreshContainerMapping() }()
 
 	res, err := site.Reload(siteName)
 	if err != nil {

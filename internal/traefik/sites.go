@@ -78,15 +78,25 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 	// We use the container name directly since Traefik resolves via Docker network
 	serviceURL := fmt.Sprintf("http://%s:%d", route.ServiceName, route.Port)
 	via := "container " + route.ServiceName
+	var middlewareNames []string
+	var middlewares map[string]dynMiddleware
 	if route.DaemonServed {
 		serviceURL = fmt.Sprintf("http://%s:%d", daemonStaticHost(), constants.PortStatic)
 		via = "the srv daemon's embedded static server"
+		// The nginx renderer gzips static sites; the daemon's server hands
+		// Traefik raw files over loopback (sendfile) and Traefik compresses
+		// on the way out, so moving a site to the daemon never costs bytes
+		// on the wire.
+		compress := serviceName + "-compress"
+		middlewareNames = []string{compress}
+		middlewares = map[string]dynMiddleware{compress: {Compress: &dynCompress{}}}
 	}
 
 	router := dynRouter{
 		Rule:        BuildHostRule(route.Domains, route.Wildcard),
 		EntryPoints: []string{constants.EntryPointWebsecure},
 		Service:     serviceName,
+		Middlewares: middlewareNames,
 	}
 
 	if route.IsLocal {
@@ -109,6 +119,7 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 				Rule:        BuildHostRule(route.Domains, route.Wildcard),
 				EntryPoints: []string{constants.EntryPointInternal},
 				Service:     serviceName,
+				Middlewares: middlewareNames,
 			}
 		}
 	}
@@ -123,6 +134,7 @@ func WriteSiteRouteConfig(cfg *config.Config, route SiteRouteConfig) error {
 					},
 				},
 			},
+			Middlewares: middlewares,
 		},
 	}
 

@@ -3,13 +3,13 @@ package mcp
 import (
 	"context"
 	"os"
-	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/logfile"
 	"github.com/stubbedev/srv/internal/metrics"
 )
 
@@ -79,18 +79,16 @@ func daemonLogTool(_ context.Context, _ *mcpsdk.CallToolRequest, in daemonLogIn)
 		return nil, daemonLogOut{}, err
 	}
 	path := daemon.LogPath(cfg)
-	data, err := os.ReadFile(path)
+	// Tail streams the file holding only n lines, instead of reading a
+	// log that may be megabytes into memory.
+	lines, err := logfile.Tail(path, n, nil)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, daemonLogOut{Path: path, Lines: []string{}}, nil
 		}
 		return nil, daemonLogOut{Path: path}, err
 	}
-	all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(all) > n {
-		all = all[len(all)-n:]
-	}
-	return nil, daemonLogOut{Path: path, Lines: all}, nil
+	return nil, daemonLogOut{Path: path, Lines: lines}, nil
 }
 
 type (

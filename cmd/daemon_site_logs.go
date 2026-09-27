@@ -6,17 +6,16 @@
 package cmd
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/daemon"
+	"github.com/stubbedev/srv/internal/logfile"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -55,51 +54,16 @@ func streamDaemonSiteLogs(siteName string, follow bool, tail int) error {
 	return followDaemonSiteLog(logPath, siteName)
 }
 
-// daemonSiteLogLines returns the log's request lines for one site. tail <= 0
-// returns every matching line; otherwise only the last tail.
+// daemonSiteLogLines returns the log's request lines for one site, across
+// rotated generations. tail <= 0 returns every matching line; otherwise only
+// the last tail.
 func daemonSiteLogLines(path, siteName string, tail int) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open daemon log file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
 	token := siteLogToken(siteName)
-	matches := func(line string) bool { return strings.Contains(line, token) }
-
-	if tail <= 0 {
-		var lines []string
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			if matches(scanner.Text()) {
-				lines = append(lines, scanner.Text())
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			return nil, fmt.Errorf("error reading daemon log file: %w", err)
-		}
-		return lines, nil
-	}
-
-	// Ring buffer: memory stays bounded regardless of log file size.
-	ring := make([]string, tail)
-	written := 0
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if matches(scanner.Text()) {
-			ring[written%len(ring)] = scanner.Text()
-			written++
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	lines, err := logfile.Tail(path, tail, func(line string) bool { return strings.Contains(line, token) })
+	if err != nil {
 		return nil, fmt.Errorf("error reading daemon log file: %w", err)
 	}
-	if written < tail {
-		return ring[:written], nil
-	}
-	return append(ring[written%len(ring):], ring[:written%len(ring)]...), nil
+	return lines, nil
 }
 
 // printDaemonSiteLogLines renders request lines; a non-empty prefix gets the
@@ -152,35 +116,16 @@ func daemonLogBytes(b int64) string {
 	}
 }
 
-// followDaemonSiteLog tails the daemon log for one site's request lines.
-// Mirrors `srv daemon logs`: seek to end, poll for new content. Runs until
-// the process is interrupted.
+// followDaemonSiteLog streams one site's new request lines from the daemon
+// log, across rotations, until the process is interrupted.
 func followDaemonSiteLog(path, siteName string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("failed to open daemon log file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return err
-	}
-
 	token := siteLogToken(siteName)
-	reader := bufio.NewReader(f)
-	for {
-		line, err := reader.ReadString('\n')
-		if len(line) > 0 && strings.Contains(line, token) {
-			if formatted, ok := formatDaemonAccessLine(line); ok {
-				fmt.Println(formatted)
-			}
+	return logfile.Follow(context.Background(), path, func(line string) {
+		if !strings.Contains(line, token) {
+			return
 		}
-		if errors.Is(err, io.EOF) {
-			time.Sleep(200 * time.Millisecond)
-			continue
+		if formatted, ok := formatDaemonAccessLine(line); ok {
+			fmt.Println(formatted)
 		}
-		if err != nil {
-			return fmt.Errorf("error reading daemon log file: %w", err)
-		}
-	}
+	})
 }

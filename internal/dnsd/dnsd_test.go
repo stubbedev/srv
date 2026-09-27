@@ -361,14 +361,11 @@ func TestParseConfAndHostsEdgeCases(t *testing.T) {
 	}
 }
 
-// wildcardCovers mirrors lookupA's suffix logic for zone-inspection tests.
+// wildcardCovers reports whether a wildcard entry answers name, ignoring the
+// exact table, for zone-inspection tests.
 func wildcardCovers(z *ZoneSnapshot, name string) bool {
-	for _, w := range z.wildcards {
-		if name == strings.TrimPrefix(w.suffix, ".") || strings.HasSuffix(name, w.suffix) {
-			return true
-		}
-	}
-	return false
+	_, ok := lookupA(&ZoneSnapshot{wildcards: z.wildcards}, name)
+	return ok
 }
 
 func writeTemp(t *testing.T, name, content string) string {

@@ -1,17 +1,14 @@
 package cmd
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
-	"io"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/daemon"
+	"github.com/stubbedev/srv/internal/logfile"
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
@@ -238,74 +235,25 @@ func runDaemonLogs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Follow mode: open the file, seek to end, and poll for new content.
-	f, err := os.Open(logPath)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
-	}
-
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return err
-	}
-
-	reader := bufio.NewReader(f)
-	for {
-		line, err := reader.ReadString('\n')
-		if len(line) > 0 {
-			fmt.Print(line)
-		}
-		if errors.Is(err, io.EOF) {
-			// No new data yet; wait a short interval and try again.
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("error reading log file: %w", err)
-		}
-	}
+	// Follow mode: stream new lines, across log rotations, until interrupted.
+	return logfile.Follow(cmd.Context(), logPath, func(line string) { fmt.Println(line) })
 }
 
-// printLastLines prints the last n lines of the file at path to stdout.
+// printLastLines prints the last n lines of the daemon log at path (reaching
+// into rotated generations when the live file is shorter) to stdout.
 func printLastLines(path string, n int) error {
-	f, err := os.Open(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-
 	if n <= 0 {
 		return nil
 	}
-
-	// Ring buffer of size n: at any moment we hold only the last n lines, so
-	// memory stays bounded regardless of log file size. write tracks how many
-	// lines we've consumed total; len(ring)-write%n gives the oldest slot.
-	ring := make([]string, n)
-	write := 0
-	scanner := bufio.NewScanner(f)
-	// Allow lines up to 1 MiB — the default 64 KiB limit truncates long stack
-	// traces silently. printLastLines is only used for the daemon's own log.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		ring[write%n] = scanner.Text()
-		write++
-	}
-	if err := scanner.Err(); err != nil {
+	lines, err := logfile.Tail(path, n, nil)
+	if err != nil {
 		return fmt.Errorf("error reading log file: %w", err)
 	}
-
-	// Emit in chronological order. If we wrote fewer than n lines, the ring
-	// is partially filled — start from index 0. Otherwise the oldest line
-	// lives at write%n.
-	count := min(write, n)
-	start := 0
-	if write > n {
-		start = write % n
-	}
-	for i := range count {
-		fmt.Println(ring[(start+i)%n])
+	for _, line := range lines {
+		fmt.Println(line)
 	}
 	return nil
 }

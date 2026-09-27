@@ -42,6 +42,8 @@ import (
 	miekg "github.com/miekg/dns"
 
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/domain"
+	"github.com/stubbedev/srv/internal/pool"
 )
 
 // CheckName is the health-check query: the server answers it locally with
@@ -62,31 +64,48 @@ const shutdownGrace = 2 * time.Second
 const reloadDebounce = 250 * time.Millisecond
 
 // pollInterval is how often Watch re-stats the zone files as a safety net
-// for change events the platform never delivered.
-const pollInterval = time.Second
+// for change events the platform never delivered. fsnotify is the primary
+// signal, so the net is coarse: a resident daemon should not wake every
+// second to stat files that almost never change. After a watcher error the
+// events can no longer be trusted, and Watch drops to pollIntervalDegraded.
+const (
+	pollInterval         = 30 * time.Second
+	pollIntervalDegraded = time.Second
+)
 
 // ZoneSnapshot is one immutable set of zones. The handler reads the combined
 // snapshot through an atomic pointer: SetZones and Reload swap the pointer,
 // queries never block on a mutex.
+//
+// Addresses are parsed once, when the snapshot is built, into the 4-byte
+// form an A record packs; answering a query copies a slice header.
 type ZoneSnapshot struct {
-	// exact maps a fully-qualified name to its A record.
-	exact map[string]string
-	// wildcards are suffix matchers: entry "example.com." answers
-	// example.com and every subdomain, matching dnsmasq's address=/name/.
-	wildcards []wildcard
+	// exact maps a lower-case FQDN to its A record.
+	exact map[string]net.IP
+	// wildcards maps a lower-case FQDN ("example.com.") to the A record for
+	// it and every subdomain, matching dnsmasq's address=/name/. Lookups walk
+	// the query name's labels, so cost scales with name depth, not with the
+	// number of registered domains; the most specific entry wins.
+	wildcards map[string]net.IP
 	// upstream holds the forwarder addresses in config order, "ip#port"
 	// already split into host/port.
 	upstream []upstream
 }
 
-type wildcard struct {
-	suffix string // lower-case FQDN, leading dot included: ".example.com."
-	ip     string
-}
-
 type upstream struct {
 	host string
 	port int
+	// addr is host:port, joined once for every forwarded query.
+	addr string
+}
+
+// loopbackA is the answer for srv's own names and the health check.
+var loopbackA = net.ParseIP(constants.LocalhostIP).To4()
+
+// parseA parses an A-record address: IPv4 only, in 4-byte form. Anything
+// else is nil, so a snapshot can never hold a record that fails to pack.
+func parseA(ip string) net.IP {
+	return net.ParseIP(ip).To4()
 }
 
 // NewZoneSnapshot returns an empty snapshot for callers that build zones
@@ -95,30 +114,35 @@ type upstream struct {
 // and its defaults, so only a resolver list explicitly configured in
 // config.yml overrides what the files declare.
 func NewZoneSnapshot() *ZoneSnapshot {
-	return &ZoneSnapshot{exact: map[string]string{}}
+	return newZoneSnapshot()
+}
+
+func newZoneSnapshot() *ZoneSnapshot {
+	return &ZoneSnapshot{exact: map[string]net.IP{}, wildcards: map[string]net.IP{}}
 }
 
 // PinExact adds an A record matching name exactly — the structured twin of
-// an "<ip> <name>" hosts-file line. Entries with an unparseable IP are
+// an "<ip> <name>" hosts-file line. Entries with an invalid IPv4 address are
 // dropped so a snapshot can never hold a record the query path cannot
 // serve.
 func (z *ZoneSnapshot) PinExact(name, ip string) {
-	if net.ParseIP(ip) == nil || name == "" {
-		return
+	if a := parseA(ip); a != nil && name != "" {
+		z.exact[strings.ToLower(dnsName(name))] = a
 	}
-	z.exact[strings.ToLower(dnsName(name))] = ip
 }
 
 // PinWildcard answers name and every subdomain — the structured twin of
 // dnsmasq's address=/name/ directive that parseConf renders from the files.
+// The first declaration of a name wins, as in the config files.
 func (z *ZoneSnapshot) PinWildcard(name, ip string) {
-	if net.ParseIP(ip) == nil || name == "" {
+	a := parseA(ip)
+	if a == nil || name == "" {
 		return
 	}
-	z.wildcards = append(z.wildcards, wildcard{
-		suffix: "." + strings.ToLower(dnsName(name)),
-		ip:     ip,
-	})
+	key := strings.ToLower(dnsName(name))
+	if _, taken := z.wildcards[key]; !taken {
+		z.wildcards[key] = a
+	}
 }
 
 // SetUpstream registers one forwarder, "ip" or "ip#port" — the same grammar
@@ -368,6 +392,9 @@ func (s *Server) Watch() error {
 				return nil
 			}
 			log.Printf("dnsd: watch error: %v", err)
+			// An overflowed or failing watcher may have dropped events:
+			// lean on the stat poll from here on.
+			poll.Reset(pollIntervalDegraded)
 		case <-poll.C:
 			if cur, ok := fileStampOf(s.confPath); ok && cur != confStamp {
 				confStamp = cur
@@ -423,21 +450,13 @@ func combine(primary, fallback *ZoneSnapshot) *ZoneSnapshot {
 		return primary
 	}
 	merged := &ZoneSnapshot{
-		exact:     make(map[string]string, len(primary.exact)+len(fallback.exact)),
-		wildcards: make([]wildcard, 0, len(primary.wildcards)+len(fallback.wildcards)),
+		exact:     make(map[string]net.IP, len(primary.exact)+len(fallback.exact)),
+		wildcards: make(map[string]net.IP, len(primary.wildcards)+len(fallback.wildcards)),
 	}
 	maps.Copy(merged.exact, fallback.exact)
 	maps.Copy(merged.exact, primary.exact)
-	seen := make(map[string]bool, len(primary.wildcards))
-	for _, w := range primary.wildcards {
-		merged.wildcards = append(merged.wildcards, w)
-		seen[w.suffix] = true
-	}
-	for _, w := range fallback.wildcards {
-		if !seen[w.suffix] {
-			merged.wildcards = append(merged.wildcards, w)
-		}
-	}
+	maps.Copy(merged.wildcards, fallback.wildcards)
+	maps.Copy(merged.wildcards, primary.wildcards)
 	merged.upstream = primary.upstream
 	if len(merged.upstream) == 0 {
 		merged.upstream = fallback.upstream
@@ -450,7 +469,7 @@ func combine(primary, fallback *ZoneSnapshot) *ZoneSnapshot {
 // but the health check and upstream forwarding); malformed lines inside an
 // otherwise parseable file are skipped so one bad line cannot take DNS down.
 func loadZones(confPath, hostsPath string) (*ZoneSnapshot, error) {
-	z := &ZoneSnapshot{exact: map[string]string{}}
+	z := newZoneSnapshot()
 
 	if data, err := os.ReadFile(hostsPath); err == nil {
 		parseHosts(string(data), z)
@@ -485,7 +504,7 @@ func parseHosts(data string, z *ZoneSnapshot) {
 			continue
 		}
 		for _, name := range fields[1:] {
-			z.exact[strings.ToLower(dnsName(name))] = constants.LocalhostIP
+			z.exact[strings.ToLower(dnsName(name))] = loopbackA
 		}
 	}
 }
@@ -506,10 +525,7 @@ func parseConf(data string, z *ZoneSnapshot) {
 			if !found || name == "" || ip == "" {
 				continue
 			}
-			z.wildcards = append(z.wildcards, wildcard{
-				suffix: "." + strings.ToLower(dnsName(name)),
-				ip:     ip,
-			})
+			z.PinWildcard(name, ip)
 		case strings.HasPrefix(line, "server="):
 			if up, ok := parseUpstreamSpec(strings.TrimPrefix(line, "server=")); ok {
 				z.upstream = append(z.upstream, up)
@@ -534,16 +550,22 @@ func parseUpstreamSpec(spec string) (upstream, bool) {
 	if net.ParseIP(host) == nil {
 		return upstream{}, false
 	}
-	return upstream{host: host, port: p}, true
+	return newUpstream(host, p), true
 }
 
 // defaultUpstream is used when the conf declares no server= lines: the same
 // Google resolvers srv writes into a fresh conf.
 func defaultUpstream() []upstream {
 	return []upstream{
-		{host: constants.GoogleDNS1, port: 53},
-		{host: constants.GoogleDNS2, port: 53},
+		newUpstream(constants.GoogleDNS1, 53),
+		newUpstream(constants.GoogleDNS2, 53),
 	}
+}
+
+// newUpstream is the only way to build an upstream, so addr always matches
+// host and port.
+func newUpstream(host string, port int) upstream {
+	return upstream{host: host, port: port, addr: net.JoinHostPort(host, strconv.Itoa(port))}
 }
 
 // dnsName qualifies and normalizes a config name for map keys.
@@ -552,19 +574,68 @@ func dnsName(name string) string {
 	return name + "."
 }
 
-// handleQuery answers one DNS query.
-func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
-	m := new(miekg.Msg)
-	m.SetReply(r)
+// reply is the per-query response, pooled: the message, its one A record and
+// the answer section backing it. Reuse is safe because the ResponseWriter
+// packs the message to bytes inside WriteMsg and keeps no reference.
+type reply struct {
+	msg    miekg.Msg
+	a      miekg.A
+	answer [1]miekg.RR
+}
+
+var replies pool.Pool[reply]
+
+// newReply starts the response to r: miekg's SetReply, except the question
+// section aliases the request's instead of copying it (both are read-only
+// until the reply is packed) — no allocation per query.
+func newReply(r *miekg.Msg) *reply {
+	rp := replies.Get()
+	rp.msg = miekg.Msg{}
+	m := &rp.msg
+	m.Id = r.Id
+	m.Response = true
+	m.Opcode = r.Opcode
+	if m.Opcode == miekg.OpcodeQuery {
+		m.RecursionDesired = r.RecursionDesired
+		m.CheckingDisabled = r.CheckingDisabled
+	}
+	m.Rcode = miekg.RcodeSuccess
 	m.RecursionAvailable = true
+	m.Question = r.Question[:1:1]
+	return rp
+}
+
+// answerA sets the reply's answer section to one A record.
+func (rp *reply) answerA(name string, ip net.IP) {
+	rp.a = miekg.A{
+		Hdr: miekg.RR_Header{Name: name, Rrtype: miekg.TypeA, Class: miekg.ClassINET, Ttl: 60},
+		A:   ip,
+	}
+	rp.answer[0] = &rp.a
+	rp.msg.Answer = rp.answer[:1]
+}
+
+// release returns the reply to the pool once it has been written.
+func (rp *reply) release() {
+	rp.msg = miekg.Msg{}
+	rp.a = miekg.A{}
+	rp.answer[0] = nil
+	replies.Put(rp)
+}
+
+// handleQuery answers one DNS query. A local answer allocates nothing in
+// this package; the remaining cost is miekg packing the message.
+func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
+	rp := newReply(r)
+	defer rp.release()
 	q := r.Question[0]
 	name := strings.ToLower(q.Name)
 
 	// The health-check name is answered before everything else, including
 	// forwarding, so a response to it is proof srv's server answered.
 	if name == CheckName && q.Qtype == miekg.TypeA {
-		appendA(m, name, constants.LocalhostIP)
-		_ = w.WriteMsg(m)
+		rp.answerA(name, loopbackA)
+		_ = w.WriteMsg(&rp.msg)
 		return
 	}
 
@@ -574,84 +645,91 @@ func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
 		return
 	}
 
-	switch q.Qtype {
-	case miekg.TypeA:
-		if ip, ok := lookupA(z, name); ok {
-			appendA(m, name, ip)
-			_ = w.WriteMsg(m)
-			return
+	if ip, ok := lookupA(z, name); ok {
+		// Local names are IPv4-only. Any other type (AAAA, MX, TXT, …) gets
+		// an authoritative empty answer, not NXDOMAIN, which would push
+		// resolvers to try upstream — what dnsmasq served.
+		if q.Qtype == miekg.TypeA {
+			rp.answerA(name, ip)
 		}
-	case miekg.TypeAAAA:
-		// Local domains are IPv4-only: an authoritative empty answer (not
-		// NXDOMAIN, which would push resolvers to try upstream) matches what
-		// dnsmasq served.
-		if _, ok := lookupA(z, name); ok {
-			_ = w.WriteMsg(m)
-			return
-		}
-	default:
-		// MX/TXT/SRV for local names: empty authoritative answer, like
-		// dnsmasq with no matching record type.
-		if _, ok := lookupA(z, name); ok {
-			_ = w.WriteMsg(m)
-			return
-		}
+		_ = w.WriteMsg(&rp.msg)
+		return
 	}
 
-	forwardUpstream(w, r, m, z)
+	forwardUpstream(w, r, &rp.msg, z)
 }
 
 // lookupA resolves one name against the snapshot: exact entries first, then
-// wildcard suffixes (dnsmasq semantics: address=/name/ covers the apex and
-// every subdomain).
-func lookupA(z *ZoneSnapshot, name string) (string, bool) {
+// wildcard entries (dnsmasq semantics: address=/name/ covers the apex and
+// every subdomain), the most specific winning.
+func lookupA(z *ZoneSnapshot, name string) (net.IP, bool) {
 	if ip, ok := z.exact[name]; ok {
 		return ip, true
 	}
-	for _, w := range z.wildcards {
-		// suffix ".example.com." matches "example.com." (apex) after the
-		// leading dot is accounted for, and every "x.example.com.".
-		if name == strings.TrimPrefix(w.suffix, ".") || strings.HasSuffix(name, w.suffix) {
-			return w.ip, true
-		}
-	}
-	return "", false
+	return domain.MatchSuffix(z.wildcards, name)
 }
 
-func appendA(m *miekg.Msg, name, ip string) {
-	m.Answer = append(m.Answer, &miekg.A{
-		Hdr: miekg.RR_Header{Name: name, Rrtype: miekg.TypeA, Class: miekg.ClassINET, Ttl: 60},
-		A:   net.ParseIP(ip),
-	})
-}
+// upstreamClient is shared by every forwarded query: a Client holds only
+// settings, and Exchange dials a fresh socket per call, so one instance is
+// safe for concurrent use and saves an allocation per query.
+var upstreamClient = &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
 
-// forwardUpstream relays the original question to the configured servers all
-// at once; the first response wins. The worst case is one upstreamTimeout no
-// matter how many servers are configured or how many are dead — a healthy
-// upstream's answer never waits behind a dead one's timeout.
+// hedgeDelay is how long forwardUpstream waits on one upstream before it
+// also asks the next. A healthy resolver answers well inside it, so the
+// common case sends one packet instead of one per configured upstream.
+const hedgeDelay = 200 * time.Millisecond
+
+// forwardUpstream relays the original question to the configured servers as
+// a hedged race: the first upstream is asked at once, the next one joins
+// when the previous has failed or stayed silent for hedgeDelay, and the
+// first answer wins. A healthy first upstream therefore costs one query, and
+// a dead one costs at most hedgeDelay before the next is tried — never a
+// full upstreamTimeout.
 //
 // Each worker sends exactly one message (its answer, or nil on failure) into
 // a channel buffered for all of them, so the losers of the race finish and
 // exit after the winner is written: no worker may ever block on the send,
 // or every forwarded query would leak a goroutine per slow upstream.
 func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *ZoneSnapshot) {
-	client := &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
 	replies := make(chan *miekg.Msg, len(z.upstream))
-	for _, up := range z.upstream {
-		go func(up upstream) {
+	next, inflight := 0, 0
+	launch := func() {
+		up := z.upstream[next]
+		next++
+		inflight++
+		go func() {
 			var resp *miekg.Msg
 			defer func() { replies <- resp }()
-			addr := net.JoinHostPort(up.host, strconv.Itoa(up.port))
-			answer, _, err := client.Exchange(r.Copy(), addr)
+			answer, _, err := upstreamClient.Exchange(r.Copy(), up.addr)
 			if err == nil {
 				resp = answer
 			}
-		}(up)
+		}()
 	}
-	for range z.upstream {
-		if resp := <-replies; resp != nil {
-			_ = w.WriteMsg(resp)
-			return
+	if len(z.upstream) > 0 {
+		launch()
+	}
+	hedge := time.NewTimer(hedgeDelay)
+	defer hedge.Stop()
+	for inflight > 0 {
+		select {
+		case resp := <-replies:
+			inflight--
+			if resp != nil {
+				_ = w.WriteMsg(resp)
+				return
+			}
+			// That upstream failed outright: move on now rather than
+			// waiting out the hedge timer.
+			if next < len(z.upstream) {
+				launch()
+				hedge.Reset(hedgeDelay)
+			}
+		case <-hedge.C:
+			if next < len(z.upstream) {
+				launch()
+				hedge.Reset(hedgeDelay)
+			}
 		}
 	}
 	// No upstream answered. For a name srv owns this is unreachable (lookupA
