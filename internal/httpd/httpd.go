@@ -8,6 +8,7 @@ package httpd
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -39,6 +40,9 @@ type wildcard struct {
 	target Target
 }
 
+// idleTimeout bounds how long a keep-alive connection may sit idle.
+const idleTimeout = 2 * time.Minute
+
 // Server multiplexes daemon-served static sites by Host header.
 type Server struct {
 	mu        sync.RWMutex
@@ -59,6 +63,9 @@ func New(addr string) *Server {
 		Addr:              addr,
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
+		// Reap idle keep-alive connections: without a bound every client
+		// that stops talking holds a socket and a goroutine forever.
+		IdleTimeout: idleTimeout,
 	}
 	return s
 }
@@ -364,6 +371,14 @@ func (w *statusPreservingWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// ReadFrom keeps the sendfile path of the wrapped writer; see copyTo.
+func (w *statusPreservingWriter) ReadFrom(r io.Reader) (int64, error) {
+	return copyTo(w.ResponseWriter, r)
+}
+
+// Unwrap exposes the wrapped writer to http.ResponseController.
+func (w *statusPreservingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // logResponseWriter records the status and byte count of one request for the
 // access log.
 type logResponseWriter struct {
@@ -382,3 +397,28 @@ func (w *logResponseWriter) Write(p []byte) (int, error) {
 	w.bytes += int64(n)
 	return n, err
 }
+
+// ReadFrom keeps the sendfile path of the wrapped writer; see copyTo.
+func (w *logResponseWriter) ReadFrom(r io.Reader) (int64, error) {
+	n, err := copyTo(w.ResponseWriter, r)
+	w.bytes += n
+	return n, err
+}
+
+// Unwrap exposes the wrapped writer to http.ResponseController.
+func (w *logResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// copyTo copies r into the underlying writer through its io.ReaderFrom when
+// it has one. http.ServeContent copies file bodies with io.CopyN, which only
+// reaches net/http's sendfile(2) fast path when every wrapper between it and
+// the connection implements io.ReaderFrom; a wrapper that only has Write
+// silently turns each file into a userspace read/write loop.
+func copyTo(w http.ResponseWriter, r io.Reader) (int64, error) {
+	if rf, ok := w.(io.ReaderFrom); ok {
+		return rf.ReadFrom(r)
+	}
+	return io.Copy(writerOnly{w}, r)
+}
+
+// writerOnly hides any ReadFrom on the target so io.Copy cannot recurse.
+type writerOnly struct{ io.Writer }

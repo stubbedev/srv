@@ -2,9 +2,11 @@ package dnsd
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -506,6 +508,40 @@ func TestReloadKeepsPrimaryLayer(t *testing.T) {
 	for _, name := range []string{"reg.test.", "late.test."} {
 		if got := answerIP(queryA(t, addr, name)); got != "127.0.0.1" {
 			t.Errorf("%s = %q after reload, want 127.0.0.1 (primary and fallback must coexist)", name, got)
+		}
+	}
+}
+
+// TestForwardUpstreamDoesNotLeakGoroutines is the regression test for the
+// forwarder's losers blocking forever: with every upstream answering, each
+// forwarded query used to strand one goroutine per slower upstream on a full
+// reply channel — unbounded growth on a resident daemon.
+func TestForwardUpstreamDoesNotLeakGoroutines(t *testing.T) {
+	fast := startStubUpstream(t, "10.0.0.1", 0)
+	slow := startStubUpstream(t, "10.0.0.2", 20*time.Millisecond)
+	_, addr := startTestServer(t, "server="+fast+"\nserver="+slow+"\n", "")
+
+	settle := func() int {
+		// Let the slower upstream's answers land and their workers exit.
+		time.Sleep(100 * time.Millisecond)
+		return runtime.NumGoroutine()
+	}
+	queryA(t, addr, "warmup.test.")
+	baseline := settle()
+
+	const queries = 50
+	for i := range queries {
+		queryA(t, addr, fmt.Sprintf("q%d.test.", i))
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		n := settle()
+		if n <= baseline+5 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines: %d after %d forwarded queries, baseline %d — forwarder workers are leaking", n, queries, baseline)
 		}
 	}
 }

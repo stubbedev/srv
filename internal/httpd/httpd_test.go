@@ -301,3 +301,82 @@ func TestSetTargetsReplacesTable(t *testing.T) {
 		t.Errorf("new.test after re-target: code = %d, want 200", code)
 	}
 }
+
+// readerFromRecorder is a ResponseWriter that, like net/http's connection
+// writer, implements io.ReaderFrom — the hook its sendfile path hangs off.
+type readerFromRecorder struct {
+	*httptest.ResponseRecorder
+	readFromCalls int
+}
+
+func (r *readerFromRecorder) ReadFrom(src io.Reader) (int64, error) {
+	r.readFromCalls++
+	return io.Copy(r.ResponseRecorder, src)
+}
+
+// TestFileBodiesKeepSendfilePath guards the static server's throughput: the
+// access-log and custom-status wrappers must pass io.ReaderFrom through, or
+// http.ServeContent falls back to a userspace copy for every file served.
+func TestFileBodiesKeepSendfilePath(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Repeat("x", 64<<10)
+	writeFile(t, root, "big.txt", body)
+	writeFile(t, root, "404.html", "custom missing")
+
+	for _, logged := range []bool{false, true} {
+		s := New("127.0.0.1:0")
+		if logged {
+			var buf bytes.Buffer
+			zl := zerolog.New(&buf)
+			s.Logger = &zl
+		}
+		s.SetTargets(map[string]Target{"s.test": {Name: "s.test", Root: root}}, nil)
+
+		for path, want := range map[string]struct {
+			code int
+			body string
+		}{
+			"/big.txt": {http.StatusOK, body},
+			"/missing": {http.StatusNotFound, "custom missing"},
+		} {
+			rec := &readerFromRecorder{ResponseRecorder: httptest.NewRecorder()}
+			req := httptest.NewRequest(http.MethodGet, "http://s.test"+path, nil)
+			s.ServeHTTP(rec, req)
+			if rec.Code != want.code || rec.Body.String() != want.body {
+				t.Errorf("logged=%v %s: code=%d len=%d, want %d len=%d", logged, path, rec.Code, rec.Body.Len(), want.code, len(want.body))
+			}
+			if rec.readFromCalls == 0 {
+				t.Errorf("logged=%v %s: body bypassed the writer's ReadFrom (no sendfile)", logged, path)
+			}
+		}
+	}
+}
+
+// The access log must still count bytes copied through ReadFrom.
+func TestAccessLogCountsReadFromBytes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "f.txt", "12345")
+	var buf bytes.Buffer
+	zl := zerolog.New(&buf)
+	s := New("127.0.0.1:0")
+	s.Logger = &zl
+	s.SetTargets(map[string]Target{"s.test": {Name: "s.test", Root: root}}, nil)
+
+	rec := &readerFromRecorder{ResponseRecorder: httptest.NewRecorder()}
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://s.test/f.txt", nil))
+	var e map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &e); err != nil {
+		t.Fatalf("access event: %v (%s)", err, buf.String())
+	}
+	if e["bytes"] != float64(5) {
+		t.Errorf("bytes = %v, want 5", e["bytes"])
+	}
+}
+
+// Idle keep-alive connections must be reaped, or every client that goes
+// quiet pins a socket and a goroutine in the daemon for good.
+func TestIdleConnectionsAreBounded(t *testing.T) {
+	if s := New("127.0.0.1:0"); s.srv.IdleTimeout <= 0 {
+		t.Errorf("IdleTimeout = %v, want a positive bound", s.srv.IdleTimeout)
+	}
+}

@@ -629,16 +629,22 @@ func appendA(m *miekg.Msg, name, ip string) {
 // at once; the first response wins. The worst case is one upstreamTimeout no
 // matter how many servers are configured or how many are dead — a healthy
 // upstream's answer never waits behind a dead one's timeout.
+//
+// Each worker sends exactly one message (its answer, or nil on failure) into
+// a channel buffered for all of them, so the losers of the race finish and
+// exit after the winner is written: no worker may ever block on the send,
+// or every forwarded query would leak a goroutine per slow upstream.
 func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *ZoneSnapshot) {
 	client := &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
 	replies := make(chan *miekg.Msg, len(z.upstream))
 	for _, up := range z.upstream {
 		go func(up upstream) {
-			defer func() { replies <- nil }()
+			var resp *miekg.Msg
+			defer func() { replies <- resp }()
 			addr := net.JoinHostPort(up.host, strconv.Itoa(up.port))
-			resp, _, err := client.Exchange(r.Copy(), addr)
+			answer, _, err := client.Exchange(r.Copy(), addr)
 			if err == nil {
-				replies <- resp
+				resp = answer
 			}
 		}(up)
 	}

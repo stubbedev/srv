@@ -404,11 +404,15 @@ func (d *Daemon) watchEvents() error {
 	}
 }
 
+// watchDockerEvents opens the container event stream. Tests swap it to feed
+// the event loop without a Docker daemon.
+var watchDockerEvents = docker.WatchEvents
+
 // runEventLoop runs a single event watching session against the daemon API.
 func (d *Daemon) runEventLoop() error {
 	// Resolving the engine exports DOCKER_HOST, which the event client reads.
 	eng := ops.Engine()
-	eventCh, errCh, err := docker.WatchEvents(d.ctx)
+	eventCh, errCh, err := watchDockerEvents(d.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create %s client: %w", eng.Name, err)
 	}
@@ -419,7 +423,19 @@ func (d *Daemon) runEventLoop() error {
 			return nil
 		case err := <-errCh:
 			return fmt.Errorf("error reading Docker events: %w", err)
-		case event := <-eventCh:
+		case event, ok := <-eventCh:
+			if !ok {
+				// The stream ended (engine restart, socket closed). A closed
+				// channel yields zero events forever, so reading on would spin
+				// this loop at 100% CPU; return and let watchEvents reconnect.
+				// The producer sends its error before closing, so prefer it.
+				select {
+				case err := <-errCh:
+					return fmt.Errorf("error reading Docker events: %w", err)
+				default:
+					return docker.ErrEventStreamClosed
+				}
+			}
 			d.handleContainerStart(event)
 		}
 	}

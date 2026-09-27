@@ -242,8 +242,14 @@ func splitImageRef(ref string) (name, tag string) {
 	return ref, ""
 }
 
+// ErrEventStreamClosed reports that the daemon ended the event stream
+// cleanly — what an engine restart looks like from the client side.
+var ErrEventStreamClosed = errors.New("docker event stream closed")
+
 // Events streams daemon events matching the filters until ctx is cancelled
-// or the connection breaks.
+// or the connection breaks. eventCh is closed when the stream ends; unless
+// ctx was cancelled, errCh then carries why (ErrEventStreamClosed on a clean
+// EOF), sent before the close.
 func (m *miniClient) Events(ctx context.Context, filters map[string][]string) (<-chan Event, <-chan error) {
 	eventCh := make(chan Event)
 	errCh := make(chan error, 1)
@@ -252,7 +258,9 @@ func (m *miniClient) Events(ctx context.Context, filters map[string][]string) (<
 		q := url.Values{"filters": []string{encodeFilters(filters)}}
 		body, err := m.stream(ctx, "/events", q)
 		if err != nil {
-			errCh <- err
+			if ctx.Err() == nil {
+				errCh <- err
+			}
 			return
 		}
 		defer func() { _ = body.Close() }()
@@ -260,7 +268,10 @@ func (m *miniClient) Events(ctx context.Context, filters map[string][]string) (<
 		for {
 			var ev Event
 			if err := decoder.Decode(&ev); err != nil {
-				if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+				if ctx.Err() == nil {
+					if errors.Is(err, io.EOF) {
+						err = ErrEventStreamClosed
+					}
 					errCh <- err
 				}
 				return
