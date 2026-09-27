@@ -117,6 +117,14 @@ func Stop() error {
 
 // Run starts the daemon and blocks until stopped.
 func (d *Daemon) Run() error {
+	// One daemon per srv root: the lock holder is the single process serving
+	// the embedded DNS and static servers for every site and container.
+	lock, err := acquireDaemonLock(d.cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+
 	// Open log file
 	logPath := LogPath(d.cfg)
 	logFile, err := logfile.Open(logPath, constants.FilePermDefault)

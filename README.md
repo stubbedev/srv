@@ -475,6 +475,11 @@ the shared infrastructure and keeps sites in sync:
   `127.0.0.1:15353`.
 - **Embedded static server** — hosts `--daemon` static sites on
   `127.0.0.1:15380`.
+- **Single instance** — the daemon takes a lock on `<root>/daemon.lock`:
+  however many sites and containers you run, one daemon serves them all. A
+  second `daemon start --foreground` refuses, and a standalone `srv dnsd` /
+  `srv httpd` names the daemon as the port holder instead of failing with a
+  bare "address already in use".
 
 ```bash
 srv daemon start      # --foreground to run in the foreground, --no-watch to disable hot reload

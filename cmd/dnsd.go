@@ -61,6 +61,9 @@ func runDNSD(cmd *cobra.Command, args []string) error {
 		if dnsd.IsBindPermissionErr(err) {
 			return fmt.Errorf("%w\n  bind a port below 1024 requires privileges: 'sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53' (or run via the daemon service, which has the capability)", err)
 		}
+		if hint := daemonBindHint(err, dnsdFlags.port == constants.PortDNS); hint != nil {
+			return hint
+		}
 		return err
 	}
 

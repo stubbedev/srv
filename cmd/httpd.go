@@ -70,6 +70,9 @@ func runHTTPD(cmd *cobra.Command, args []string) error {
 
 	ui.Info("Static file server listening on %s", server.Addr())
 	if err := server.Serve(); err != nil {
+		if hint := daemonBindHint(err, httpdFlags.port == constants.PortStatic); hint != nil {
+			return hint
+		}
 		return fmt.Errorf("static file server: %w", err)
 	}
 	return nil

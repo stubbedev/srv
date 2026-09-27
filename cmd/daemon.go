@@ -99,6 +99,17 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// A foreground daemon holds the single-instance lock; starting the service
+	// now would crash-loop it against that lock until the foreground process
+	// exits. The service manager cannot see that process, the lock can.
+	if cfg, err := config.Load(); err == nil {
+		if pid, held := daemon.ServingPid(cfg); held {
+			ui.Warn("A foreground srv daemon (pid %d) is already running and serving DNS and static sites", pid)
+			ui.Dim("Stop it first (Ctrl-C or 'kill %d'), then run this again", pid)
+			return nil
+		}
+	}
+
 	ui.Info("Starting daemon service...")
 	if err := daemon.Restart(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)
