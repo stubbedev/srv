@@ -6,12 +6,15 @@
 // for every site and container. A second daemon start refuses on the lock,
 // standalone `srv dnsd` / `srv httpd` name the daemon as the port holder,
 // and both ports free up the moment the daemon stops. Needs no container
-// engine: the daemon keeps running without one.
-package daemon_test
+// engine: the daemon keeps running without one. Lives in the routing suite
+// because it shares the fixed serving ports and must not run beside it.
+package routing_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -36,8 +39,10 @@ func TestSingleDaemonInstance(t *testing.T) {
 	var daemonOut bytes.Buffer
 	d := exec.Command(bin, "daemon", "start", "--foreground", "--no-watch")
 	d.Env = srvEnv
-	d.Stdout = &daemonOut
-	d.Stderr = &daemonOut
+	// Streamed to stderr so a daemon that dies (or refuses to die) on CI
+	// explains itself in the log instead of leaving a 30-minute silence.
+	d.Stdout = io.MultiWriter(os.Stderr, &daemonOut)
+	d.Stderr = io.MultiWriter(os.Stderr, &daemonOut)
 	if err := d.Start(); err != nil {
 		t.Fatalf("start daemon: %v", err)
 	}
@@ -63,7 +68,7 @@ func TestSingleDaemonInstance(t *testing.T) {
 		t.Errorf("lock names pid %d, want daemon pid %d", lockPid, d.Process.Pid)
 	}
 
-	out, err := harness.RunSrvAllowErr(t, root, "daemon", "start", "--foreground", "--no-watch")
+	out, err := runSrvBounded(t, root, "second daemon start must refuse while the lock is held", "daemon", "start", "--foreground", "--no-watch")
 	if err == nil {
 		t.Fatalf("second daemon start succeeded:\n%s", out)
 	}
@@ -71,7 +76,7 @@ func TestSingleDaemonInstance(t *testing.T) {
 		t.Errorf("second start output %q does not name the running daemon", out)
 	}
 
-	out, err = harness.RunSrvAllowErr(t, root, "dnsd")
+	out, err = runSrvBounded(t, root, "standalone dnsd must refuse while the daemon serves", "dnsd")
 	if err == nil {
 		t.Fatalf("standalone dnsd succeeded beside the daemon:\n%s", out)
 	}
@@ -79,7 +84,7 @@ func TestSingleDaemonInstance(t *testing.T) {
 		t.Errorf("dnsd output %q does not name the daemon as the holder", out)
 	}
 
-	out, err = harness.RunSrvAllowErr(t, root, "httpd")
+	out, err = runSrvBounded(t, root, "standalone httpd must refuse while the daemon serves", "httpd")
 	if err == nil {
 		t.Fatalf("standalone httpd succeeded beside the daemon:\n%s", out)
 	}
@@ -135,6 +140,24 @@ func waitFor(t *testing.T, timeout time.Duration, what string, done func() bool)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// runSrvBounded runs the srv binary with SRV_ROOT pinned to root and fails
+// the test after a minute instead of blocking the suite forever: every child
+// here must exit on its own (a refusal, or a bind error), so a hang IS the
+// bug and gets reported with whatever the child printed.
+func runSrvBounded(t *testing.T, root, what string, args ...string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	bin := harness.BuildSrv(t)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = append(os.Environ(), constants.EnvSrvRoot+"="+root)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("%s: 'srv %s' still running after a minute; output so far:\n%s", what, strings.Join(args, " "), out)
+	}
+	return string(out), err
 }
 
 func readLockPid(t *testing.T, path string) int {
