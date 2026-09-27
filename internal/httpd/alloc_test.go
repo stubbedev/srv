@@ -46,7 +46,7 @@ func benchServer(tb testing.TB, logged bool) (*Server, *http.Request) {
 // values, Last-Modified formatting, the LimitReader around the body). The
 // server's own code — dispatch, headers, logging — allocates nothing, and
 // this guard keeps it that way.
-const serveHitAllocBudget = 11
+var serveHitAllocBudget = allocbudget.Budget{Allocs: 11, FileOpens: 1}
 
 func TestServeHTTPAllocationBudget(t *testing.T) {
 	for _, logged := range []bool{false, true} {

@@ -86,7 +86,7 @@ func TestLocalAnswersAllocateNothing(t *testing.T) {
 		}
 
 		name := fmt.Sprintf("%s type %d", tc.q.Question[0].Name, tc.q.Question[0].Qtype)
-		allocbudget.Check(t, name, 0, func() { s.handleQuery(w, tc.q) })
+		allocbudget.Check(t, name, allocbudget.Budget{}, func() { s.handleQuery(w, tc.q) })
 	}
 }
 
