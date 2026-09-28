@@ -4,12 +4,8 @@
 package cmd
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/spf13/cobra"
 
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -87,16 +83,13 @@ func reloadOne(name string) error {
 
 	switch {
 	case reloadFlags.restart:
-		s, gerr := site.GetByName(name)
-		if gerr != nil {
-			return fmt.Errorf("lookup site: %w", gerr)
-		}
-		if s.IsBroken {
-			return errors.New("site is broken (target directory missing)")
+		s, err := site.Require(name)
+		if err != nil {
+			return err
 		}
 		ui.Info("Restarting %s...", name)
-		if err := docker.ComposeUpWithProfile(s.ComposeDir, s.Profile); err != nil {
-			return fmt.Errorf("docker compose up: %w", err)
+		if err := new(site.Runner).Apply(s); err != nil {
+			return err
 		}
 		ui.Success("Reloaded and restarted %s", name)
 	case res.NeedsRestart:

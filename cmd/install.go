@@ -290,10 +290,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// startSites starts every site in parallel through site.Runner, the same path
+// as `srv start --all`, so daemon-served sites are routed rather than handed
+// to compose. Failures are reported inline per site and do not fail install.
 func startSites(sites []site.Site) {
-	_ = runBatchSiteOperation(sites, "Starting", func(s *site.Site) error {
-		return docker.ComposeUp(s.ComposeDir)
-	})
+	r := site.Runner{Quiet: true}
+	_ = runBatchSiteOperation(sites, verbStart, func(s *site.Site) error { return r.Start(s, false) })
 }
 
 // stopValetIfActive detects a running Valet install (config dir + systemd

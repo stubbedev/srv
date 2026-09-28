@@ -251,9 +251,9 @@ func TestLifecycleFailsWhenEngineIsUnreachable(t *testing.T) {
 	}
 }
 
-func TestRequireSiteUnknown(t *testing.T) {
+func TestRequireUnknown(t *testing.T) {
 	withSRVRoot(t)
-	if _, err := requireSite("ghost"); err == nil {
-		t.Error("requireSite(ghost) = nil, want an error")
+	if _, err := Require("ghost"); err == nil {
+		t.Error("Require(ghost) = nil, want an error")
 	}
 }

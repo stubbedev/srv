@@ -1,10 +1,10 @@
 // Package cmd — site_lifecycle.go implements the lifecycle commands
 // (`srv start`, `srv stop`, `srv restart`) and the shared
-// runBatchSiteOperation helper used by them and by `srv install`.
+// runBatchSiteOperation helper used by them and by `srv install`. The
+// per-site work itself is site.Runner's; this file only words it.
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,9 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
@@ -56,158 +54,25 @@ func init() {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
-	// Daemon-served sites live in the srv daemon, not Docker: their whole
-	// lifecycle runs before the Docker preflight, so they work with the
-	// engine down or even uninstalled.
-	if !startFlags.all {
-		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
-			ui.Info("Starting %s...", s.Name)
-			if err := site.StartSite(s.Name, false); err != nil {
-				return err
-			}
-			ui.Success("Site '%s' started", s.Name)
-			if d := s.Domain(); d != "" {
-				ui.Info("https://%s", d)
-			}
-			return nil
-		}
-	}
-
-	if err := docker.EnsureRunning(); err != nil {
-		return err
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
-		return err
-	}
-
-	// Apply any pending edge-config changes from a binary upgrade before
-	// starting sites, so a freshly-upgraded srv works without `srv install`.
-	if reconciled, err := traefik.ReconcileVersion(Version); err != nil {
-		ui.Warn("Edge config reconcile failed: %v", err)
-	} else if reconciled {
-		ui.Info("Reconciled edge config to srv %s", Version)
-	}
-
-	if startFlags.all {
-		return startAllSites()
-	}
-
-	s, err := site.GetByName(args[0])
-	if err != nil {
-		return err
-	}
-
-	if s.IsBroken {
-		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
-	}
-
-	// Renew local SSL cert if needed
-	if s.IsLocal && len(s.Domains) > 0 {
-		renewLocalCertIfNeeded(s.Name, s.Domains, s.Wildcard)
-	}
-
-	// Regenerate per-site artifacts before bringing containers up so any
-	// metadata edits since the last write are reflected in docker-compose.yml
-	// and the per-site Dockerfile. Reload short-circuits when the metadata
-	// hash matches the last apply so this stays cheap on hot paths.
-	if _, err := site.Reload(s.Name); err != nil {
-		return fmt.Errorf("reload site before start: %w", err)
-	}
-
-	ui.Info("Starting %s...", s.Name)
-	// Use ComposeDir which is set correctly for both static and compose sites
-	var startErr error
-	if startFlags.build {
-		startErr = docker.ComposeUpBuildWithProfile(s.ComposeDir, s.Profile)
-	} else {
-		startErr = docker.ComposeUpWithProfile(s.ComposeDir, s.Profile)
-	}
-	if startErr != nil {
-		return fmt.Errorf("failed to start site: %w", startErr)
-	}
-
-	// For compose sites, connect service to traefik network after starting
-	if s.Type == site.SiteTypeCompose && s.ComposeServiceName != "" {
-		cfg, err := config.Load()
-		if err != nil {
-			return err
-		}
-		if err := docker.ConnectServiceToNetwork(s.Dir, s.ComposeServiceName, cfg.NetworkName); err != nil {
-			if errors.Is(err, docker.ErrServiceNotRunning) {
-				ui.Dim("Service '%s' not running (may use Docker Compose profiles)", s.ComposeServiceName)
-			} else {
-				ui.Warn("Could not connect to traefik network: %v", err)
-				ui.Dim("Run manually: docker network connect %s <container_name>", cfg.NetworkName)
-			}
-		}
-	}
-
-	ui.Success("Site '%s' started", s.Name)
-	if d := s.Domain(); d != "" {
-		ui.Info("https://%s", d)
-	}
-	return nil
+	return lifecycleCmd{
+		lifecycleVerb: verbStart,
+		showURL:       true,
+		// Apply any pending edge-config changes from a binary upgrade before
+		// the first container starts, so a freshly-upgraded srv works without
+		// `srv install`.
+		onDockerReady: reconcileEdge,
+		run:           func(r *site.Runner, s *site.Site) error { return r.Start(s, startFlags.build) },
+	}.exec(args, startFlags.all)
 }
 
-// startAllSites starts all registered sites in parallel.
-func startAllSites() error {
-	sites, err := site.ListBasic()
-	if err != nil {
-		return err
+// reconcileEdge re-renders the edge config when the binary changed since the
+// last install. It may run from a batch worker, hence the Safe variants.
+func reconcileEdge() {
+	if reconciled, err := traefik.ReconcileVersion(Version); err != nil {
+		ui.SafeWarn("Edge config reconcile failed: %v", err)
+	} else if reconciled {
+		ui.SafeIndentedDim(0, "Reconciled edge config to srv %s", Version)
 	}
-
-	if len(sites) == 0 {
-		ui.Dim("No sites registered")
-		return nil
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	// Renew any expiring local certs before starting
-	for _, s := range sites {
-		if s.IsLocal && len(s.Domains) > 0 && !s.IsBroken {
-			renewLocalCertIfNeeded(s.Name, s.Domains, s.Wildcard)
-		}
-	}
-
-	ui.Info("Starting %d site(s)...", len(sites))
-	if err := runBatchSiteOperation(sites, "start", func(s *site.Site) error {
-		if s.DaemonServed {
-			return site.StartSite(s.Name, false)
-		}
-		// Reload per-site artifacts before compose up so label/Dockerfile
-		// edits land. Cheap when nothing changed (metadata-hash short-circuit).
-		if _, err := site.Reload(s.Name); err != nil {
-			return fmt.Errorf("reload: %w", err)
-		}
-		// Use ComposeDir for docker operations with profile if set
-		// Include --remove-orphans to clean up stale containers that may reference non-existent networks
-		if err := docker.ComposeQuietWithProfile(s.ComposeDir, s.Profile, "up", "-d", "--remove-orphans"); err != nil {
-			return err
-		}
-		// Connect compose sites to traefik network
-		if s.Type == site.SiteTypeCompose && s.ComposeServiceName != "" {
-			if err := docker.ConnectServiceToNetwork(s.Dir, s.ComposeServiceName, cfg.NetworkName); err != nil {
-				// Only log actual errors, not "service not running" (profiles)
-				if !errors.Is(err, docker.ErrServiceNotRunning) {
-					ui.SafeError("Could not connect %s to traefik network: %v", s.Name, err)
-				}
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	ui.Success("All sites started")
-	return nil
 }
 
 // =============================================================================
@@ -244,67 +109,10 @@ func init() {
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
-	// See runStart: daemon-served sites never touch Docker.
-	if !stopFlags.all {
-		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
-			ui.Info("Stopping %s...", s.Name)
-			if err := site.StopSite(s.Name); err != nil {
-				return err
-			}
-			ui.Success("Site '%s' stopped", s.Name)
-			return nil
-		}
-	}
-
-	if err := docker.EnsureRunning(); err != nil {
-		return err
-	}
-
-	if stopFlags.all {
-		return stopAllSites()
-	}
-
-	s, err := site.GetByName(args[0])
-	if err != nil {
-		return err
-	}
-
-	if s.IsBroken {
-		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
-	}
-
-	ui.Info("Stopping %s...", s.Name)
-	if err := docker.ComposeStop(s.ComposeDir); err != nil {
-		return fmt.Errorf("failed to stop site: %w", err)
-	}
-
-	ui.Success("Site '%s' stopped", s.Name)
-	return nil
-}
-
-// stopAllSites stops all registered sites in parallel.
-func stopAllSites() error {
-	sites, err := site.ListBasic()
-	if err != nil {
-		return err
-	}
-
-	if len(sites) == 0 {
-		ui.Dim("No sites registered")
-		return nil
-	}
-
-	ui.Info("Stopping %d site(s)...", len(sites))
-	if err := runBatchSiteOperation(sites, "stop", func(s *site.Site) error {
-		if s.DaemonServed {
-			return site.StopSite(s.Name)
-		}
-		return docker.ComposeStop(s.ComposeDir)
-	}); err != nil {
-		return err
-	}
-	ui.Success("All sites stopped")
-	return nil
+	return lifecycleCmd{
+		lifecycleVerb: verbStop,
+		run:           (*site.Runner).Stop,
+	}.exec(args, stopFlags.all)
 }
 
 // =============================================================================
@@ -343,84 +151,70 @@ func init() {
 }
 
 func runRestart(cmd *cobra.Command, args []string) error {
-	// See runStart: daemon-served sites never touch Docker.
-	if !restartFlags.all {
-		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
-			ui.Info("Restarting %s...", s.Name)
-			if err := site.RestartSite(s.Name, false); err != nil {
-				return err
-			}
-			ui.Success("Site '%s' restarted", s.Name)
-			return nil
-		}
-	}
-
-	if err := docker.EnsureRunning(); err != nil {
-		return err
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
-		return err
-	}
-
-	if restartFlags.all {
-		return restartAllSites()
-	}
-
-	s, err := site.GetByName(args[0])
-	if err != nil {
-		return err
-	}
-
-	if s.IsBroken {
-		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
-	}
-
-	if _, err := site.Reload(s.Name); err != nil {
-		return fmt.Errorf("reload site before restart: %w", err)
-	}
-
-	ui.Info("Restarting %s...", s.Name)
-	if restartFlags.build {
-		if err := docker.ComposeUpBuildWithProfile(s.ComposeDir, s.Profile); err != nil {
-			return fmt.Errorf("failed to rebuild and restart site: %w", err)
-		}
-	} else {
-		if err := docker.ComposeRestart(s.ComposeDir); err != nil {
-			return fmt.Errorf("failed to restart site: %w", err)
-		}
-	}
-
-	ui.Success("Site '%s' restarted", s.Name)
-	return nil
+	return lifecycleCmd{
+		lifecycleVerb: verbRestart,
+		run:           func(r *site.Runner, s *site.Site) error { return r.Restart(s, restartFlags.build) },
+	}.exec(args, restartFlags.all)
 }
 
-// restartAllSites restarts all registered sites in parallel.
-func restartAllSites() error {
-	sites, err := site.ListBasic()
-	if err != nil {
-		return err
-	}
+// =============================================================================
+// Shared lifecycle flow
+// =============================================================================
 
-	if len(sites) == 0 {
-		ui.Dim("No sites registered")
+// lifecycleVerb is how the CLI words one lifecycle operation.
+type lifecycleVerb struct {
+	base   string // "start": error messages
+	gerund string // "Starting": progress lines
+	past   string // "started": success lines
+}
+
+var (
+	verbStart   = lifecycleVerb{"start", "Starting", "started"}
+	verbStop    = lifecycleVerb{"stop", "Stopping", "stopped"}
+	verbRestart = lifecycleVerb{"restart", "Restarting", "restarted"}
+)
+
+// lifecycleCmd is one of `srv start|stop|restart`: the wording, and the
+// site.Runner method that does the work for a single site.
+type lifecycleCmd struct {
+	lifecycleVerb
+	showURL       bool   // print the site URL after a single-site success
+	onDockerReady func() // see site.Runner.OnDockerReady
+	run           func(r *site.Runner, s *site.Site) error
+}
+
+// exec runs the command for args[0], or for every registered site when all.
+func (c lifecycleCmd) exec(args []string, all bool) error {
+	r := &site.Runner{Quiet: all, OnDockerReady: c.onDockerReady}
+	if all {
+		sites, err := site.ListBasic()
+		if err != nil {
+			return err
+		}
+		if len(sites) == 0 {
+			ui.Dim("No sites registered")
+			return nil
+		}
+		ui.Info("%s %d site(s)...", c.gerund, len(sites))
+		if err := runBatchSiteOperation(sites, c.lifecycleVerb, func(s *site.Site) error { return c.run(r, s) }); err != nil {
+			return err
+		}
+		ui.Success("All sites %s", c.past)
 		return nil
 	}
 
-	ui.Info("Restarting %d site(s)...", len(sites))
-	if err := runBatchSiteOperation(sites, "restart", func(s *site.Site) error {
-		if s.DaemonServed {
-			return site.RestartSite(s.Name, false)
-		}
-		return docker.ComposeRestart(s.ComposeDir)
-	}); err != nil {
+	s, err := site.Require(args[0])
+	if err != nil {
 		return err
 	}
-	ui.Success("All sites restarted")
+	ui.Info("%s %s...", c.gerund, s.Name)
+	if err := c.run(r, s); err != nil {
+		return err
+	}
+	ui.Success("Site '%s' %s", s.Name, c.past)
+	if d := s.Domain(); c.showURL && d != "" {
+		ui.Info("https://%s", d)
+	}
 	return nil
 }
 
@@ -431,7 +225,7 @@ func restartAllSites() error {
 // runBatchSiteOperation runs an operation on multiple sites in parallel.
 // Each failure is printed inline as it happens; the returned error names the
 // failing sites so callers and tests can act on the set rather than just a count.
-func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site) error) error {
+func runBatchSiteOperation(sites []site.Site, verb lifecycleVerb, op func(*site.Site) error) error {
 	// Filter out broken sites
 	validSites := make([]site.Site, 0, len(sites))
 	for _, s := range sites {
@@ -458,9 +252,9 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 	for range workers {
 		wg.Go(func() {
 			for s := range siteChan {
-				ui.SafeIndentedDim(1, "%s %s...", opName, s.Name)
+				ui.SafeIndentedDim(1, "%s %s...", verb.gerund, s.Name)
 				if err := op(&s); err != nil {
-					ui.SafeError("Failed to %s %s: %v", opName, s.Name, err)
+					ui.SafeError("Failed to %s %s: %v", verb.base, s.Name, err)
 					failMu.Lock()
 					failed = append(failed, s.Name)
 					failMu.Unlock()
@@ -480,7 +274,7 @@ func runBatchSiteOperation(sites []site.Site, opName string, op func(*site.Site)
 
 	if len(failed) > 0 {
 		slices.Sort(failed)
-		return fmt.Errorf("failed to %s: %s", opName, strings.Join(failed, ", "))
+		return fmt.Errorf("failed to %s: %s", verb.base, strings.Join(failed, ", "))
 	}
 	return nil
 }

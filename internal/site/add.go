@@ -14,7 +14,6 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
-	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/validate"
 )
@@ -98,14 +97,11 @@ func (s *addSetup) typeLabel() string {
 // (bad input, file write failure); cert/DNS/start failures are non-fatal and
 // returned as AddResult.Warnings.
 func Add(opts AddOptions) (*AddResult, error) {
-	if err := docker.EnsureRunning(); err != nil {
-		return nil, err
-	}
-	cfg, err := config.Load()
+	// One Runner for the whole add: its precondition check doubles as the
+	// start step's, so the engine and network are probed once.
+	var r Runner
+	cfg, err := r.ready()
 	if err != nil {
-		return nil, err
-	}
-	if err := docker.EnsureInitialized(cfg.NetworkName); err != nil {
 		return nil, err
 	}
 
@@ -114,7 +110,7 @@ func Add(opts AddOptions) (*AddResult, error) {
 		return nil, err
 	}
 
-	writeWarnings, err := writeAddFiles(cfg, setup)
+	meta, writeWarnings, err := writeAddFiles(cfg, setup)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +121,12 @@ func Add(opts AddOptions) (*AddResult, error) {
 		res.Warnings = append(res.Warnings, issueLocalCert(setup.siteName, setup.allDomains(), opts.Wildcard)...)
 	}
 	if opts.Start {
-		res.Warnings = append(res.Warnings, startAfterAdd(cfg, setup)...)
+		// Everything Start would regenerate was just written, so bring the
+		// fresh artifacts live directly.
+		added, _ := siteFromMetadata(cfg, setup.siteName, &meta)
+		if err := r.Apply(&added); err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("start site: %v", err))
+		}
 	}
 	return res, nil
 }
@@ -327,7 +328,7 @@ func selectComposeService(s *addSetup, service, profile string) error {
 
 // writeAddFiles writes metadata.yml and the per-type artifacts. Warnings are
 // non-fatal observations (e.g. a preserved user-modified file on force re-add).
-func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err error) {
+func writeAddFiles(cfg *config.Config, s *addSetup) (meta SiteMetadata, warnings []string, err error) {
 	siteType := SiteTypeCompose
 	switch {
 	case s.isDockerfile:
@@ -341,7 +342,7 @@ func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err erro
 		port = s.dockerfileInfo.Port
 	}
 
-	meta := SiteMetadata{
+	meta = SiteMetadata{
 		Type:               siteType,
 		Domains:            s.allDomains(),
 		ProjectPath:        s.sitePath,
@@ -365,22 +366,22 @@ func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err erro
 	}
 
 	if err := WriteSiteMetadata(s.siteName, meta); err != nil {
-		return warnings, fmt.Errorf("write site metadata: %w", err)
+		return meta, warnings, fmt.Errorf("write site metadata: %w", err)
 	}
 
 	switch {
 	case s.daemonServed:
 		if err := writeDaemonRouteConfig(cfg, s.siteName, &meta); err != nil {
-			return warnings, fmt.Errorf("write traefik config: %w", err)
+			return meta, warnings, fmt.Errorf("write traefik config: %w", err)
 		}
 	case s.isDockerfile:
 		if err := WriteDockerfileSiteConfig(s.siteName, meta, s.dockerfileInfo, s.opts.Force); err != nil {
-			return warnings, fmt.Errorf("write Dockerfile site config: %w", err)
+			return meta, warnings, fmt.Errorf("write Dockerfile site config: %w", err)
 		}
 	case s.isStatic:
 		warnings, err = WriteStaticSiteConfig(s.siteName, meta, s.opts.Force)
 		if err != nil {
-			return warnings, fmt.Errorf("write static site config: %w", err)
+			return meta, warnings, fmt.Errorf("write static site config: %w", err)
 		}
 	default:
 		if err := traefik.WriteSiteRouteConfig(cfg, traefik.SiteRouteConfig{
@@ -392,10 +393,10 @@ func writeAddFiles(cfg *config.Config, s *addSetup) (warnings []string, err erro
 			Wildcard:    s.opts.Wildcard,
 			Listeners:   meta.Listeners,
 		}); err != nil {
-			return warnings, fmt.Errorf("write traefik config: %w", err)
+			return meta, warnings, fmt.Errorf("write traefik config: %w", err)
 		}
 	}
-	return warnings, nil
+	return meta, warnings, nil
 }
 
 // issueLocalCert registers DNS for every domain and issues the mkcert cert,
@@ -422,31 +423,6 @@ func issueLocalCert(siteName string, domains []string, wildcard bool) (warnings 
 	if renewed {
 		if err := traefik.UpdateDynamicConfig(); err != nil {
 			warnings = append(warnings, fmt.Sprintf("update Traefik config: %v", err))
-		}
-	}
-	return warnings
-}
-
-// startAfterAdd brings the new site's containers up. Best-effort warnings.
-func startAfterAdd(cfg *config.Config, s *addSetup) (warnings []string) {
-	if s.daemonServed {
-		// StartSite skips Docker for daemon-served sites: starting is just
-		// (re)rendering the Traefik route to the daemon's embedded server.
-		if err := StartSite(s.siteName, false); err != nil {
-			return append(warnings, fmt.Sprintf("start site: %v", err))
-		}
-		return warnings
-	}
-	composeDir := s.sitePath
-	if s.isStatic || s.isDockerfile {
-		composeDir = SiteConfigDir(cfg, s.siteName)
-	}
-	if err := docker.ComposeUpWithProfile(composeDir, s.profile); err != nil {
-		return append(warnings, fmt.Sprintf("start site: %v", err))
-	}
-	if !s.isStatic && !s.isDockerfile && s.composeServiceName != "" {
-		if err := docker.ConnectServiceToNetwork(s.sitePath, s.composeServiceName, cfg.NetworkName); err != nil && !errors.Is(err, docker.ErrServiceNotRunning) {
-			warnings = append(warnings, fmt.Sprintf("connect service to traefik network: %v", err))
 		}
 	}
 	return warnings

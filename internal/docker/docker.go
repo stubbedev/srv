@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -123,6 +124,16 @@ func SwapNewClientOK() func() {
 // EnsureRunning and EnsureInitialized to pass.
 func SwapNewClientWithNetwork(name string) func() {
 	return SwapNewClient(func() (sdkClient, error) {
+		return networkFakeSDK{noopSDK: noopSDK{}, networkName: name}, nil
+	})
+}
+
+// SwapNewClientWithNetworkCounted is SwapNewClientWithNetwork that also counts
+// every client created, so tests can assert how many engine round trips a
+// code path costs.
+func SwapNewClientWithNetworkCounted(name string, calls *atomic.Int64) func() {
+	return SwapNewClient(func() (sdkClient, error) {
+		calls.Add(1)
 		return networkFakeSDK{noopSDK: noopSDK{}, networkName: name}, nil
 	})
 }
@@ -255,20 +266,35 @@ func ComposeUpForceRecreate(dir string) error {
 // ComposeUpWithProfile runs docker compose up -d with a specific profile.
 // See ComposeUp for why --remove-orphans is deliberately omitted.
 func ComposeUpWithProfile(dir, profile string) error {
-	args := []string{"up", "-d"}
-	if profile != "" {
-		return Compose(dir, append([]string{"--profile", profile}, args...)...)
-	}
-	return Compose(dir, args...)
+	return Compose(dir, ComposeUpArgs(profile, false)...)
 }
 
 // ComposeUpBuildWithProfile runs docker compose up -d --build with a specific profile.
 func ComposeUpBuildWithProfile(dir, profile string) error {
-	args := []string{"up", "-d", "--build"}
+	return Compose(dir, ComposeUpArgs(profile, true)...)
+}
+
+// ComposeUpArgs returns the `compose` arguments for `up -d`, preceded by
+// `--profile <profile>` when profile is set and followed by `--build` when
+// build is true. It is the single definition of how srv brings a stack up;
+// see ComposeUp for why --remove-orphans is never part of it.
+func ComposeUpArgs(profile string, build bool) []string {
+	n := 2
 	if profile != "" {
-		return Compose(dir, append([]string{"--profile", profile}, args...)...)
+		n += 2
 	}
-	return Compose(dir, args...)
+	if build {
+		n++
+	}
+	args := make([]string, 0, n)
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	args = append(args, "up", "-d")
+	if build {
+		args = append(args, "--build")
+	}
+	return args
 }
 
 // ComposeDown runs docker compose down in the specified directory. It does NOT
@@ -331,6 +357,9 @@ func SwapComposePrefixedExec(fn func(dir, prefix string, args ...string) error) 
 // stderr through a writer that prefixes every line with `[prefix] `. Used by
 // `srv logs --all` to multiplex many sites into one terminal.
 func ComposePrefixed(dir, prefix string, args ...string) error {
+	if dir == "" {
+		return ErrNoComposeDir
+	}
 	return composePrefixedExec(dir, prefix, args...)
 }
 
@@ -474,20 +503,28 @@ func SwapComposeExec(fn func(dir string, quiet bool, args ...string) error) func
 // docker compose is intentionally kept as a shell-out: the Docker SDK has no
 // compose support; compose-go can parse manifests but cannot orchestrate them.
 func Compose(dir string, args ...string) error {
-	return composeExec(dir, false, args...)
+	return runCompose(dir, false, args)
 }
 
 // ComposeQuiet runs docker compose without stdout/stderr (for parallel execution).
 func ComposeQuiet(dir string, args ...string) error {
-	return composeExec(dir, true, args...)
+	return runCompose(dir, true, args)
 }
 
-// ComposeQuietWithProfile runs docker compose with a profile without stdout/stderr.
-func ComposeQuietWithProfile(dir, profile string, args ...string) error {
-	if profile == "" {
-		return ComposeQuiet(dir, args...)
+// ErrNoComposeDir is returned when a compose command is asked to run without a
+// stack directory. An empty cmd.Dir means the caller's working directory, so
+// running anyway would act on whatever compose file happens to live there (or
+// fail with compose's opaque "no configuration file provided") — e.g. for a
+// daemon-served site, which has no stack at all.
+var ErrNoComposeDir = errors.New("docker compose: no stack directory (site has no containers)")
+
+// runCompose is the single gate every `docker compose` invocation passes
+// through, so no caller can run compose against an unset directory.
+func runCompose(dir string, quiet bool, args []string) error {
+	if dir == "" {
+		return ErrNoComposeDir
 	}
-	return ComposeQuiet(dir, append([]string{"--profile", profile}, args...)...)
+	return composeExec(dir, quiet, args...)
 }
 
 // composePSOutput is the seam tests override to provide canned `docker compose

@@ -56,22 +56,30 @@ func (s *Site) Domain() string {
 	return s.Domains[0]
 }
 
-// loadSiteFromDir loads site information from a site config directory.
-// Returns the site and whether it needs a status check.
-func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
-	s := Site{
-		Name: entry.Name(),
-	}
+// routed reports whether a daemon-served site's Traefik route was in place
+// when the site was loaded — its equivalent of a running container.
+func (s *Site) routed() bool {
+	return s.Status == constants.StatusRunning
+}
 
-	// Read site metadata
-	meta, err := ReadSiteMetadata(entry.Name())
+// loadSite loads the site whose config directory is sites/<name>.
+// Returns the site and whether it needs a status check.
+func loadSite(cfg *config.Config, name string) (Site, bool) {
+	meta, err := ReadSiteMetadata(name)
 	if err != nil || meta == nil {
 		// No valid metadata - skip this directory
-		s.IsBroken = true
-		return s, false
+		return Site{Name: name, IsBroken: true}, false
 	}
+	return siteFromMetadata(cfg, name, meta)
+}
 
-	s.Domains = append([]string(nil), meta.Domains...)
+// siteFromMetadata builds the Site for name from its parsed metadata, taking
+// over meta's slices (callers hand in a freshly read or built value they no
+// longer mutate). Returns the site and whether it needs a container status
+// check.
+func siteFromMetadata(cfg *config.Config, name string, meta *SiteMetadata) (Site, bool) {
+	s := Site{Name: name}
+	s.Domains = meta.Domains
 	s.IsLocal = meta.IsLocal
 	s.Wildcard = meta.Wildcard
 	s.Type = meta.Type
@@ -80,7 +88,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 	s.Profile = meta.Profile
 	s.Port = meta.Port
 	s.Dir = meta.ProjectPath
-	s.ExtraNetworks = append([]string(nil), meta.ExtraNetworks...)
+	s.ExtraNetworks = meta.ExtraNetworks
 	s.DaemonServed = meta.DaemonServed
 	s.SPA = meta.SPA
 	s.Cache = meta.Cache
@@ -103,7 +111,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 		if meta.DaemonServed {
 			// No containers exist, so "running" simply means the Traefik
 			// route config is in place; no Docker probe is needed.
-			if _, err := os.Stat(traefik.SiteRouteConfigPath(cfg, entry.Name())); err == nil {
+			if _, err := os.Stat(traefik.SiteRouteConfigPath(cfg, name)); err == nil {
 				s.Status = constants.StatusRunning
 			} else {
 				s.Status = constants.StatusStopped
@@ -111,7 +119,7 @@ func loadSiteFromDir(cfg *config.Config, entry os.DirEntry) (Site, bool) {
 			return s, false
 		}
 		// srv-managed sites have their compose file in the srv config dir
-		s.ComposeDir = SiteConfigDir(cfg, entry.Name())
+		s.ComposeDir = SiteConfigDir(cfg, name)
 	default:
 		// Compose sites use the project directory
 		s.ComposeDir = meta.ProjectPath
@@ -212,7 +220,7 @@ func ListBasic() ([]Site, error) {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") {
 			continue
 		}
-		site, _ := loadSiteFromDir(cfg, entry)
+		site, _ := loadSite(cfg, entry.Name())
 		sites = append(sites, site)
 	}
 	return sites, nil
@@ -259,37 +267,34 @@ func Get(name string) (*Site, error) {
 // It reads only that site's metadata and fetches its container status directly,
 // making it significantly faster than Get when the full list is not needed.
 func GetByName(name string) (*Site, error) {
+	return getByName(name, true)
+}
+
+// getByName loads one site: a stat of its config dir plus its metadata read.
+// probe adds the container status lookup, a Docker API round trip that
+// lifecycle operations skip because they act on the site regardless.
+func getByName(name string, probe bool) (*Site, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	// Verify the site config directory exists.
-	siteDir := SiteConfigDir(cfg, name)
-	if _, err := os.Stat(siteDir); err != nil {
+	fi, err := os.Stat(SiteConfigDir(cfg, name))
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("site not found: %s", name)
 		}
 		return nil, err
 	}
-
-	// Synthesise a DirEntry-like object using the site name.
-	entries, err := os.ReadDir(filepath.Dir(siteDir))
-	if err != nil {
-		return nil, err
+	if !fi.IsDir() {
+		return nil, fmt.Errorf("site not found: %s", name)
 	}
 
-	for _, entry := range entries {
-		if entry.Name() == name && entry.IsDir() {
-			s, needsStatus := loadSiteFromDir(cfg, entry)
-			if needsStatus {
-				s.Status = siteContainerStatus(s)
-			}
-			return &s, nil
-		}
+	s, needsStatus := loadSite(cfg, name)
+	if probe && needsStatus {
+		s.Status = siteContainerStatus(s)
 	}
-
-	return nil, fmt.Errorf("site not found: %s", name)
+	return &s, nil
 }
 
 // ResolvePath resolves a site path to an absolute path.

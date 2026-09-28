@@ -665,27 +665,49 @@ func TestComposeRestart(t *testing.T) {
 	}
 }
 
-func TestComposeQuietWithProfile(t *testing.T) {
-	calls := captureCompose(t, nil)
-	if err := ComposeQuietWithProfile("/x", "dev", "ps"); err != nil {
-		t.Fatal(err)
-	}
-	joined := strings.Join((*calls)[0].args, " ")
-	if !strings.Contains(joined, "--profile dev") {
-		t.Errorf("missing profile: %v", (*calls)[0].args)
-	}
-	if !(*calls)[0].quiet {
-		t.Error("quiet expected")
+func TestComposeUpArgs(t *testing.T) {
+	for _, tc := range []struct {
+		profile string
+		build   bool
+		want    string
+	}{
+		{"", false, "up -d"},
+		{"", true, "up -d --build"},
+		{"dev", false, "--profile dev up -d"},
+		{"dev", true, "--profile dev up -d --build"},
+	} {
+		got := ComposeUpArgs(tc.profile, tc.build)
+		if strings.Join(got, " ") != tc.want {
+			t.Errorf("ComposeUpArgs(%q, %v) = %v, want %q", tc.profile, tc.build, got, tc.want)
+		}
+		// Sized exactly: no append past the initial allocation.
+		if cap(got) != len(got) {
+			t.Errorf("ComposeUpArgs(%q, %v): cap %d != len %d", tc.profile, tc.build, cap(got), len(got))
+		}
 	}
 }
 
-func TestComposeQuietWithProfileEmptyDelegates(t *testing.T) {
+// An empty stack dir would run compose in the caller's working directory —
+// the daemon-served-site bug. Every entry point must refuse it before exec.
+func TestComposeRefusesEmptyDir(t *testing.T) {
 	calls := captureCompose(t, nil)
-	if err := ComposeQuietWithProfile("/x", "", "ps"); err != nil {
-		t.Fatal(err)
+	t.Cleanup(SwapComposePrefixedExec(func(string, string, ...string) error {
+		t.Error("ComposePrefixed reached exec with an empty dir")
+		return nil
+	}))
+	for name, call := range map[string]func() error{
+		"Compose":         func() error { return Compose("", "ps") },
+		"ComposeQuiet":    func() error { return ComposeQuiet("", "ps") },
+		"ComposeUp":       func() error { return ComposeUp("") },
+		"ComposeStop":     func() error { return ComposeStop("") },
+		"ComposePrefixed": func() error { return ComposePrefixed("", "x", "logs") },
+	} {
+		if err := call(); !errors.Is(err, ErrNoComposeDir) {
+			t.Errorf("%s(\"\") = %v, want ErrNoComposeDir", name, err)
+		}
 	}
-	if strings.Contains(strings.Join((*calls)[0].args, " "), "--profile") {
-		t.Errorf("empty profile should not add flag")
+	if len(*calls) != 0 {
+		t.Errorf("compose exec reached %d time(s) with an empty dir", len(*calls))
 	}
 }
 

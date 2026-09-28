@@ -7,12 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/site"
 )
 
 func TestRunBatchSiteOperationEmpty(t *testing.T) {
-	if err := runBatchSiteOperation(nil, "start", func(*site.Site) error { return nil }); err != nil {
+	if err := runBatchSiteOperation(nil, verbStart, func(*site.Site) error { return nil }); err != nil {
 		t.Errorf("nil sites -> %v", err)
 	}
 }
@@ -23,7 +25,7 @@ func TestRunBatchSiteOperationSkipsBroken(t *testing.T) {
 		{Name: "broken", IsBroken: true},
 	}
 	called := 0
-	if err := runBatchSiteOperation(sites, "start", func(*site.Site) error {
+	if err := runBatchSiteOperation(sites, verbStart, func(*site.Site) error {
 		called++
 		return nil
 	}); err != nil {
@@ -40,7 +42,7 @@ func TestRunBatchSiteOperationCollectsFailures(t *testing.T) {
 		{Name: "b"},
 		{Name: "c"},
 	}
-	err := runBatchSiteOperation(sites, "start", func(s *site.Site) error {
+	err := runBatchSiteOperation(sites, verbStart, func(s *site.Site) error {
 		if s.Name == "b" {
 			return errors.New("fail")
 		}
@@ -129,25 +131,25 @@ func TestRunRestartDockerDown(t *testing.T) {
 	}
 }
 
-func TestStartAllSitesEmpty(t *testing.T) {
+// --all over an empty registry is a no-op for every verb, and must not need
+// the engine: nothing would be started.
+func TestLifecycleAllEmpty(t *testing.T) {
 	setupSrvRoot(t)
-	t.Cleanup(docker.SwapNewClientOK())
-	if err := startAllSites(); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
-func TestStopAllSitesEmpty(t *testing.T) {
-	setupSrvRoot(t)
-	if err := stopAllSites(); err != nil {
-		t.Errorf("err: %v", err)
-	}
-}
-
-func TestRestartAllSitesEmpty(t *testing.T) {
-	setupSrvRoot(t)
-	if err := restartAllSites(); err != nil {
-		t.Errorf("err: %v", err)
+	t.Cleanup(docker.SwapNewClientErr(errors.New("offline")))
+	for name, c := range map[string]struct {
+		all *bool
+		run func(*cobra.Command, []string) error
+	}{
+		"start":   {&startFlags.all, runStart},
+		"stop":    {&stopFlags.all, runStop},
+		"restart": {&restartFlags.all, runRestart},
+	} {
+		*c.all = true
+		err := c.run(nil, nil)
+		*c.all = false
+		if err != nil {
+			t.Errorf("%s --all with no sites: %v", name, err)
+		}
 	}
 }
 
