@@ -17,19 +17,17 @@ What you get:
 
 ## When srv is (and isn't) worth it
 
-srv is an **edge layer**: Traefik, mkcert/ACME, a DNS server, and a daemon
-wired together with a CLI that manages them per-site. It is not a PaaS — no
-runtime, no buildpack, no app manager.
+srv is an **edge layer** — Traefik, mkcert/ACME, a DNS server, and a
+daemon behind one per-site CLI — not a PaaS: no runtime, no buildpack, no
+app manager.
 
-Worth it when you have a dev box or a server fronting multiple sites, apps,
-`localhost:PORT` dev servers, and redirects under one TLS edge — especially a
-multi-tenant app served under many hostnames (one SAN cert, one router, many
-`Host` rules).
+Worth it when one box fronts many sites, apps, `localhost:PORT` dev
+servers, and redirects under a single TLS edge — especially a multi-tenant
+app under many hostnames (one SAN cert, one router, many `Host` rules).
 
 Overkill for a single project (run Caddy or FrankenPHP with a self-signed
-cert directly), or if you already have a reverse-proxy setup you're happy
-with (nginx-proxy, Caddy, bare Traefik, Kubernetes Ingress). srv overlaps
-with those; it doesn't layer on top.
+cert) or when you're happy with nginx-proxy, Caddy, bare Traefik, or
+Kubernetes Ingress. srv overlaps with those; it doesn't layer on top.
 
 ## Installation
 
@@ -64,16 +62,15 @@ install-script or manual-download only.
 - A container runtime with a Docker-compatible API and Compose v2 — Docker,
   Podman, Colima, OrbStack or Rancher Desktop (see [Container runtimes](#container-runtimes)).
   Traefik runs as a container even for `--daemon` static sites.
-- Ports 80 and 443 for Traefik (see the Podman note below for rootless engines)
-- Nothing else: the [mkcert](https://github.com/FiloSottile/mkcert) engine is
-  vendored into srv (same CAROOT layout as the mkcert tool), and DNS is served
-  by an embedded resolver inside the srv daemon on `127.0.0.1:15353` — no
-  dnsmasq container, no privileged DNS port. `srv install` points your system
-  resolver (systemd-resolved, NetworkManager, or macOS) at it once, with a
-  single sudo prompt. On systemd-resolved it also checks that
-  `/etc/resolv.conf` actually sends lookups through resolved's stub; if it
-  links to resolved's upstream list instead, `srv install --yes` re-points it
-  (`srv doctor` shows the fix either way).
+- Ports 80 and 443 for Traefik (rootless engines: see the Podman note below)
+- Nothing else: mkcert is vendored in (same CAROOT layout as the tool), and
+  DNS is an embedded resolver in the daemon on `127.0.0.1:15353` — no
+  dnsmasq container, no privileged port. `srv install` points your system
+  resolver (systemd-resolved, NetworkManager, or macOS) at it with a single
+  sudo prompt; on systemd-resolved it also verifies `/etc/resolv.conf`
+  sends lookups through resolved's stub, and `srv install --yes` re-points
+  it if it links to the upstream list instead (`srv doctor` shows the fix
+  either way).
 
 ## Quick start
 
@@ -99,12 +96,11 @@ open.
 
 ## Container runtimes
 
-srv needs one thing from a container runtime: a **Docker-compatible API
-endpoint** (to create the shared network, inspect containers, pull images —
-Traefik watches labels through it) plus **Compose v2**, which writes the
-`com.docker.compose.*` labels srv finds containers by (`podman compose`
-delegates to Compose v2 and is fine; the Python `podman-compose` is not).
-`srv doctor` checks both.
+srv needs a **Docker-compatible API endpoint** from the runtime (shared
+network, container inspection, image pulls — Traefik watches labels through
+it) plus **Compose v2**, whose `com.docker.compose.*` labels srv finds
+containers by (`podman compose` delegates to Compose v2 and is fine; the
+Python `podman-compose` is not). `srv doctor` checks both.
 
 With no `container_engine` key set, srv probes for a runtime that is actually
 usable here — CLI on `$PATH` and API socket present — in this order:
@@ -124,11 +120,11 @@ If nothing is detectable, srv falls back to Docker. To pin one instead:
 container_engine: podman   # auto (default), docker, colima, orbstack, rancher-desktop
 ```
 
-**`DOCKER_HOST` beats everything.** If it is exported, srv uses that endpoint
-verbatim — which is also how you reach anything not in the table (a remote
-daemon, a rootless socket in an odd place, a Docker-API shim). Otherwise srv
-exports `DOCKER_HOST` itself from whatever it resolved, so the Docker SDK and
-Compose v2 follow the same choice, and bind-mounts the socket into Traefik.
+**`DOCKER_HOST` beats everything.** If exported, srv uses that endpoint
+verbatim — also how you reach anything not in the table (a remote daemon, a
+rootless socket in an odd place, a Docker-API shim). Otherwise srv exports
+`DOCKER_HOST` from whatever it resolved, so the Docker SDK and Compose v2
+follow the same choice, and bind-mounts the socket into Traefik.
 
 **nerdctl and Finch are not supported** — containerd's socket is a different
 protocol, not a Docker-compatible API. Put a Docker-API shim in front and
@@ -201,17 +197,15 @@ compose implementation, and this port floor when it applies.
 
 ## `srv add`
 
-Register a new site and generate its routing. The site type is
-auto-detected from the project directory:
+Register a new site and generate its routing. The type is auto-detected:
 
 1. **Compose** — the path contains a `docker-compose.yml`
 2. **Dockerfile** — the path contains a `Dockerfile`
-3. **Static** — otherwise the directory is served as static files (nginx, or
-   the srv daemon itself with `--daemon`)
+3. **Static** — otherwise, served as static files (nginx, or the daemon
+   itself with `--daemon`)
 
-If you point srv at a project that needs a runtime (PHP, Node, Ruby,
-Python, …) but carries neither file, it is served as a static site. Drop in
-a Dockerfile or docker-compose.yml to run the app code.
+A runtime project (PHP, Node, Ruby, Python, …) with neither file is served
+static — drop in a Dockerfile or docker-compose.yml to run the app code.
 
 ```bash
 srv add PATH [flags]
@@ -252,28 +246,25 @@ srv add ./mixed-project --domain x.test --local --type static
 
 ## Static sites
 
-For directories without a `docker-compose.yml` or `Dockerfile`, srv by
-default generates an nginx (`nginx:alpine`) container that serves the
-directory with:
+For directories without a `docker-compose.yml` or `Dockerfile`, srv
+generates an nginx (`nginx:alpine`) container serving the directory with:
 
 - SPA routing (fallback to `/index.html`) and asset caching, both configurable
 - Optional permissive CORS headers and a custom `404.html`
 - Hidden-file and sensitive-extension blocks (`.env`, `.git`, `.htaccess`, …)
 - gzip compression and standard security headers
 
-With `--daemon`, srv skips the container entirely: the daemon's embedded
-HTTP server hosts the site on `127.0.0.1:15380` and multiplexes every
-daemon-served site by `Host` header. It mirrors the nginx semantics above,
-`docker compose` is never invoked (start/stop just add or remove the
-Traefik route file), and `srv logs SITE` shows per-request access logs
-straight from the daemon log. `--port` and `--volume` don't apply — there
-is no container.
+With `--daemon` there is no container: the daemon's embedded HTTP server
+hosts the site on `127.0.0.1:15380`, multiplexing daemon-served sites by
+`Host` header with the same semantics. `docker compose` is never invoked
+(start/stop just add or remove the Traefik route file), `srv logs SITE`
+shows per-request access logs, and `--port`/`--volume` don't apply.
 
 ## Dockerfile and compose sites (bring your own runtime)
 
 Any project root with a `Dockerfile` is a dockerfile site; any root with a
-`docker-compose.yml` is a compose site. srv attaches Traefik routing and
-leaves your files alone — it never generates or edits them.
+`docker-compose.yml`, a compose site. srv attaches Traefik routing and
+never generates or edits your files.
 
 ### Worked example: Laravel with local HTTPS
 
@@ -310,8 +301,8 @@ srv add . --domain mylaravel.test --local
 
 srv detects the compose file, mints a mkcert cert, registers the hostname
 with its DNS server, attaches routing labels to the `app` service, and runs
-`docker compose up -d`. For host-side MySQL/Redis on the host's loopback,
-point `.env` at `host.docker.internal` — see
+`docker compose up -d`. For MySQL/Redis on the host, point `.env` at
+`host.docker.internal` — see
 [Talking to host services from inside a container](#talking-to-host-services-from-inside-a-container).
 
 ## Proxies (non-Docker upstreams)
@@ -333,12 +324,10 @@ All proxies use local SSL (mkcert) and register with srv's DNS server.
 
 ## Host-to-URL redirects
 
-301 (permanent, default) or 302 (`--temporary`). The request path and query
-string are appended to the target, so
-`https://jira.example.com/browse/X?y=1` lands on
-`https://jira.myapp.com/browse/X?y=1`. A mkcert-signed certificate is
-provisioned for the source domain so browsers follow the redirect without a
-TLS warning.
+301 (permanent, default) or 302 (`--temporary`). Path and query are
+appended to the target, so `https://jira.example.com/browse/X?y=1` lands
+on `https://jira.myapp.com/browse/X?y=1`, and a mkcert cert for the source
+domain keeps the browser from warning before the redirect.
 
 ```bash
 srv redirect add --domain jira.example.com --to https://jira.myapp.com
@@ -359,9 +348,9 @@ srv redirect add --domain jira.example.com.test --to jira.myapp.com --dns-only
 ```
 
 The client never sees an HTTP 301 — it connects straight to the target's IP
-with `Host: jira.example.com.test`. Whether the visible URL changes depends
-on what the backend does with that `Host:` header. When the target's IP
-changes, run `srv redirect reload` to re-resolve.
+with the original `Host:` header, so whether the visible URL changes
+depends on the backend. When the target's IP changes, run
+`srv redirect reload` to re-resolve.
 
 | | `--dns-only` | default (HTTP 301/302) |
 |---|---|---|
@@ -388,9 +377,9 @@ the DNS server; the Traefik router OR-joins every `Host` rule.
 
 ## Internal plain-HTTP listener
 
-Container-to-host calls often want `https://myapp.test` from another
-container whose client doesn't trust the mkcert CA. srv exposes a second
-Traefik entrypoint on `:88` that serves the same routers without TLS:
+Code inside a container often wants `https://myapp.test` from a client
+that doesn't trust the mkcert CA. srv exposes a second Traefik entrypoint
+on `:88` serving the same routers without TLS:
 
 ```bash
 srv add ./my-app --domain app.test --local --internal-http   # at add time
@@ -430,13 +419,13 @@ emitted as a per-site Traefik file-provider config at
 
 ## Talking to host services from inside a container
 
-App code in a container has its own loopback namespace, so
-`DB_HOST=127.0.0.1` points at the app container itself, not at MySQL on the
-host. Three escape hatches:
+App code in a container has its own loopback, so `DB_HOST=127.0.0.1`
+points at the app container, not at MySQL on the host. Three escape
+hatches:
 
 **(a) Host services on the loopback → `host.docker.internal`.** Add
 `extra_hosts: ["host.docker.internal:host-gateway"]` to your
-`docker-compose.yml` and rewrite each affected `.env` entry
+`docker-compose.yml` and point `.env` entries at it
 (`DB_HOST=host.docker.internal`). `srv doctor` warns when it finds
 `*_HOST=127.0.0.1`-style entries in container-backed sites.
 
@@ -465,24 +454,21 @@ project bind. `srv volume list <site>` and `srv volume remove <site>
 
 ## Daemon
 
-The daemon is a user service (systemd user unit or launchd agent) that runs
-the shared infrastructure and keeps sites in sync:
+The daemon is a user service (systemd user unit or launchd agent) running
+the shared infrastructure and keeping sites in sync:
 
 - **Hot reload** — watches every `~/.config/srv/sites/<name>/metadata.yml`
   and re-applies changes within ~300ms (debounced across editor saves):
-  certs refresh, DNS updates, routing regenerates. Hand-edit the YAML, no
-  restart command needed.
+  certs refresh, DNS updates, routing regenerates. Hand-edit the YAML; no
+  restart needed.
 - **Docker events** — connects containers started outside srv (e.g. a bare
   `docker compose up`) to the srv network.
-- **Embedded DNS** — serves all registered local domains on
-  `127.0.0.1:15353`.
-- **Embedded static server** — hosts `--daemon` static sites on
-  `127.0.0.1:15380`.
-- **Single instance** — the daemon takes a lock on `<root>/daemon.lock`:
-  however many sites and containers you run, one daemon serves them all. A
-  second `daemon start --foreground` refuses, and a standalone `srv dnsd` /
-  `srv httpd` names the daemon as the port holder instead of failing with a
-  bare "address already in use".
+- **Embedded DNS** — registered local domains on `127.0.0.1:15353`.
+- **Embedded static server** — `--daemon` sites on `127.0.0.1:15380`.
+- **Single instance** — one daemon serves every site and container, gated
+  by a lock on `<root>/daemon.lock`. A second `daemon start --foreground`
+  refuses, and a standalone `srv dnsd` / `srv httpd` names the daemon as
+  the port holder instead of failing with a bare "address already in use".
 
 ```bash
 srv daemon start      # --foreground to run in the foreground, --no-watch to disable hot reload
@@ -522,14 +508,14 @@ srv import valet --list-sites
 ```
 
 Reads every Valet nginx config (`~/.valet` or `~/.config/valet`, whichever
-has content), resolves each host to its project directory via parked paths
-and `Sites/` symlinks, folds hosts sharing a project root into one
-`srv add --alias …` call, and maps proxy passes, `:88` listeners, path
-splits, regex rewrites, and fallback blocks onto the matching srv commands.
-`--skip` records decisions in `~/.config/srv/import-decisions.yml`.
+has content), resolves each host to its project via parked paths and
+`Sites/` symlinks, folds hosts sharing a root into one `srv add --alias`
+call, and maps proxy passes, `:88` listeners, path splits, regex rewrites,
+and fallback blocks onto the matching srv commands. `--skip` records
+decisions in `~/.config/srv/import-decisions.yml`.
 
-**PHP sites** are emitted as commented-out `srv add` lines: srv does not
-manage runtimes, so each project needs a user-provided Dockerfile or
+**PHP sites** are emitted as commented-out `srv add` lines: srv doesn't
+manage runtimes, so each project needs a Dockerfile or
 docker-compose.yml before the line can run.
 
 ## Metrics (Prometheus + Grafana)
@@ -551,17 +537,16 @@ dashboard ID 17347 for a per-router Traefik overview.
 ## MCP server
 
 `srv mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
-server so AI agents can drive srv the same way a human does from the CLI —
-inspecting and mutating sites, proxies, redirects, routes, networks, and
-volumes.
+server so AI agents can drive srv like the CLI does — sites, proxies,
+redirects, routes, networks, and volumes.
 
 **The tool surface is lazy-loaded.** At startup the server advertises only
-`version` and `srv_activate`, so srv costs no context in sessions that never
-touch it. When the agent needs srv, `srv_activate(group="read")` unlocks
-inspection and diagnostics, `srv_activate(group="write")` (the default)
-also unlocks every mutating tool. Activation lasts for the session;
-destructive tools still gate on confirmation regardless of tier. The full
-tool table is generated below.
+`version` and `srv_activate`, so srv costs no context in sessions that
+never touch it. `srv_activate(group="read")` unlocks inspection and
+diagnostics; `srv_activate(group="write")` (the default) also unlocks every
+mutating tool. Activation lasts for the session; destructive tools still
+gate on confirmation regardless of tier. The full tool table is generated
+below.
 
 **Transports:**
 
@@ -575,11 +560,10 @@ tool table is generated below.
   srv mcp --http=0.0.0.0:9000    # bind elsewhere; --http-path=/foo to remap
   ```
 
-  Each HTTP session keeps its own activation state. Per-request workspace
-  context (anchoring relative paths in `add_site`/`add_volume`) comes from
-  the client's MCP roots or an `X-Repo-Root` header. Mutating calls are
-  serialized across clients; each call is bounded by `--tool-timeout`
-  (default 10m).
+  Each HTTP session keeps its own activation state. Workspace context for
+  relative paths in `add_site`/`add_volume` comes from the client's MCP
+  roots or an `X-Repo-Root` header. Mutating calls are serialized across
+  clients; each is bounded by `--tool-timeout` (default 10m).
 
 The HTTP endpoint binds **loopback with no auth** — it mutates a privileged
 Traefik edge, so it trusts local processes only. Put it behind a reverse
@@ -648,11 +632,10 @@ Available tools, by tier:
 
 ## Declarative config files
 
-Every site, proxy, and redirect lives in a single yaml file under
-`~/.config/srv/`. The daemon watches them and re-applies changes within
-~300ms. The field reference below is generated from the Go structs (the
-same source as the published [JSON Schemas](schemas/)), so it always
-matches the binary.
+Every site, proxy, and redirect lives in one yaml file under
+`~/.config/srv/`, watched by the daemon and re-applied within ~300ms. The
+field reference below is generated from the same Go structs as the
+published [JSON Schemas](schemas/), so it always matches the binary.
 
 <!-- BEGIN:config -->
 #### Site — `metadata.yml`
@@ -731,19 +714,17 @@ is_local: true
 
 - **Traefik** (pinned `v3.7`) terminates TLS on :80/:443 and routes by
   `Host` rule from generated file-provider configs in
-  `~/.config/srv/traefik/conf/`. The dashboard is on
-  `http://127.0.0.1:8080/dashboard/`.
-- **Local SSL (`--local`)**: certificates from srv's vendored
-  [mkcert](https://github.com/FiloSottile/mkcert) CA — trusted in your
-  browser without warnings.
-- **Production SSL**: Let's Encrypt via Traefik's ACME resolver; renewal is
-  automatic.
-- **DNS**: the daemon's embedded server answers every registered local
-  domain with `127.0.0.1` (any TLD works) on `127.0.0.1:15353` and forwards
-  everything else upstream (`upstream_dns`, Google DNS by default).
-  `srv install` points the system resolver at it; the underlying zone files
-  stay in dnsmasq format and remain hand-editable (watched, and re-read on
-  SIGHUP).
+  `~/.config/srv/traefik/conf/`. Dashboard: `http://127.0.0.1:8080/dashboard/`.
+- **Local SSL (`--local`)** — certificates from srv's vendored
+  [mkcert](https://github.com/FiloSottile/mkcert) CA, trusted without
+  browser warnings.
+- **Production SSL** — Let's Encrypt via Traefik's ACME resolver, renewed
+  automatically.
+- **DNS** — the daemon's embedded server answers every registered local
+  domain with `127.0.0.1` (any TLD) on `127.0.0.1:15353` and forwards the
+  rest upstream (`upstream_dns`, Google DNS by default). `srv install`
+  points the system resolver at it; zone files stay in hand-editable
+  dnsmasq format (watched, re-read on SIGHUP).
 
 ## Configuration paths
 
@@ -780,9 +761,9 @@ your project directories (`srv paths` prints the main ones).
 
 ## Troubleshooting
 
-**SSL not trusted in browser?** Restart your browser after adding your
-first local site — the mkcert CA is installed system-wide but browsers only
-pick it up on restart.
+**SSL not trusted in browser?** Restart the browser after adding your
+first local site — the mkcert CA is installed system-wide, but browsers
+only pick it up on restart.
 
 **Site not accessible?**
 
@@ -792,9 +773,9 @@ srv logs mysite
 ```
 
 **DNS not resolving?** `srv doctor` reports whether srv's DNS server is up
-and whether your system resolver actually routes through it. `srv install`
-re-runs the resolver setup (installs upgraded from older srv releases may
-still point at the retired container-era port).
+and whether the system resolver routes through it; `srv install` re-runs
+the resolver setup (upgrades from older releases may still point at the
+retired container-era port).
 
 **Port already in use?**
 
