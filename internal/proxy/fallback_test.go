@@ -108,7 +108,9 @@ func TestReconcileFallbacksMigratesDaemonListener(t *testing.T) {
 	}
 	for _, want := range []string{
 		"failover:", "service: proxy-app-primary", "fallback: proxy-app-fallback",
-		"500-599", "dialTimeout: 2s", "url: http://localhost:3000",
+		// The primary Add would render on this platform: localhost on Linux,
+		// host.docker.internal where Traefik runs in bridge mode.
+		"500-599", "dialTimeout: 2s", "url: " + localPrimaryURL("3000"),
 	} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("rendered route missing %q:\n%s", want, data)
