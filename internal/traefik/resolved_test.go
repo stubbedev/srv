@@ -12,19 +12,24 @@ import (
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
 
-// scratchResolv points resolvConfPath and nixosMarkerPath into a temp dir.
-func scratchResolv(t *testing.T) (resolvPath, nixosPath string) {
+// scratchResolv points resolvConfPath, resolvedStubPath and nixosMarkerPath
+// into a temp dir. The stub path is not created; tests that need one write
+// to it.
+func scratchResolv(t *testing.T) (resolvPath, stubPath, nixosPath string) {
 	t.Helper()
 	dir := t.TempDir()
-	prevResolv, prevNixos := resolvConfPath, nixosMarkerPath
+	prevResolv, prevStub, prevNixos := resolvConfPath, resolvedStubPath, nixosMarkerPath
 	resolvConfPath = filepath.Join(dir, "resolv.conf")
+	resolvedStubPath = filepath.Join(dir, "stub-resolv.conf")
 	nixosMarkerPath = filepath.Join(dir, "NIXOS")
-	t.Cleanup(func() { resolvConfPath, nixosMarkerPath = prevResolv, prevNixos })
-	return resolvConfPath, nixosMarkerPath
+	t.Cleanup(func() {
+		resolvConfPath, resolvedStubPath, nixosMarkerPath = prevResolv, prevStub, prevNixos
+	})
+	return resolvConfPath, resolvedStubPath, nixosMarkerPath
 }
 
-// fsShell is a fake whose sudo ln/tee act on the real (scratch) filesystem,
-// so a test observes what the commands would have done.
+// fsShell is a fake whose sudo ln/install/tee act on the real (scratch)
+// filesystem, so a test observes what the commands would have done.
 func fsShell(t *testing.T) *shelltest.Fake {
 	t.Helper()
 	fake := shelltest.New(nil)
@@ -35,11 +40,27 @@ func fsShell(t *testing.T) *shelltest.Fake {
 		case method == "SudoRun" && len(args) == 4 && args[0] == "ln" && args[1] == "-sfn":
 			_ = os.Remove(args[3])
 			return shelltest.Response{Err: os.Symlink(args[2], args[3])}, true
+		case method == "SudoRun" && len(args) == 5 && args[0] == "install" && args[1] == "-m":
+			data, err := os.ReadFile(args[3])
+			if err == nil {
+				_ = os.Remove(args[4])
+				err = os.WriteFile(args[4], data, 0o644)
+			}
+			return shelltest.Response{Err: err}, true
 		}
 		return shelltest.Response{}, false
 	}
 	swapShell(t, fake)
 	return fake
+}
+
+// pinBootstrapProbe pins the aliveness probe EnsureBootstrapResolution gates
+// its swap on, so tests do not depend on the host's loopback DNS state.
+func pinBootstrapProbe(t *testing.T, answers bool) {
+	t.Helper()
+	prev := probeResolvConf
+	probeResolvConf = func([]byte) bool { return answers }
+	t.Cleanup(func() { probeResolvConf = prev })
 }
 
 func TestNameservers(t *testing.T) {
@@ -100,7 +121,7 @@ func TestResolvedBypass(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resolv, nixos := scratchResolv(t)
+			resolv, _, nixos := scratchResolv(t)
 			if tc.link != "" {
 				if err := os.Symlink(tc.link, resolv); err != nil {
 					t.Fatal(err)
@@ -125,7 +146,7 @@ func TestResolvedBypass(t *testing.T) {
 }
 
 func TestResolvedBypassFix(t *testing.T) {
-	resolv, _ := scratchResolv(t)
+	resolv, _, _ := scratchResolv(t)
 	b := &ResolvedBypassError{Nameserver: "192.168.1.1", Target: constants.SystemdResolvedUplinkPath, Fixable: true}
 	if want := "sudo ln -sfn " + constants.SystemdResolvePath + " " + resolv; b.Fix() != want {
 		t.Errorf("Fix() = %q, want %q", b.Fix(), want)
@@ -146,7 +167,7 @@ func TestResolvedBypassFix(t *testing.T) {
 // RepointResolvConf leaves resolv.conf linked to resolved's stub, and the
 // verdict flips to "reaches resolved".
 func TestRepointResolvConf(t *testing.T) {
-	resolv, _ := scratchResolv(t)
+	resolv, _, _ := scratchResolv(t)
 	if err := os.Symlink(constants.SystemdResolvedUplinkPath, resolv); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +183,8 @@ func TestRepointResolvConf(t *testing.T) {
 // The bootstrap restore must undo only srv's own swap: if resolv.conf was
 // re-pointed meanwhile (the #13 fix), restoring would put the bypass back.
 func TestBootstrapRestoreKeepsLaterRepoint(t *testing.T) {
-	resolv, _ := scratchResolv(t)
+	resolv, _, _ := scratchResolv(t)
+	pinBootstrapProbe(t, false)
 	uplink := filepath.Join(filepath.Dir(resolv), "uplink")
 	if err := os.WriteFile(uplink, []byte("nameserver 127.0.0.1\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -195,7 +217,8 @@ func TestBootstrapRestoreKeepsLaterRepoint(t *testing.T) {
 
 // Without an intervening change the restore puts the original symlink back.
 func TestBootstrapRestoreRevertsOwnSwap(t *testing.T) {
-	resolv, _ := scratchResolv(t)
+	resolv, _, _ := scratchResolv(t)
+	pinBootstrapProbe(t, false)
 	orig := filepath.Join(filepath.Dir(resolv), "orig")
 	if err := os.WriteFile(orig, []byte("nameserver 127.0.0.1\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -214,6 +237,95 @@ func TestBootstrapRestoreRevertsOwnSwap(t *testing.T) {
 	restore()
 	if target, _ := os.Readlink(resolv); target != orig {
 		t.Errorf("resolv.conf -> %q, want original %q", target, orig)
+	}
+}
+
+// The swap must never write through a symlinked resolv.conf (#15): the
+// bootstrap replaces the link itself, so resolved's runtime file behind it
+// keeps its contents through swap and restore alike.
+func TestBootstrapSwapLeavesSymlinkTargetIntact(t *testing.T) {
+	resolv, _, _ := scratchResolv(t)
+	pinBootstrapProbe(t, false)
+	orig := filepath.Join(filepath.Dir(resolv), "orig")
+	const origContents = "nameserver 127.0.0.53\n"
+	if err := os.WriteFile(orig, []byte(origContents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(orig, resolv); err != nil {
+		t.Fatal(err)
+	}
+	fsShell(t)
+
+	restore, err := EnsureBootstrapResolution()
+	if err != nil || restore == nil {
+		t.Fatalf("EnsureBootstrapResolution: restore=%t err=%v; want a swap", restore != nil, err)
+	}
+	if data, _ := os.ReadFile(orig); string(data) != origContents {
+		t.Fatalf("symlink target clobbered: %q, want %q", data, origContents)
+	}
+	if li, err := os.Lstat(resolv); err != nil || li.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("resolv.conf still a symlink (li=%v err=%v); want the bootstrap regular file", li, err)
+	}
+	restore()
+	if data, _ := os.ReadFile(orig); string(data) != origContents {
+		t.Errorf("symlink target clobbered by restore: %q, want %q", data, origContents)
+	}
+	if target, _ := os.Readlink(resolv); target != orig {
+		t.Errorf("resolv.conf -> %q, want original %q", target, orig)
+	}
+}
+
+// A loopback-only resolv.conf whose nameserver answers — systemd-resolved's
+// stub on a stock host — is a working resolver and must not be swapped.
+func TestBootstrapKeepsWorkingLoopbackResolver(t *testing.T) {
+	resolv, _, _ := scratchResolv(t)
+	pinBootstrapProbe(t, true)
+	if err := os.WriteFile(resolv, []byte("nameserver 127.0.0.53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := fsShell(t)
+	restore, err := EnsureBootstrapResolution()
+	if err != nil || restore != nil {
+		t.Fatalf("EnsureBootstrapResolution: restore=%t err=%v; want no swap", restore != nil, err)
+	}
+	if calls := fake.Snapshot(); len(calls) > 0 {
+		t.Errorf("no sudo command expected, got %v", calls)
+	}
+	if data, _ := os.ReadFile(resolv); string(data) != "nameserver 127.0.0.53\n" {
+		t.Errorf("resolv.conf rewritten: %q", data)
+	}
+}
+
+// RepairClobberedResolvedStub restarts resolved exactly when its stub file
+// still carries the bootstrap an older srv wrote through the symlink.
+func TestRepairClobberedResolvedStub(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		contents string
+		want     bool
+	}{
+		{"clobbered", publicBootstrapResolvConf, true},
+		{"healthy", "nameserver 127.0.0.53\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stub, _ := scratchResolv(t)
+			if err := os.WriteFile(stub, []byte(tc.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			fake := fsShell(t)
+			if got := RepairClobberedResolvedStub(); got != tc.want {
+				t.Errorf("repaired = %v, want %v", got, tc.want)
+			}
+			var sawRestart bool
+			for _, c := range fake.Snapshot() {
+				if c.Method == "SudoSystemctl" {
+					sawRestart = true
+				}
+			}
+			if sawRestart != tc.want {
+				t.Errorf("resolved restarted = %v, want %v", sawRestart, tc.want)
+			}
+		})
 	}
 }
 

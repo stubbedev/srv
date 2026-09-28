@@ -194,6 +194,12 @@ func systemResolver(resolv []byte) *net.Resolver {
 	if !platform.IsLinux() || ns == "" {
 		return net.DefaultResolver
 	}
+	return resolverPinnedTo(ns)
+}
+
+// resolverPinnedTo returns a Go resolver whose every query goes to ns:53,
+// independent of what /etc/resolv.conf says right now.
+func resolverPinnedTo(ns string) *net.Resolver {
 	addr := net.JoinHostPort(ns, "53")
 	return &net.Resolver{
 		PreferGo: true,

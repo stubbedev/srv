@@ -1,18 +1,23 @@
 // Package traefik — resolv.go handles the narrow case where /etc/resolv.conf
-// points only at a loopback DNS server (e.g. a previously-installed Valet's
-// dnsmasq the user has just stopped). With no working resolver, the docker
-// image pulls that follow during `srv install` fail before srv's own dnsmasq
-// can take over. EnsureBootstrapResolution detects that situation, sudo-writes
-// a temporary resolv.conf pointing at public DNS, and returns a restore
-// callback the caller defers to put the original back once srv's containers
-// are healthy and 127.0.0.1:53 again resolves.
+// points only at a loopback DNS server that no longer answers (e.g. a
+// previously-installed Valet's dnsmasq the user has just stopped). With no
+// working resolver, the docker image pulls that follow during `srv install`
+// fail before srv's own dnsmasq can take over. EnsureBootstrapResolution
+// detects that situation, sudo-writes a temporary resolv.conf pointing at
+// public DNS, and returns a restore callback the caller defers to put the
+// original back once srv's containers are healthy and 127.0.0.1:53 again
+// resolves.
 package traefik
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"iter"
+	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/shell"
@@ -22,19 +27,31 @@ import (
 // resolv.conf is unusable. Cloudflare + Google as a belt-and-braces pair.
 const publicBootstrapResolvConf = "nameserver 1.1.1.1\nnameserver 8.8.8.8\n"
 
-// resolvConfPath is a var so tests can point it at a scratch file.
-var resolvConfPath = constants.ResolvConfPath
+// resolvConfPath and resolvedStubPath are vars so tests can point them at
+// scratch files.
+var (
+	resolvConfPath   = constants.ResolvConfPath
+	resolvedStubPath = constants.SystemdResolvePath
+)
 
-// EnsureBootstrapResolution checks /etc/resolv.conf. When every nameserver
-// entry points at a loopback address, it stashes the current state and
-// sudo-overwrites resolv.conf with public DNS so docker image pulls work.
-// The returned restore function puts the original file (or symlink) back.
+// EnsureBootstrapResolution checks /etc/resolv.conf. A loopback-only file
+// whose nameserver still answers queries is a working resolver —
+// systemd-resolved's stub (127.0.0.53) and a running srv dnsmasq both look
+// like that and must be left alone. Only when the loopback nameserver is
+// silent does it stash the current state and sudo-replace resolv.conf with
+// public DNS so docker image pulls work; the returned restore function puts
+// the original file (or symlink) back.
 //
 // On macOS the file model is different and the function is a no-op (returns
-// (nil, nil)). On Linux without any loopback-only situation it also returns
-// (nil, nil).
+// (nil, nil)). On Linux without a dead loopback-only situation it also
+// returns (nil, nil).
 func EnsureBootstrapResolution() (restore func(), err error) {
-	if !needsBootstrapSwap(resolvConfPath) {
+	data, err := os.ReadFile(resolvConfPath)
+	if err != nil || !loopbackOnlyResolvConf(string(data)) {
+		return nil, nil //nolint:nilerr // unreadable or healthy — caller can do nothing useful here
+	}
+
+	if probeResolvConf(data) {
 		return nil, nil
 	}
 
@@ -61,8 +78,8 @@ func EnsureBootstrapResolution() (restore func(), err error) {
 		savedContents = c
 	}
 
-	if err := shell.Default.SudoWrite(resolvConfPath, publicBootstrapResolvConf); err != nil {
-		return nil, fmt.Errorf("sudo-write %s: %w", resolvConfPath, err)
+	if err := sudoInstallBootstrapResolvConf(); err != nil {
+		return nil, err
 	}
 
 	restore = func() {
@@ -73,13 +90,72 @@ func EnsureBootstrapResolution() (restore func(), err error) {
 			return
 		}
 		if savedTarget != "" {
-			// ln -f replaces the regular file we wrote with the original symlink.
+			// ln -f replaces the bootstrap file we installed with the
+			// original symlink.
 			_ = sudoSymlink(savedTarget, resolvConfPath)
 			return
 		}
 		_ = shell.Default.SudoWrite(resolvConfPath, string(savedContents))
 	}
 	return restore, nil
+}
+
+// RepairClobberedResolvedStub restarts systemd-resolved when its own stub
+// resolv.conf carries srv's bootstrap contents — the damage srv ≤ 0.4.28 did
+// by writing the bootstrap through /etc/resolv.conf's symlink. resolved
+// rewrites the file from its link configuration on restart; srv cannot
+// reconstruct those per-link servers itself. Reports whether it restarted.
+func RepairClobberedResolvedStub() bool {
+	data, err := os.ReadFile(resolvedStubPath)
+	if err != nil || !isBootstrapResolvConf(string(data)) {
+		return false
+	}
+	return shell.Default.SudoSystemctl("restart", "systemd-resolved") == nil
+}
+
+// sudoInstallBootstrapResolvConf puts the public-DNS bootstrap in place as a
+// regular file. `sudo tee` would follow a symlinked /etc/resolv.conf and
+// overwrite the file it points at (systemd-resolved's runtime resolv.conf);
+// staging the contents in a temp file and running `sudo install` replaces
+// the link itself, leaving its target untouched.
+func sudoInstallBootstrapResolvConf() error {
+	tmp, err := os.CreateTemp("", "srv-resolv.conf-*")
+	if err != nil {
+		return fmt.Errorf("stage bootstrap resolv.conf: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(publicBootstrapResolvConf); err != nil {
+		tmp.Close()
+		return fmt.Errorf("stage bootstrap resolv.conf: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("stage bootstrap resolv.conf: %w", err)
+	}
+	if err := shell.Default.SudoRun("install", "-m", "0644", tmp.Name(), resolvConfPath); err != nil {
+		return fmt.Errorf("sudo-install %s: %w", resolvConfPath, err)
+	}
+	return nil
+}
+
+// probeResolvConf reports whether the first nameserver in resolv.conf
+// contents answers a query. Var so tests can pin the verdict without a
+// live DNS server on the host.
+var probeResolvConf = loopbackResolvConfAnswers
+
+// loopbackResolvConfAnswers resolves a name reserved to never exist (RFC
+// 6761 .invalid) through the contents' first nameserver. Any reply —
+// including the expected NXDOMAIN — proves a live resolver, so only silence
+// (a timeout or a refused connection) reads as dead.
+func loopbackResolvConfAnswers(contents []byte) bool {
+	ns := firstNameserver(string(contents))
+	if ns == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := resolverPinnedTo(ns).LookupHost(ctx, "srv-probe.invalid")
+	var dnsErr *net.DNSError
+	return err == nil || (errors.As(err, &dnsErr) && dnsErr.IsNotFound)
 }
 
 // isBootstrapResolvConf reports whether resolv.conf contents are srv's own
@@ -93,17 +169,6 @@ func isBootstrapResolvConf(contents string) bool {
 // directory to descend into (-n).
 func sudoSymlink(target, link string) error {
 	return shell.Default.SudoRun("ln", "-sfn", target, link)
-}
-
-// needsBootstrapSwap is the pure-logic half of EnsureBootstrapResolution: it
-// reads the file at path and returns true when every nameserver entry is a
-// loopback address. Empty / unreadable / no-nameservers files return false.
-func needsBootstrapSwap(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	return loopbackOnlyResolvConf(string(data))
 }
 
 // loopbackOnlyResolvConf parses resolv.conf-style contents and returns true

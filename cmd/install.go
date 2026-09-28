@@ -177,6 +177,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// next `docker compose up` can't pull Traefik/dnsmasq images. Swap in
 	// public DNS for the duration of the pull, then restore the original
 	// once srv's own dnsmasq is up and the embedded DNS server resolves again.
+	if traefik.RepairClobberedResolvedStub() {
+		ui.Dim("Restarted systemd-resolved to repair its stub resolv.conf (clobbered by srv <= 0.4.28)")
+	}
 	restoreResolv := func() {}
 	if restore, rerr := traefik.EnsureBootstrapResolution(); rerr != nil {
 		ui.Warn("Could not pre-swap /etc/resolv.conf: %v", rerr)
