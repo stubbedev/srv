@@ -441,7 +441,7 @@ srv install [flags]
 |---|---|---|
 | `--email` | — | Let's Encrypt account email for production SSL. Stored on disk after first set; only required once. Pass an empty string to disable production SSL entirely. |
 | `--fresh` | `false` | Remove existing configuration and start fresh |
-| `--yes`, `-y` | `false` | Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry, re-pointing a systemd-resolved-bypassing /etc/resolv.conf at the resolved stub). Required for non-interactive runs. |
+| `--yes`, `-y` | `false` | Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry, re-pointing a systemd-resolved-bypassing /etc/resolv.conf at the resolved stub, re-enabling resolved's stub listener when Laravel Valet disabled it). Required for non-interactive runs. |
 
 ## `srv internal`
 
