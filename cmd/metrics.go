@@ -191,7 +191,7 @@ func reportMetricsEndpoint(label, domain string) {
 	url := "https://" + domain
 	switch {
 	case !traefik.CheckDNS(domain):
-		ui.Warn("  %-12s %s  - DNS not resolving (run 'srv dns setup')", label, url)
+		ui.Warn("  %-12s %s  - DNS not resolving (run 'srv doctor')", label, url)
 	case metricsURLResponds(url):
 		ui.Success("  %-12s %s", label, url)
 	default:

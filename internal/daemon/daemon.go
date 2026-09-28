@@ -245,9 +245,9 @@ func (d *Daemon) startEmbeddedDNS() {
 		// the dnsmasq container era point at the old port 53, and nothing else
 		// rewrites this until the next domain add. Idempotent — a no-op when
 		// the on-disk config already matches. Needs sudo for /etc; failure is
-		// logged, not fatal, and the next `srv dns setup` repairs it.
+		// logged, not fatal, and the next `srv install` repairs it.
 		if err := traefik.SetupDNS(); err != nil {
-			d.log("DNS routing refresh failed (run 'srv dns setup'): %v", err)
+			d.log("DNS routing refresh failed (re-run 'srv install'): %v", err)
 		}
 
 		d.startDNSZoneSource()

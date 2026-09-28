@@ -10,9 +10,11 @@ package traefik
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"strings"
 
+	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/shell"
 )
 
@@ -20,7 +22,8 @@ import (
 // resolv.conf is unusable. Cloudflare + Google as a belt-and-braces pair.
 const publicBootstrapResolvConf = "nameserver 1.1.1.1\nnameserver 8.8.8.8\n"
 
-const resolvConfPath = "/etc/resolv.conf"
+// resolvConfPath is a var so tests can point it at a scratch file.
+var resolvConfPath = constants.ResolvConfPath
 
 // EnsureBootstrapResolution checks /etc/resolv.conf. When every nameserver
 // entry points at a loopback address, it stashes the current state and
@@ -63,15 +66,33 @@ func EnsureBootstrapResolution() (restore func(), err error) {
 	}
 
 	restore = func() {
+		// Undo only srv's own write. Once anything else has replaced the
+		// bootstrap file — install re-pointing resolv.conf at resolved's
+		// stub, say — putting the original back would revert that fix.
+		if data, err := os.ReadFile(resolvConfPath); err != nil || !isBootstrapResolvConf(string(data)) {
+			return
+		}
 		if savedTarget != "" {
-			// Replace the regular file we just wrote with the original symlink.
-			_ = shell.Default.SudoRemove(resolvConfPath)
-			_ = shell.Default.SudoRun("ln", "-sf", savedTarget, resolvConfPath)
+			// ln -f replaces the regular file we wrote with the original symlink.
+			_ = sudoSymlink(savedTarget, resolvConfPath)
 			return
 		}
 		_ = shell.Default.SudoWrite(resolvConfPath, string(savedContents))
 	}
 	return restore, nil
+}
+
+// isBootstrapResolvConf reports whether resolv.conf contents are srv's own
+// temporary swap rather than the host's configuration.
+func isBootstrapResolvConf(contents string) bool {
+	return contents == publicBootstrapResolvConf
+}
+
+// sudoSymlink points link at target, replacing whatever link is now (-f),
+// and treating an existing symlink as the entry to replace rather than a
+// directory to descend into (-n).
+func sudoSymlink(target, link string) error {
+	return shell.Default.SudoRun("ln", "-sfn", target, link)
 }
 
 // needsBootstrapSwap is the pure-logic half of EnsureBootstrapResolution: it
@@ -90,25 +111,43 @@ func needsBootstrapSwap(path string) bool {
 // address (127.0.0.0/8 IPv4 or ::1 IPv6).
 func loopbackOnlyResolvConf(contents string) bool {
 	seen := false
-	for line := range strings.SplitSeq(contents, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" || strings.HasPrefix(t, "#") {
-			continue
-		}
-		if !strings.HasPrefix(t, "nameserver") {
-			continue
-		}
-		fields := strings.Fields(t)
-		if len(fields) < 2 {
-			continue
-		}
-		addr := fields[1]
+	for addr := range nameservers(contents) {
 		seen = true
 		if !isLoopback(addr) {
 			return false
 		}
 	}
 	return seen
+}
+
+// firstNameserver returns the nameserver resolv.conf contents send lookups
+// to first, or "" when none is listed.
+func firstNameserver(contents string) string {
+	for addr := range nameservers(contents) {
+		return addr
+	}
+	return ""
+}
+
+// nameservers yields every `nameserver` address in resolv.conf contents, in
+// file order. It slices the input rather than splitting fields, so walking a
+// file allocates nothing.
+func nameservers(contents string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for line := range strings.SplitSeq(contents, "\n") {
+			rest, ok := strings.CutPrefix(strings.TrimSpace(line), "nameserver")
+			if !ok || rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+				continue
+			}
+			addr := strings.TrimSpace(rest)
+			if i := strings.IndexAny(addr, " \t"); i >= 0 {
+				addr = addr[:i]
+			}
+			if addr != "" && !yield(addr) {
+				return
+			}
+		}
+	}
 }
 
 func isLoopback(addr string) bool {

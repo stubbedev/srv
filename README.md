@@ -70,7 +70,10 @@ install-script or manual-download only.
   by an embedded resolver inside the srv daemon on `127.0.0.1:15353` — no
   dnsmasq container, no privileged DNS port. `srv install` points your system
   resolver (systemd-resolved, NetworkManager, or macOS) at it once, with a
-  single sudo prompt.
+  single sudo prompt. On systemd-resolved it also checks that
+  `/etc/resolv.conf` actually sends lookups through resolved's stub; if it
+  links to resolved's upstream list instead, `srv install --yes` re-points it
+  (`srv doctor` shows the fix either way).
 
 ## Quick start
 

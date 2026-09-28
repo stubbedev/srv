@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -387,7 +386,7 @@ func checkDNS() int {
 				issues++
 			}
 
-			issues += checkSystemDNSResolution(localDomains)
+			issues += reportSystemResolution(traefik.DiagnoseSystemResolution(localDomains), len(localDomains), 1)
 		} else {
 			ui.IndentedDim(1, "No local domains registered")
 		}
@@ -406,73 +405,49 @@ func checkDNS() int {
 	return issues
 }
 
-// checkSystemDNSResolution probes every registered local domain through the
-// system resolver (the path apps actually use) and reports accurately:
-//   - all resolve            → success
-//   - a non-.local fails     → real "System DNS not configured" issue
-//   - only .local names fail → the mDNS-interception case: .local is reserved
-//     for mDNS (RFC 6762) and on hosts running Avahi with nss-mdns ahead of
-//     systemd-resolved (the common Linux default) it never reaches srv's DNS,
-//     so the guidance points at .test or the nss ordering fix rather than the
-//     misleading "re-add the site".
-func checkSystemDNSResolution(domains []string) int {
-	// Probe concurrently: each lookup has a 2s timeout, and doctor runs when
-	// DNS is unhealthy — exactly when a serial loop over ~30 domains can
-	// block for a minute.
-	type probe struct {
-		bare string
-		ok   bool
-	}
-	results := make([]probe, len(domains))
-	const maxWorkers = 8
-	workers := min(maxWorkers, len(domains))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
-			for i := range jobs {
-				bare := traefik.BareDomain(domains[i])
-				results[i] = probe{bare: bare, ok: traefik.CheckSystemDNS(bare)}
-			}
-		})
-	}
-	for i := range domains {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-
-	var realFail, localFail []string
-	for _, r := range results {
-		if r.ok {
-			continue
-		}
-		if strings.HasSuffix(r.bare, ".local") {
-			localFail = append(localFail, r.bare)
-		} else {
-			realFail = append(realFail, r.bare)
-		}
-	}
-
-	if len(realFail) == 0 && len(localFail) == 0 {
-		ui.IndentedSuccess(1, "System DNS configured (%d domain(s) resolve)", len(domains))
+// reportSystemResolution prints how the system resolver treats srv's domains
+// (see traefik.DiagnoseSystemResolution) and returns the number of issues.
+// Shared by doctor and install, so both give the same diagnosis and the same
+// fixes. Each cause is reported on its own, and when several apply — a
+// bypassed systemd-resolved and mDNS interception of .local, say — every
+// fix is listed, since fixing one leaves the other broken.
+func reportSystemResolution(r traefik.SystemResolution, total, level int) int {
+	if r.OK() {
+		ui.IndentedSuccess(level, "System DNS configured (%d domain(s) resolve)", total)
 		return 0
 	}
-
 	issues := 0
-	if len(realFail) > 0 {
-		ui.IndentedWarn(1, "System DNS not configured for: %s", strings.Join(realFail, ", "))
-		ui.IndentedDim(1, "Re-run 'srv install', or remove and re-add the site to trigger DNS setup")
+	if r.Bypass != nil {
+		reportResolvedBypass(r.Bypass, level)
 		issues++
 	}
-	if len(localFail) > 0 {
-		ui.IndentedWarn(1, ".local not resolving via system resolver: %s", strings.Join(localFail, ", "))
-		ui.IndentedDim(1, ".local is reserved for mDNS — nss-mdns intercepts it before srv's DNS.")
-		ui.IndentedDim(1, "Fastest fix: use a .test domain (no mDNS conflict, zero config).")
-		ui.IndentedDim(1, "To keep .local: make nss 'resolve' win (NixOS: services.avahi.nssmdns4 = false).")
+	if len(r.Unresolved) > 0 {
+		ui.IndentedWarn(level, "System DNS not resolving: %s", strings.Join(r.Unresolved, ", "))
+		if r.Bypass != nil {
+			ui.IndentedDim(level, "Caused by the resolv.conf bypass above.")
+		} else {
+			ui.IndentedDim(level, "Re-run 'srv install' to repair the resolver routing")
+			issues++
+		}
+	}
+	if len(r.MDNSLocal) > 0 {
+		ui.IndentedWarn(level, ".local handed to mDNS before DNS: %s", strings.Join(r.MDNSLocal, ", "))
+		ui.IndentedDim(level, "nsswitch.conf's hosts line stops at an mdns module with [NOTFOUND=return],")
+		ui.IndentedDim(level, "so glibc programs (curl, Firefox) never ask srv's DNS for these names.")
+		ui.IndentedDim(level, "Fastest fix: use a .test domain (no mDNS conflict, zero config).")
+		ui.IndentedDim(level, "To keep .local: put 'resolve' or 'dns' ahead of the mdns module (NixOS: services.avahi.nssmdns4 = false).")
 		issues++
 	}
 	return issues
+}
+
+// reportResolvedBypass explains a bypassed systemd-resolved and its fix.
+func reportResolvedBypass(b *traefik.ResolvedBypassError, level int) {
+	ui.IndentedWarn(level, "%s", b.Summary())
+	ui.IndentedDim(level, "Fix: %s", b.Fix())
+	if b.Fixable {
+		ui.IndentedDim(level, "Or run 'srv install --yes' to let srv do it (upstream servers stay the same).")
+	}
 }
 
 // checkMetrics flags the common "route live, backend dead" case: the metrics

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -42,7 +43,7 @@ Use --fresh to remove all existing configuration and start fresh.`,
 
 func init() {
 	installCmd.Flags().BoolVar(&installFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
-	installCmd.Flags().BoolVarP(&installFlags.yes, "yes", "y", false, "Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry). Required for non-interactive runs.")
+	installCmd.Flags().BoolVarP(&installFlags.yes, "yes", "y", false, "Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry, re-pointing a systemd-resolved-bypassing /etc/resolv.conf at the resolved stub). Required for non-interactive runs.")
 	installCmd.Flags().StringVar(&installFlags.email, "email", "", "Let's Encrypt account email for production SSL. Stored on disk after first set; only required once. Pass an empty string to disable production SSL entirely.")
 	installCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(installCmd)
@@ -176,11 +177,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// next `docker compose up` can't pull Traefik/dnsmasq images. Swap in
 	// public DNS for the duration of the pull, then restore the original
 	// once srv's own dnsmasq is up and the embedded DNS server resolves again.
-	restoreResolv, rerr := traefik.EnsureBootstrapResolution()
-	if rerr != nil {
+	restoreResolv := func() {}
+	if restore, rerr := traefik.EnsureBootstrapResolution(); rerr != nil {
 		ui.Warn("Could not pre-swap /etc/resolv.conf: %v", rerr)
-	} else if restoreResolv != nil {
+	} else if restore != nil {
 		ui.Dim("Pre-swapped /etc/resolv.conf to public DNS for the image pull")
+		// Restored explicitly before the DNS step below (which must judge
+		// the host's own resolv.conf), and deferred for the error returns.
+		restoreResolv = sync.OnceFunc(restore)
 		defer restoreResolv()
 	}
 
@@ -194,15 +198,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// for the first `srv add` to trigger a config reload.
 	if err := traefik.UpdateDnsmasqConfig(); err != nil {
 		ui.Dim("DNS pre-warm skipped: %v", err)
-	}
-
-	// Point the system resolver at srv's embedded DNS server. This is the
-	// one interactive moment guaranteed to have working sudo — the daemon
-	// retries the same update on every start but cannot prompt for a
-	// password, so an upgrade whose resolver config predates a srv change
-	// (e.g. the embedded DNS port) is repaired here.
-	if err := traefik.SetupDNS(); err != nil {
-		ui.Warn("DNS routing not updated (%v) — run 'srv dns setup' to fix local hostname resolution", err)
 	}
 
 	// Step 4: Set up dashboard HTTPS proxy (traefik.local)
@@ -276,6 +271,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Point the system resolver at srv's embedded DNS server. This is the
+	// one interactive moment guaranteed to have working sudo — the daemon
+	// retries the same update on every start but cannot prompt for a
+	// password, so an upgrade whose resolver config predates a srv change
+	// (e.g. the embedded DNS port) is repaired here. It runs after the last
+	// image pull with the bootstrap swap undone, so it judges — and repairs
+	// — the host's real resolv.conf, not srv's temporary one.
+	restoreResolv()
+	configureSystemDNS()
+
 	// Stamp the version that generated this config so upgrades can detect drift
 	// and auto-reconcile (see traefik.ReconcileVersion).
 	if err := traefik.MarkInstalled(cfg, Version); err != nil {
@@ -296,6 +301,39 @@ func runInstall(cmd *cobra.Command, args []string) error {
 func startSites(sites []site.Site) {
 	r := site.Runner{Quiet: true}
 	_ = runBatchSiteOperation(sites, verbStart, func(s *site.Site) error { return r.Start(s, false) })
+}
+
+// configureSystemDNS installs srv's resolver routing, then checks it the way
+// clients see it: a setup that "succeeds" while lookups bypass it is reported
+// (or, with --yes and where srv may, repaired) here, not discovered later as
+// every srv domain resolving to the internet.
+func configureSystemDNS() {
+	err := traefik.SetupDNS()
+	bypass, isBypass := errors.AsType[*traefik.ResolvedBypassError](err)
+	repoint := isBypass && bypass.Fixable && installFlags.yes
+	switch {
+	case repoint:
+		ui.Info("Re-pointing /etc/resolv.conf at systemd-resolved's stub listener")
+		ui.Dim("Upstream servers stay the same: resolved keeps forwarding to each link's servers.")
+		if err := traefik.RepointResolvConf(); err != nil {
+			ui.Warn("%v", err)
+		}
+	case isBypass:
+		// Not srv's to change (or no --yes): the diagnosis below reports
+		// it together with its fix.
+	case err != nil:
+		ui.Warn("DNS routing not updated (%v) — re-run 'srv install' to fix local hostname resolution", err)
+		return
+	}
+
+	domains, _ := traefik.LoadLocalDomains()
+	if len(domains) == 0 {
+		if isBypass && !repoint {
+			reportResolvedBypass(bypass, 0)
+		}
+		return
+	}
+	reportSystemResolution(traefik.DiagnoseSystemResolution(domains), len(domains), 0)
 }
 
 // stopValetIfActive detects a running Valet install (config dir + systemd

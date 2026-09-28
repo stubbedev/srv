@@ -138,8 +138,22 @@ const (
 // =============================================================================
 
 const (
-	// SystemdResolvePath is the path to systemd-resolved configuration.
+	// SystemdResolvePath is the resolv.conf systemd-resolved writes for its
+	// stub listener (nameserver 127.0.0.53). It exists whenever resolved runs,
+	// whether or not /etc/resolv.conf points at it.
 	SystemdResolvePath = "/run/systemd/resolve/stub-resolv.conf"
+	// SystemdResolvedUplinkPath is the resolv.conf systemd-resolved writes
+	// listing the upstream servers themselves. Pointing /etc/resolv.conf at it
+	// ("uplink" mode) sends lookups straight upstream, past resolved's routing.
+	SystemdResolvedUplinkPath = "/run/systemd/resolve/resolv.conf"
+	// SystemdResolvedStubIP is resolved's stub listener address.
+	SystemdResolvedStubIP = "127.0.0.53"
+	// ResolvConfPath is the system resolver configuration.
+	ResolvConfPath = "/etc/resolv.conf"
+	// NsswitchPath is glibc's name-service switch configuration.
+	NsswitchPath = "/etc/nsswitch.conf"
+	// NixOSMarkerPath exists on NixOS, where /etc is generated declaratively.
+	NixOSMarkerPath = "/etc/NIXOS"
 	// HomeDirPrefix is the home directory prefix.
 	HomeDirPrefix = "~/"
 )

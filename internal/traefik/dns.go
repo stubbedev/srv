@@ -130,13 +130,20 @@ func CheckSystemDNS(domain string) bool {
 }
 
 // SetupDNS configures the system to use the local DNS server for .test domains.
-// Returns an error if setup fails or requires manual intervention.
+// Returns an error if setup fails or requires manual intervention; on a
+// systemd-resolved host whose /etc/resolv.conf bypasses resolved that error
+// is a *ResolvedBypassError carrying the fix.
 func SetupDNS() error {
 	resolver := DetectResolver()
 
 	switch resolver {
 	case ResolverSystemdResolved:
-		return setupSystemdResolved()
+		if err := setupSystemdResolved(); err != nil {
+			return err
+		}
+		// The drop-in is only half the setup: it does nothing unless
+		// lookups actually reach resolved.
+		return checkResolvedPath()
 	case ResolverMacOS:
 		return setupMacOSResolver()
 	case ResolverNetworkManager:
@@ -626,11 +633,11 @@ func registerLocalDomainsLocked(domains []string, wildcard bool) error {
 
 	// Automatically set up system DNS when adding the first local domain.
 	// Failure here is non-fatal: the domain is registered in dnsmasq and the
-	// caller can still proceed; the user can run `srv dns setup` manually.
+	// caller can still proceed; the user can re-run `srv install`, which repairs it.
 	if isFirstDomain && !CheckSystemDNS(domains[0]) {
 		if err := SetupDNS(); err != nil {
 			// Log but do not propagate — DNS registration succeeded above.
-			fmt.Fprintf(os.Stderr, "warning: system DNS setup failed (run 'srv dns setup' manually): %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: system DNS setup failed (re-run 'srv install' to fix): %v\n", err)
 		}
 	}
 
