@@ -106,15 +106,15 @@
     },
     "fallback_url": {
       "type": "string",
-      "description": "Fallback (srv proxy add --fallback): the remote URL 5xx responses\nre-proxy to. Empty when the proxy has no fallback. The failover itself\nis Traefik's native `failover` service, rendered into proxy-\u003cname\u003e.yml."
+      "description": "Remote URL that 5xx responses are re-proxied to (--fallback); empty\nwhen the proxy has no fallback. Rendered as Traefik's native failover\nservice."
     },
     "fallback_timeout": {
       "type": "string",
-      "description": "FallbackTimeout is the connect timeout to the primary upstream before\nTraefik fails over (--fallback-timeout)."
+      "description": "Connect timeout to the primary upstream before Traefik fails over\n(--fallback-timeout)."
     },
     "fallback_port": {
       "type": "integer",
-      "description": "FallbackPort is retired: it recorded the loopback port of the daemon-\nhosted failover listener, which the native Traefik failover replaced.\nOld metadata files still carry it; it is read only to detect proxies\nthat need migration, and cleared when that migration re-renders them."
+      "description": "Deprecated: unused. srv drops it from existing metadata when\nre-rendering."
     }
   },
   "additionalProperties": false,

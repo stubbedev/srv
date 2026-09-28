@@ -19,7 +19,7 @@
         "type": "string"
       },
       "type": "array",
-      "description": "Upstream resolvers written into dnsmasq.conf as server= lines. Each entry must be an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4) when empty."
+      "description": "Upstream DNS resolvers; each entry is an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4)."
     }
   },
   "additionalProperties": false,
