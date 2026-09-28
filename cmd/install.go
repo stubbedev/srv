@@ -43,7 +43,7 @@ Use --fresh to remove all existing configuration and start fresh.`,
 
 func init() {
 	installCmd.Flags().BoolVar(&installFlags.fresh, "fresh", false, "Remove existing configuration and start fresh")
-	installCmd.Flags().BoolVarP(&installFlags.yes, "yes", "y", false, "Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry, re-pointing a systemd-resolved-bypassing /etc/resolv.conf at the resolved stub). Required for non-interactive runs.")
+	installCmd.Flags().BoolVarP(&installFlags.yes, "yes", "y", false, "Assume yes to every confirmable action (firewall open, port conflict auto-fix, valet stop, mkcert CA install retry, re-pointing a systemd-resolved-bypassing /etc/resolv.conf at the resolved stub, re-enabling resolved's stub listener when Laravel Valet disabled it). Required for non-interactive runs.")
 	installCmd.Flags().StringVar(&installFlags.email, "email", "", "Let's Encrypt account email for production SSL. Stored on disk after first set; only required once. Pass an empty string to disable production SSL entirely.")
 	installCmd.GroupID = GroupSystem
 	RootCmd.AddCommand(installCmd)
@@ -313,9 +313,15 @@ func startSites(sites []site.Site) {
 func configureSystemDNS() {
 	err := traefik.SetupDNS()
 	bypass, isBypass := errors.AsType[*traefik.ResolvedBypassError](err)
-	repoint := isBypass && bypass.Fixable && installFlags.yes
+	fixable := isBypass && bypass.Fixable && installFlags.yes
 	switch {
-	case repoint:
+	case fixable && bypass.StubListenerDisabled:
+		ui.Info("Enabling systemd-resolved's stub listener (Laravel Valet turns it off)")
+		ui.Dim("srv's drop-in already carries DNSStubListener=yes; a restart applies it.")
+		if err := traefik.EnableResolvedStubListener(); err != nil {
+			ui.Warn("%v", err)
+		}
+	case fixable:
 		ui.Info("Re-pointing /etc/resolv.conf at systemd-resolved's stub listener")
 		ui.Dim("Upstream servers stay the same: resolved keeps forwarding to each link's servers.")
 		if err := traefik.RepointResolvConf(); err != nil {
@@ -331,7 +337,7 @@ func configureSystemDNS() {
 
 	domains, _ := traefik.LoadLocalDomains()
 	if len(domains) == 0 {
-		if isBypass && !repoint {
+		if isBypass && !fixable {
 			reportResolvedBypass(bypass, 0)
 		}
 		return
@@ -362,6 +368,7 @@ func stopValetIfActive() error {
 		return fmt.Errorf("stop valet units: %w", err)
 	}
 	ui.Success("Stopped Valet units")
+	ui.Dim("Valet also leaves DNSStubListener=no in systemd-resolved; srv's install overrides it so resolved's stub listener runs again.")
 	return nil
 }
 

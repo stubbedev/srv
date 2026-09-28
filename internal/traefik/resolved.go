@@ -21,6 +21,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/platform"
+	"github.com/stubbedev/srv/internal/shell"
 )
 
 // Vars so tests can point them at scratch files.
@@ -36,13 +37,19 @@ type ResolvedBypassError struct {
 	Nameserver string
 	// Target is the /etc/resolv.conf symlink target ("" for a regular file).
 	Target string
-	// Fixable reports that srv may re-point /etc/resolv.conf itself: it links
-	// to resolved's own uplink file, so resolved already owns it and only the
-	// mode changes. Anything else belongs to another manager (or is NixOS's
-	// generated /etc), and rewriting it would fight that manager.
+	// Fixable reports that srv may repair the bypass itself: it links to one
+	// of resolved's own resolv.conf files, so resolved already owns it and
+	// only the mode changes. Anything else belongs to another manager (or is
+	// NixOS's generated /etc), and rewriting it would fight that manager.
 	Fixable bool
 	// NixOS reports a declarative /etc, where the fix is configuration.nix.
 	NixOS bool
+	// StubListenerDisabled reports that resolved's stub listener is off
+	// (DNSStubListener=no — what a Laravel Valet install leaves behind), so
+	// resolved writes the upstream servers into its stub file itself: even
+	// /etc/resolv.conf linked to that file bypasses resolved, and re-pointing
+	// alone can never fix this.
+	StubListenerDisabled bool
 }
 
 func (e *ResolvedBypassError) Error() string {
@@ -51,6 +58,9 @@ func (e *ResolvedBypassError) Error() string {
 
 // Summary says what is wrong, without the fix.
 func (e *ResolvedBypassError) Summary() string {
+	if e.StubListenerDisabled {
+		return "systemd-resolved's stub listener is disabled (DNSStubListener=no), so its stub resolv.conf lists the upstream servers and every lookup bypasses resolved: srv's DNS routing has no effect"
+	}
 	where := "is a regular file"
 	if e.Target != "" {
 		where = "links to " + e.Target
@@ -65,7 +75,18 @@ func (e *ResolvedBypassError) Summary() string {
 // Fix returns the remedy to show the user.
 func (e *ResolvedBypassError) Fix() string {
 	if e.NixOS {
+		if e.StubListenerDisabled {
+			return "remove DNSStubListener=no from services.resolved in configuration.nix and rebuild (with it set, resolved's stub file lists the upstream servers)"
+		}
 		return "set services.resolved.enable = true in configuration.nix and rebuild (it points /etc/resolv.conf at resolved's stub)"
+	}
+	if e.StubListenerDisabled {
+		return strings.Join([]string{
+			"sudo mkdir -p /etc/systemd/resolved.conf.d",
+			"printf '[Resolve]\\nDNSStubListener=yes\\n' | sudo tee /etc/systemd/resolved.conf.d/stub-listener.conf",
+			"sudo systemctl restart systemd-resolved",
+			"sudo " + strings.Join(repointArgs(), " "),
+		}, " && ")
 	}
 	return "sudo " + strings.Join(repointArgs(), " ")
 }
@@ -85,6 +106,30 @@ func RepointResolvConf() error {
 		return fmt.Errorf("re-point %s at %s: %w", resolvConfPath, constants.SystemdResolvePath, err)
 	}
 	return nil
+}
+
+// EnableResolvedStubListener turns systemd-resolved's stub listener back on
+// and points /etc/resolv.conf at the stub, completing the fix for a
+// StubListenerDisabled bypass. SetupDNS has already written the drop-in
+// carrying DNSStubListener=yes; the restart this performs is what applies
+// it once nothing else holds the stub address. Callers only do this for a
+// Fixable bypass, with the user's consent.
+func EnableResolvedStubListener() error {
+	if inUse, _ := shell.Default.CheckPortOnAddr(constants.SystemdResolvedStubIP, "53"); inUse {
+		holder := shell.Default.IdentifyPortProcess("53")
+		return fmt.Errorf("cannot enable resolved's stub listener: %s:53 is in use%s", constants.SystemdResolvedStubIP, holderSuffix(holder))
+	}
+	if err := shell.Default.SudoSystemctl("restart", "systemd-resolved"); err != nil {
+		return fmt.Errorf("restart systemd-resolved: %w", err)
+	}
+	return RepointResolvConf()
+}
+
+func holderSuffix(holder string) string {
+	if holder == "" {
+		return ""
+	}
+	return " (" + holder + ")"
 }
 
 // resolvedBypass reports how /etc/resolv.conf skips systemd-resolved, or nil
@@ -107,8 +152,33 @@ func resolvedBypass(data []byte) *ResolvedBypassError {
 	if _, err := os.Stat(nixosMarkerPath); err == nil {
 		e.NixOS = true
 	}
-	e.Fixable = !e.NixOS && filepath.Clean(e.Target) == constants.SystemdResolvedUplinkPath
+	// With the stub listener off, resolved writes the upstream servers into
+	// the stub file itself, so the file is no evidence of anything but the
+	// listener being disabled — whatever /etc/resolv.conf points at.
+	if stub, err := os.ReadFile(resolvedStubPath); err == nil &&
+		firstNameserver(string(stub)) != constants.SystemdResolvedStubIP {
+		e.StubListenerDisabled = true
+	}
+	target := filepath.Clean(e.Target)
+	resolvedOwnsLink := target == constants.SystemdResolvedUplinkPath
+	if e.StubListenerDisabled {
+		// The fix re-enables the listener and (re)points the link, which only
+		// completes when the link is one of resolved's own files, and only
+		// works at all when resolved can actually bind its stub address.
+		resolvedOwnsLink = resolvedOwnsLink || target == constants.SystemdResolvePath
+		e.Fixable = resolvedOwnsLink && !e.NixOS && resolvedStubPortFree()
+	} else {
+		e.Fixable = resolvedOwnsLink && !e.NixOS
+	}
 	return e
+}
+
+// resolvedStubPortFree reports whether resolved could bind its stub
+// listener: a leftover Valet dnsmasq holding :53 makes resolved drop the
+// stub listener even with the config right, so srv must not claim the fix.
+func resolvedStubPortFree() bool {
+	inUse, err := shell.Default.CheckPortOnAddr(constants.SystemdResolvedStubIP, "53")
+	return err == nil && !inUse
 }
 
 // checkResolvedPath returns a *ResolvedBypassError when resolved is the

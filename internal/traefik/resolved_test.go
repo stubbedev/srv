@@ -94,11 +94,13 @@ func TestResolvedBypass(t *testing.T) {
 	stub := "nameserver 127.0.0.53\noptions edns0 trust-ad\n"
 	upstream := "nameserver 192.168.1.1\n"
 	for _, tc := range []struct {
-		name     string
-		link     string // symlink target; "" writes a regular file
-		contents string
-		nixos    bool
-		want     *ResolvedBypassError
+		name         string
+		link         string // symlink target; "" writes a regular file
+		contents     string
+		stubContents string // resolved stub file contents; "" leaves it absent
+		nixos        bool
+		portHeld     bool
+		want         *ResolvedBypassError
 	}{
 		{name: "stub symlink", link: constants.SystemdResolvePath, contents: stub},
 		{name: "regular file naming the stub", contents: stub},
@@ -119,15 +121,47 @@ func TestResolvedBypass(t *testing.T) {
 			name: "NixOS never is", link: constants.SystemdResolvedUplinkPath, contents: upstream, nixos: true,
 			want: &ResolvedBypassError{Nameserver: "192.168.1.1", Target: constants.SystemdResolvedUplinkPath, NixOS: true},
 		},
+		// #14: with DNSStubListener=no (a leftover Valet setting) resolved's
+		// stub file lists the upstream servers, so re-pointing alone loops.
+		{
+			name: "disabled listener with uplink link", link: constants.SystemdResolvedUplinkPath, contents: upstream, stubContents: upstream,
+			want: &ResolvedBypassError{Nameserver: "192.168.1.1", Target: constants.SystemdResolvedUplinkPath, StubListenerDisabled: true, Fixable: true},
+		},
+		{
+			name: "disabled listener, link already at the stub", link: constants.SystemdResolvePath, contents: upstream, stubContents: upstream,
+			want: &ResolvedBypassError{Nameserver: "192.168.1.1", Target: constants.SystemdResolvePath, StubListenerDisabled: true, Fixable: true},
+		},
+		{
+			name: "disabled listener, stub port held", link: constants.SystemdResolvedUplinkPath, contents: upstream, stubContents: upstream, portHeld: true,
+			want: &ResolvedBypassError{Nameserver: "192.168.1.1", Target: constants.SystemdResolvedUplinkPath, StubListenerDisabled: true},
+		},
+		{
+			name: "disabled listener on NixOS", link: constants.SystemdResolvedUplinkPath, contents: upstream, stubContents: upstream, nixos: true,
+			want: &ResolvedBypassError{Nameserver: "192.168.1.1", Target: constants.SystemdResolvedUplinkPath, NixOS: true, StubListenerDisabled: true},
+		},
+		{
+			name: "disabled listener, another manager's link", link: "/run/NetworkManager/resolv.conf", contents: upstream, stubContents: upstream,
+			want: &ResolvedBypassError{Nameserver: "192.168.1.1", Target: "/run/NetworkManager/resolv.conf", StubListenerDisabled: true},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resolv, _, nixos := scratchResolv(t)
+			resolv, stubFile, nixos := scratchResolv(t)
+			responses := map[string]shelltest.Response{}
+			if tc.portHeld {
+				responses["port:53"] = shelltest.Response{InUse: true}
+			}
+			swapShell(t, shelltest.New(responses))
 			if tc.link != "" {
 				if err := os.Symlink(tc.link, resolv); err != nil {
 					t.Fatal(err)
 				}
 			} else if err := os.WriteFile(resolv, []byte(tc.contents), 0o644); err != nil {
 				t.Fatal(err)
+			}
+			if tc.stubContents != "" {
+				if err := os.WriteFile(stubFile, []byte(tc.stubContents), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if tc.nixos {
 				if err := os.WriteFile(nixos, nil, 0o644); err != nil {
@@ -158,6 +192,19 @@ func TestResolvedBypassFix(t *testing.T) {
 	if !strings.Contains(nix.Fix(), "services.resolved.enable") {
 		t.Errorf("NixOS Fix() = %q", nix.Fix())
 	}
+	disabled := &ResolvedBypassError{StubListenerDisabled: true}
+	for _, want := range []string{"DNSStubListener=yes", "restart systemd-resolved", constants.SystemdResolvePath} {
+		if !strings.Contains(disabled.Fix(), want) {
+			t.Errorf("disabled Fix() = %q, want it to mention %q", disabled.Fix(), want)
+		}
+	}
+	nixDisabled := &ResolvedBypassError{NixOS: true, StubListenerDisabled: true}
+	if !strings.Contains(nixDisabled.Fix(), "DNSStubListener=no") {
+		t.Errorf("NixOS disabled Fix() = %q", nixDisabled.Fix())
+	}
+	if !strings.Contains(disabled.Summary(), "stub listener is disabled") {
+		t.Errorf("disabled Summary() = %q", disabled.Summary())
+	}
 	var err error = b
 	if _, ok := errors.AsType[*ResolvedBypassError](err); !ok {
 		t.Error("errors.As does not find the bypass")
@@ -178,6 +225,50 @@ func TestRepointResolvConf(t *testing.T) {
 	if target, _ := os.Readlink(resolv); target != constants.SystemdResolvePath {
 		t.Errorf("resolv.conf -> %q, want %q", target, constants.SystemdResolvePath)
 	}
+}
+
+// EnableResolvedStubListener restarts resolved (applying the DNSStubListener
+// drop-in SetupDNS wrote) and repoints resolv.conf — but never while another
+// process holds the stub address, where the restart could not help.
+func TestEnableResolvedStubListener(t *testing.T) {
+	t.Run("port free", func(t *testing.T) {
+		resolv, _, _ := scratchResolv(t)
+		if err := os.Symlink(constants.SystemdResolvedUplinkPath, resolv); err != nil {
+			t.Fatal(err)
+		}
+		fake := fsShell(t)
+		if err := EnableResolvedStubListener(); err != nil {
+			t.Fatal(err)
+		}
+		var sawRestart bool
+		for _, c := range fake.Snapshot() {
+			if c.Method == "SudoSystemctl" && slices.Contains(c.Args, "restart") {
+				sawRestart = true
+			}
+		}
+		if !sawRestart {
+			t.Error("expected a systemd-resolved restart")
+		}
+		if target, _ := os.Readlink(resolv); target != constants.SystemdResolvePath {
+			t.Errorf("resolv.conf -> %q, want %q", target, constants.SystemdResolvePath)
+		}
+	})
+	t.Run("stub port held", func(t *testing.T) {
+		_, _, _ = scratchResolv(t)
+		fake := shelltest.New(map[string]shelltest.Response{
+			"port:53":    {InUse: true},
+			"process:53": {Process: "dnsmasq"},
+		})
+		swapShell(t, fake)
+		if err := EnableResolvedStubListener(); err == nil || !strings.Contains(err.Error(), "dnsmasq") {
+			t.Fatalf("err = %v, want it to name the port holder", err)
+		}
+		for _, c := range fake.Snapshot() {
+			if c.Method == "SudoSystemctl" {
+				t.Errorf("resolved restarted despite the held port: %v", c.Args)
+			}
+		}
+	})
 }
 
 // The bootstrap restore must undo only srv's own swap: if resolv.conf was

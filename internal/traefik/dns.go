@@ -174,6 +174,12 @@ func renderResolvedConf(routingDomains []string) string {
 	b.WriteString("[Resolve]\n")
 	fmt.Fprintf(&b, "DNS=%s:%s\n", constants.LocalhostIP, constants.PortDNSStr)
 	fmt.Fprintf(&b, "Domains=%s\n", strings.Join(routingDomains, " "))
+	// Explicitly the default, so a main config that disables the stub
+	// listener (a Laravel Valet install writes DNSStubListener=no and leaves
+	// it behind) is overridden: with the listener off, resolved's stub file
+	// lists the upstream servers and no resolv.conf target routes through
+	// resolved, so srv's routing would have no effect.
+	b.WriteString("DNSStubListener=yes\n")
 	return b.String()
 }
 
