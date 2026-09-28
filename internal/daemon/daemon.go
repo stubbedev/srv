@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -174,7 +173,7 @@ func (d *Daemon) Run() error {
 	// Traefik failover carry either a daemon-hosted listener port or an nginx
 	// sidecar. Re-render them natively and remove the hop, best-effort, once
 	// per daemon start; failures are logged and the next start retries.
-	d.migrateLegacyFallbacks()
+	d.reconcileFallbacks()
 
 	// Daemon-served routes are rendered by this binary's rules (the compress
 	// middleware, the embedded server's address); re-render them once per
@@ -191,24 +190,11 @@ func (d *Daemon) Run() error {
 	return d.watchEvents()
 }
 
-// migrateLegacyFallbacks re-renders proxies whose fallback still uses a
-// retired hop. Never fails the daemon: per-proxy warnings land in the log.
-func (d *Daemon) migrateLegacyFallbacks() {
-	entries, err := os.ReadDir(filepath.Join(d.cfg.Root, constants.ProxiesSubdir))
-	if err != nil {
-		return // no proxies dir yet — nothing to migrate
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") {
-			continue
-		}
-		meta, err := proxy.Read(strings.TrimSuffix(entry.Name(), ".yml"))
-		if err != nil || meta == nil {
-			continue
-		}
-		for _, w := range proxy.MigrateLegacyFallback(d.cfg, meta) {
-			d.log("Fallback migration: %s", w)
-		}
+// reconcileFallbacks brings proxy fallback renderings up to date (see
+// proxy.ReconcileFallbacks). Never fails the daemon: warnings land in the log.
+func (d *Daemon) reconcileFallbacks() {
+	for _, w := range proxy.ReconcileFallbacks(d.cfg) {
+		d.log("Fallback reconcile: %s", w)
 	}
 }
 

@@ -84,7 +84,7 @@ func setupLegacyProxy(t *testing.T, meta Metadata) *config.Config {
 	return cfg
 }
 
-func TestMigrateLegacyFallbackDaemonListener(t *testing.T) {
+func TestReconcileFallbacksMigratesDaemonListener(t *testing.T) {
 	cfg := setupLegacyProxy(t, Metadata{
 		Name:         "app",
 		Domains:      []string{"app.test"},
@@ -97,7 +97,7 @@ func TestMigrateLegacyFallbackDaemonListener(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if warns := MigrateLegacyFallback(cfg, mustMeta(t, "app")); len(warns) != 0 {
+	if warns := ReconcileFallbacks(cfg); len(warns) != 0 {
 		t.Fatalf("unexpected warnings: %v", warns)
 	}
 
@@ -145,7 +145,7 @@ func TestMigrateLegacyFallbackDaemonListener(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyFallbackSidecar(t *testing.T) {
+func TestReconcileFallbacksMigratesSidecar(t *testing.T) {
 	cfg := setupLegacyProxy(t, Metadata{
 		Name:         "web",
 		Domains:      []string{"web.test"},
@@ -172,7 +172,7 @@ func TestMigrateLegacyFallbackSidecar(t *testing.T) {
 	restoreCompose := docker.SwapComposeExec(func(string, bool, ...string) error { return nil })
 	t.Cleanup(restoreCompose)
 
-	if warns := MigrateLegacyFallback(cfg, mustMeta(t, "web")); len(warns) != 0 {
+	if warns := ReconcileFallbacks(cfg); len(warns) != 0 {
 		t.Fatalf("unexpected warnings: %v", warns)
 	}
 
@@ -188,14 +188,14 @@ func TestMigrateLegacyFallbackSidecar(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyFallbackNoop(t *testing.T) {
+func TestReconcileFallbacksNoop(t *testing.T) {
 	cfg := setupLegacyProxy(t, Metadata{
 		Name:    "plain",
 		Domains: []string{"plain.test"},
 		IsLocal: true,
 		Port:    8080,
 	})
-	if warns := MigrateLegacyFallback(cfg, mustMeta(t, "plain")); len(warns) != 0 {
+	if warns := ReconcileFallbacks(cfg); len(warns) != 0 {
 		t.Fatalf("no legacy hop, got warnings: %v", warns)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.TraefikConfDir(), "proxy-plain.yml")); !os.IsNotExist(err) {

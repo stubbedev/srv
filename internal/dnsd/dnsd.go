@@ -702,22 +702,37 @@ var upstreamClient = &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
 // common case sends one packet instead of one per configured upstream.
 const hedgeDelay = 200 * time.Millisecond
 
-// forwardUpstream relays the original question to the configured servers as
-// a hedged race: the first upstream is asked at once, the next one joins
-// when the previous has failed or stayed silent for hedgeDelay, and the
-// first answer wins. A healthy first upstream therefore costs one query, and
-// a dead one costs at most hedgeDelay before the next is tried — never a
-// full upstreamTimeout.
+// forwardUpstream relays the original question upstream (see exchangeUpstream)
+// and writes the winning answer, or SERVFAIL when no upstream answered.
+func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *ZoneSnapshot) {
+	if resp := exchangeUpstream(r, z.upstream); resp != nil {
+		_ = w.WriteMsg(resp)
+		return
+	}
+	// No upstream answered. For a name srv owns this is unreachable (lookupA
+	// matched); for anything else the honest answer is SERVFAIL rather than a
+	// forged empty answer for a name we know nothing about.
+	reply.Rcode = miekg.RcodeServerFailure
+	reply.Answer = nil
+	_ = w.WriteMsg(reply)
+}
+
+// exchangeUpstream asks the upstreams as a hedged race: the first upstream is
+// asked at once, the next one joins when the previous has failed or stayed
+// silent for hedgeDelay, and the first answer wins. A healthy first upstream
+// therefore costs one query, and a dead one costs at most hedgeDelay before
+// the next is tried — never a full upstreamTimeout. Returns nil when none
+// answered.
 //
 // Each worker sends exactly one message (its answer, or nil on failure) into
 // a channel buffered for all of them, so the losers of the race finish and
-// exit after the winner is written: no worker may ever block on the send,
+// exit after the winner is returned: no worker may ever block on the send,
 // or every forwarded query would leak a goroutine per slow upstream.
-func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *ZoneSnapshot) {
-	replies := make(chan *miekg.Msg, len(z.upstream))
+func exchangeUpstream(r *miekg.Msg, upstreams []upstream) *miekg.Msg {
+	replies := make(chan *miekg.Msg, len(upstreams))
 	next, inflight := 0, 0
 	launch := func() {
-		up := z.upstream[next]
+		up := upstreams[next]
 		next++
 		inflight++
 		go func() {
@@ -729,7 +744,7 @@ func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *
 			}
 		}()
 	}
-	if len(z.upstream) > 0 {
+	if len(upstreams) > 0 {
 		launch()
 	}
 	hedge := time.NewTimer(hedgeDelay)
@@ -739,28 +754,52 @@ func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *
 		case resp := <-replies:
 			inflight--
 			if resp != nil {
-				_ = w.WriteMsg(resp)
-				return
+				return resp
 			}
 			// That upstream failed outright: move on now rather than
 			// waiting out the hedge timer.
-			if next < len(z.upstream) {
+			if next < len(upstreams) {
 				launch()
 				hedge.Reset(hedgeDelay)
 			}
 		case <-hedge.C:
-			if next < len(z.upstream) {
+			if next < len(upstreams) {
 				launch()
 				hedge.Reset(hedgeDelay)
 			}
 		}
 	}
-	// No upstream answered. For a name srv owns this is unreachable (lookupA
-	// matched); for anything else the honest answer is SERVFAIL rather than a
-	// forged empty answer for a name we know nothing about.
-	reply.Rcode = miekg.RcodeServerFailure
-	reply.Answer = nil
-	_ = w.WriteMsg(reply)
+	return nil
+}
+
+// Owns reports whether the server answers name itself from this snapshot
+// rather than forwarding it — the same lookup the query path makes.
+func (z *ZoneSnapshot) Owns(name string) bool {
+	_, ok := lookupA(z, strings.ToLower(dnsName(name)))
+	return ok
+}
+
+// ResolveA resolves name the way the server resolves a name it does not own:
+// through this snapshot's upstreams (the defaults when it declares none),
+// bypassing its own records. Returns the first A record.
+func (z *ZoneSnapshot) ResolveA(name string) (net.IP, error) {
+	upstreams := z.upstream
+	if len(upstreams) == 0 {
+		upstreams = defaultUpstream()
+	}
+	var q miekg.Msg
+	q.SetQuestion(dnsName(name), miekg.TypeA)
+	q.RecursionDesired = true
+	resp := exchangeUpstream(&q, upstreams)
+	if resp == nil {
+		return nil, fmt.Errorf("no upstream DNS server answered for %s", name)
+	}
+	for _, rr := range resp.Answer {
+		if a, ok := rr.(*miekg.A); ok {
+			return a.A, nil
+		}
+	}
+	return nil, fmt.Errorf("no A record for %s upstream (%s)", name, miekg.RcodeToString[resp.Rcode])
 }
 
 // IsBindPermissionErr reports whether err is the classic "cannot bind port

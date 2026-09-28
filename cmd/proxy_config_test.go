@@ -90,3 +90,23 @@ func TestReadProxyConfigBadYAML(t *testing.T) {
 		t.Errorf("bad yaml should yield unknown, got %+v", info)
 	}
 }
+
+func TestWriteProxyConfigFallbackServerName(t *testing.T) {
+	cfg := newCmdCfg(t)
+	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{
+		Name: "app", Domain: "app.com", TargetURL: "http://localhost:3001",
+		FallbackURL: "https://203.0.113.7", FallbackServerName: "app.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.TraefikConfDir(), "proxy-app.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	for _, want := range []string{"url: https://203.0.113.7", "serverName: app.com", "insecureSkipVerify: true", "serversTransport: proxy-app-fb-transport"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered config missing %q:\n%s", want, body)
+		}
+	}
+}

@@ -25,6 +25,11 @@ type ProxyRoute struct {
 	// FallbackURL turns the service into Traefik's native failover (v3.7+):
 	// 5xx responses and dial failures re-proxy to this URL.
 	FallbackURL string
+	// FallbackServerName is the TLS server name for an https FallbackURL that
+	// names an IP in place of its hostname (see proxy.fallbackTarget): the
+	// hostname srv's own DNS answers with loopback, which would make Traefik
+	// fail over to itself. Empty when FallbackURL carries its own hostname.
+	FallbackServerName string
 	// FallbackDial bounds the connect phase to the primary before a dial
 	// failure fails over. Empty means the Traefik default; srv passes the
 	// user's --fallback-timeout through.
@@ -48,12 +53,14 @@ func WriteProxyConfig(cfg *config.Config, p ProxyRoute) error {
 		TLS:         localTLS(),
 	}
 
-	services := map[string]dynService{
-		key: {LoadBalancer: &dynLoadBalancer{Servers: []dynServer{{URL: p.TargetURL}}}},
-	}
+	var services map[string]dynService
 	var transports map[string]dynServersTransport
 
-	if p.FallbackURL != "" {
+	if p.FallbackURL == "" {
+		services = map[string]dynService{
+			key: {LoadBalancer: &dynLoadBalancer{Servers: []dynServer{{URL: p.TargetURL}}}},
+		}
+	} else {
 		dial := p.FallbackDial
 		if dial == "" {
 			dial = constants.FallbackTimeoutDefault
@@ -66,6 +73,14 @@ func WriteProxyConfig(cfg *config.Config, p ProxyRoute) error {
 		}
 
 		primary, fallback := key+"-primary", key+"-fallback"
+		fallbackLB := &dynLoadBalancer{Servers: []dynServer{{URL: p.FallbackURL}}}
+		if strings.HasPrefix(p.FallbackURL, "https://") {
+			fallbackLB.ServersTransport = key + "-fb-transport"
+			transports[fallbackLB.ServersTransport] = dynServersTransport{
+				ServerName:         p.FallbackServerName,
+				InsecureSkipVerify: true,
+			}
+		}
 		services = map[string]dynService{
 			key: {
 				Failover: &dynFailover{
@@ -80,17 +95,7 @@ func WriteProxyConfig(cfg *config.Config, p ProxyRoute) error {
 					ServersTransport: primaryTransport,
 				},
 			},
-			fallback: {LoadBalancer: &dynLoadBalancer{Servers: []dynServer{{URL: p.FallbackURL}}}},
-		}
-		if strings.HasPrefix(p.FallbackURL, "https://") {
-			fallbackTransport := key + "-fb-transport"
-			transports[fallbackTransport] = dynServersTransport{InsecureSkipVerify: true}
-			services[fallback] = dynService{
-				LoadBalancer: &dynLoadBalancer{
-					Servers:          []dynServer{{URL: p.FallbackURL}},
-					ServersTransport: fallbackTransport,
-				},
-			}
+			fallback: {LoadBalancer: fallbackLB},
 		}
 	}
 

@@ -16,7 +16,6 @@ import (
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/dnsd"
-	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/traefik"
 )
 
@@ -117,17 +116,9 @@ func (d *Daemon) refreshDNSZones() {
 	}
 	z := dnsd.NewZoneSnapshot()
 
-	domains, err := traefik.LoadLocalDomains()
-	if err != nil {
+	if err := traefik.PinLocalDomains(z); err != nil {
 		d.log("DNS zone refresh: %v", err)
 		return
-	}
-	for _, entry := range domains {
-		if traefik.IsWildcardEntry(entry) {
-			z.PinWildcard(traefik.BareDomain(entry), constants.LocalhostIP)
-			continue
-		}
-		z.PinExact(entry, constants.LocalhostIP)
 	}
 
 	aliasDecls, err := traefik.ScanRedirectAliases()
@@ -143,12 +134,8 @@ func (d *Daemon) refreshDNSZones() {
 		}
 	}
 
-	if userCfg, err := ops.UserConfig(); err != nil {
+	if err := traefik.SetConfiguredUpstreams(z); err != nil {
 		d.log("DNS zone refresh: user config: %v", err)
-	} else {
-		for _, spec := range userCfg.UpstreamDNS {
-			z.SetUpstream(spec)
-		}
 	}
 
 	server.SetZones(z)

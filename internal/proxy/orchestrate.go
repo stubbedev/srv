@@ -113,18 +113,6 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 	}
 	res.TargetURL = targetURL
 
-	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{
-		Name:         name,
-		Domain:       spec.Domain,
-		TargetURL:    targetURL,
-		Container:    containerName,
-		Wildcard:     spec.Wildcard,
-		FallbackURL:  spec.FallbackURL,
-		FallbackDial: spec.FallbackTimeout,
-	}); err != nil {
-		return nil, err
-	}
-
 	// Preserve any existing routes when overwriting via Force.
 	var existingRoutes []site.Route
 	if pmeta, _ := Read(name); pmeta != nil {
@@ -133,7 +121,7 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 	// Port records the primary upstream so migrations and doctor checks can
 	// reason about the proxy without Docker; a container primary has none.
 	primaryPort, _ := strconv.Atoi(spec.Port)
-	if err := Write(Metadata{
+	meta := Metadata{
 		Name:            name,
 		Domains:         []string{spec.Domain},
 		Wildcard:        spec.Wildcard,
@@ -142,7 +130,21 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		Routes:          existingRoutes,
 		FallbackURL:     spec.FallbackURL,
 		FallbackTimeout: spec.FallbackTimeout,
-	}); err != nil {
+	}
+
+	route, err := proxyRoute(localZone, &meta, targetURL)
+	if err != nil {
+		return nil, err
+	}
+	route.Container = containerName
+	if route.FallbackServerName != "" {
+		res.Notes = append(res.Notes, fmt.Sprintf("%s is served by srv locally, so the fallback dials its upstream address %s directly", route.FallbackServerName, route.FallbackURL))
+	}
+	if err := traefik.WriteProxyConfig(cfg, route); err != nil {
+		return nil, err
+	}
+
+	if err := Write(meta); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("write proxy metadata: %v", err))
 	} else if len(existingRoutes) > 0 {
 		if err := Reload(name); err != nil {
@@ -267,16 +269,7 @@ func resolveTarget(cfg *config.Config, isContainer bool, containerName, containe
 		} else {
 			warn = fmt.Sprintf("nothing is listening on port %s — start your service before using the proxy", port)
 		}
-		// On Linux, Traefik uses network_mode: host, so it can reach localhost
-		// directly. Use "localhost" rather than "127.0.0.1" so that services
-		// bound only to the IPv6 loopback (::1) — e.g. Nuxt, Vite — are also
-		// reachable. On Mac/Windows, Traefik runs in bridge mode and needs
-		// host.docker.internal.
-		host := constants.DockerHostInternal
-		if platform.IsLinux() {
-			host = constants.LocalhostAlias
-		}
-		return fmt.Sprintf("http://%s:%s", host, port), warn, nil
+		return localPrimaryURL(port), warn, nil
 	}
 	if err := docker.CreateNetwork(cfg.NetworkName); err != nil {
 		return "", "", fmt.Errorf("create network: %w", err)
@@ -295,7 +288,7 @@ func resolveTarget(cfg *config.Config, isContainer bool, containerName, containe
 		if pubErr != nil {
 			return "", "", fmt.Errorf("container %s: %w — publish the port to the host (docker run -p %s:%s ...) so Traefik can reach it", containerName, pubErr, containerPort, containerPort)
 		}
-		return fmt.Sprintf("http://%s:%s", constants.LocalhostAlias, hostPort), "", nil
+		return localPrimaryURL(hostPort), "", nil
 	}
 	// Mac/Windows: Traefik joins the srv network (bridge mode), so it resolves
 	// the container by its Docker DNS name directly.

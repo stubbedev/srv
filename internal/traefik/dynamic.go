@@ -43,6 +43,9 @@ type dynFailoverErrors struct {
 // dial phase so a dead primary fails over after a bounded wait instead of the
 // 30s default. Referenced by name from dynLoadBalancer.ServersTransport.
 type dynServersTransport struct {
+	// ServerName is the SNI sent to an upstream dialed by IP, so a host that
+	// srv shadows locally still gets its real vhost.
+	ServerName         string                 `yaml:"serverName,omitempty"`
 	InsecureSkipVerify bool                   `yaml:"insecureSkipVerify,omitempty"`
 	ForwardingTimeouts *dynForwardingTimeouts `yaml:"forwardingTimeouts,omitempty"`
 }

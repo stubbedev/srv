@@ -542,3 +542,45 @@ func TestForwardUpstreamDoesNotLeakGoroutines(t *testing.T) {
 		}
 	}
 }
+
+func TestZoneSnapshotOwnsFollowsLookup(t *testing.T) {
+	z := NewZoneSnapshot()
+	z.PinExact("app.com", constants.LocalhostIP)
+	z.PinWildcard("site.test", constants.LocalhostIP)
+	for name, want := range map[string]bool{
+		"app.com":        true,
+		"APP.com.":       true,
+		"www.app.com":    false, // exact entries cover the name only
+		"site.test":      true,
+		"a.b.site.test":  true,
+		"napp.com":       false,
+		"othersite.test": false,
+		"unrelated.org":  false,
+	} {
+		if got := z.Owns(name); got != want {
+			t.Errorf("Owns(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestZoneSnapshotResolveABypassesOwnRecords(t *testing.T) {
+	up := startStubUpstream(t, "203.0.113.7", 0)
+	z := NewZoneSnapshot()
+	z.PinExact("app.com", constants.LocalhostIP)
+	z.SetUpstream(up)
+	ip, err := z.ResolveA("app.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip.String() != "203.0.113.7" {
+		t.Errorf("ResolveA = %s, want the upstream's 203.0.113.7", ip)
+	}
+}
+
+func TestZoneSnapshotResolveAEmptyAnswer(t *testing.T) {
+	z := NewZoneSnapshot()
+	z.SetUpstream(startStubUpstream(t, "", 0))
+	if _, err := z.ResolveA("gone.example"); err == nil {
+		t.Fatal("ResolveA succeeded on an empty upstream answer")
+	}
+}

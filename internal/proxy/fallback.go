@@ -104,15 +104,12 @@ func legacyFallback(cfg *config.Config, meta *Metadata) bool {
 	return err == nil
 }
 
-// MigrateLegacyFallback re-renders a proxy whose fallback predates the native
+// migrateLegacyFallback re-renders a proxy whose fallback predates the native
 // Traefik failover: the daemon-hosted listener (localhost primaries) or the
 // nginx sidecar (container primaries) is replaced by the failover service,
 // and the retired hop is removed. Returns warnings for anything it had to
-// skip; a proxy without a legacy hop is a silent no-op.
-func MigrateLegacyFallback(cfg *config.Config, meta *Metadata) []string {
-	if !legacyFallback(cfg, meta) {
-		return nil
-	}
+// skip. Callers check legacyFallback first.
+func migrateLegacyFallback(cfg *config.Config, dns func() (dnsView, error), meta *Metadata) []string {
 	name := meta.Name
 	var warn []string
 
@@ -123,7 +120,7 @@ func MigrateLegacyFallback(cfg *config.Config, meta *Metadata) []string {
 	var primaryURL string
 	switch {
 	case meta.Port > 0:
-		primaryURL = fmt.Sprintf("http://%s:%d", constants.LocalhostAlias, meta.Port)
+		primaryURL = localPrimaryURL(strconv.Itoa(meta.Port))
 	default:
 		data, err := os.ReadFile(filepath.Join(FallbackDir(cfg, name), "nginx.conf"))
 		if err != nil {
@@ -134,21 +131,18 @@ func MigrateLegacyFallback(cfg *config.Config, meta *Metadata) []string {
 			return append(warn, fmt.Sprintf("proxy %s: no proxy_pass in the retired sidecar config; re-run 'srv proxy add --force' to rebuild it", name))
 		}
 		host, port := m[1], m[2]
-		if host != constants.LocalhostIP && host != "127.0.0.1" {
+		if host != constants.LocalhostIP {
 			primaryURL = fmt.Sprintf("http://%s:%s", host, port)
 		} else {
-			primaryURL = fmt.Sprintf("http://%s:%s", constants.LocalhostAlias, port)
+			primaryURL = localPrimaryURL(port)
 		}
 	}
 
-	if err := traefik.WriteProxyConfig(cfg, traefik.ProxyRoute{
-		Name:         name,
-		Domain:       firstDomain(meta),
-		TargetURL:    primaryURL,
-		Wildcard:     meta.Wildcard,
-		FallbackURL:  meta.FallbackURL,
-		FallbackDial: meta.FallbackTimeout,
-	}); err != nil {
+	route, err := proxyRoute(dns, meta, primaryURL)
+	if err != nil {
+		return append(warn, fmt.Sprintf("proxy %s: %v", name, err))
+	}
+	if err := traefik.WriteProxyConfig(cfg, route); err != nil {
 		return append(warn, fmt.Sprintf("proxy %s: re-render native failover: %v", name, err))
 	}
 
