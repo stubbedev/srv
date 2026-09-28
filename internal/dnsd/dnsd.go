@@ -305,19 +305,6 @@ func (s *Server) Shutdown() {
 	}
 }
 
-type fileStamp struct {
-	size int64
-	mod  time.Time
-}
-
-func fileStampOf(path string) (fileStamp, bool) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return fileStamp{}, false
-	}
-	return fileStamp{size: fi.Size(), mod: fi.ModTime()}, true
-}
-
 // Watch reloads the fallback zone files whenever they change, until ctx is
 // done. It blocks; run it in a goroutine. The reload immediately after the
 // watchers are installed closes the startup race: a zone file rewritten
@@ -332,85 +319,16 @@ func (s *Server) Watch() error {
 
 	// Atomic writes replace the file, so watch the directories, not the
 	// files: watching an inode that gets renamed away watches nothing.
-	dirs := map[string]bool{}
-	for _, p := range []string{s.confPath, s.hostsPath} {
-		dirs[filepath.Dir(p)] = true
+	confDir, hostsDir := filepath.Dir(s.confPath), filepath.Dir(s.hostsPath)
+	if err := watcher.Add(confDir); err != nil {
+		return fmt.Errorf("watch %s: %w", confDir, err)
 	}
-	for dir := range dirs {
-		if err := watcher.Add(dir); err != nil {
-			return fmt.Errorf("watch %s: %w", dir, err)
+	if hostsDir != confDir {
+		if err := watcher.Add(hostsDir); err != nil {
+			return fmt.Errorf("watch %s: %w", hostsDir, err)
 		}
 	}
-	if err := s.Reload(); err != nil {
-		// Startup state still matters; surface it but keep serving.
-		log.Printf("dnsd: initial reload failed: %v", err)
-	}
-
-	debounce := time.NewTimer(reloadDebounce)
-	if !debounce.Stop() {
-		<-debounce.C
-	}
-	pending := false
-	confStamp, _ := fileStampOf(s.confPath)
-	hostsStamp, _ := fileStampOf(s.hostsPath)
-	markDirty := func() {
-		if !pending {
-			pending = true
-			debounce.Reset(reloadDebounce)
-		}
-	}
-	refresh := func() {
-		if err := s.Reload(); err != nil {
-			// A half-written or hand-mangled file must not kill the server;
-			// keep the last good zones and surface the problem.
-			log.Printf("dnsd: reload failed, keeping previous zones: %v", err)
-			return
-		}
-		confStamp, _ = fileStampOf(s.confPath)
-		hostsStamp, _ = fileStampOf(s.hostsPath)
-	}
-	poll := time.NewTicker(pollInterval)
-	defer poll.Stop()
-	for {
-		select {
-		case <-s.ctx.Done():
-			return nil
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return nil
-			}
-			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 {
-				continue
-			}
-			name := filepath.Base(event.Name)
-			if name != filepath.Base(s.confPath) && name != filepath.Base(s.hostsPath) {
-				continue
-			}
-			markDirty()
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return nil
-			}
-			log.Printf("dnsd: watch error: %v", err)
-			// An overflowed or failing watcher may have dropped events:
-			// lean on the stat poll from here on.
-			poll.Reset(pollIntervalDegraded)
-		case <-poll.C:
-			if cur, ok := fileStampOf(s.confPath); ok && cur != confStamp {
-				confStamp = cur
-				markDirty()
-			}
-			if cur, ok := fileStampOf(s.hostsPath); ok && cur != hostsStamp {
-				hostsStamp = cur
-				markDirty()
-			}
-		case <-debounce.C:
-			if pending {
-				pending = false
-				refresh()
-			}
-		}
-	}
+	return s.watchLoop(watcher.Events, watcher.Errors)
 }
 
 // SetZones installs a snapshot built from the structured config as the
@@ -435,6 +353,111 @@ func (s *Server) Reload() error {
 	s.fallback.Store(z)
 	s.zones.Store(combine(s.primary.Load(), z))
 	return nil
+}
+
+// watchLoop is Watch's event loop, fed by the watcher's channels.
+//
+// An event is only a hint that something in a watched directory moved; which
+// ops a backend reports for an atomic rename-over is not dependable. kqueue
+// (macOS, BSD) reports the replaced file as Remove and emits the matching
+// Create only when its directory rescan happens to run after the file's
+// delete note, so a filter on Create/Write/Rename missed the rewrite
+// intermittently. Every event therefore just schedules a debounced stat of
+// both files, and the files reload only when a stamp actually differs: the
+// on-disk state decides, never the event type or name. Unrelated churn in
+// the directories costs two stats per debounce window and no reload.
+func (s *Server) watchLoop(events <-chan fsnotify.Event, errs <-chan error) error {
+	// Stat before reading: a write landing between the two then leaves a
+	// stale stamp that the next check catches, rather than a fresh stamp
+	// over stale zones.
+	stamps := s.statZones()
+	if err := s.Reload(); err != nil {
+		// Startup state still matters; surface it but keep serving.
+		log.Printf("dnsd: initial reload failed: %v", err)
+	}
+
+	debounce := time.NewTimer(reloadDebounce)
+	if !debounce.Stop() {
+		<-debounce.C
+	}
+	pending := false
+	markDirty := func() {
+		if !pending {
+			pending = true
+			debounce.Reset(reloadDebounce)
+		}
+	}
+	poll := time.NewTicker(pollInterval)
+	defer poll.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		case _, ok := <-events:
+			if !ok {
+				return nil
+			}
+			markDirty()
+		case err, ok := <-errs:
+			if !ok {
+				return nil
+			}
+			log.Printf("dnsd: watch error: %v", err)
+			// An overflowed or failing watcher may have dropped events:
+			// lean on the stat poll from here on.
+			poll.Reset(pollIntervalDegraded)
+		case <-poll.C:
+			// The safety net for events the platform never delivered.
+			markDirty()
+		case <-debounce.C:
+			pending = false
+			cur := s.statZones()
+			if cur.equal(stamps) {
+				continue
+			}
+			if err := s.Reload(); err != nil {
+				// A half-written or hand-mangled file must not kill the
+				// server; keep the last good zones and the old stamps, so
+				// the next event or poll retries.
+				log.Printf("dnsd: reload failed, keeping previous zones: %v", err)
+				continue
+			}
+			stamps = cur
+		}
+	}
+}
+
+// zoneStamps identifies the on-disk version of both zone files: which file
+// each name points at (os.SameFile, so a rename-over is a change even when
+// size and mtime happen to match) plus its size and mtime. A missing file is
+// a nil entry, so a deletion is a change too — the reload then drops that
+// file's records, which is what an absent file means to loadZones.
+type zoneStamps [2]os.FileInfo
+
+func (s *Server) statZones() zoneStamps {
+	var st zoneStamps
+	for i, p := range [2]string{s.confPath, s.hostsPath} {
+		if fi, err := os.Stat(p); err == nil {
+			st[i] = fi
+		}
+	}
+	return st
+}
+
+func (a zoneStamps) equal(b zoneStamps) bool {
+	for i := range a {
+		x, y := a[i], b[i]
+		if x == nil || y == nil {
+			if x != y {
+				return false
+			}
+			continue
+		}
+		if !os.SameFile(x, y) || x.Size() != y.Size() || !x.ModTime().Equal(y.ModTime()) {
+			return false
+		}
+	}
+	return true
 }
 
 // combine overlays the structured snapshot on the file-derived one and
