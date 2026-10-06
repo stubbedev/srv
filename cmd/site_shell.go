@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -159,11 +160,26 @@ func runOpen(cmd *cobra.Command, args []string) error {
 
 	url := "https://" + primary
 	ui.Dim("Opening %s...", url)
-	c := exec.CommandContext(cmd.Context(), "xdg-open", url)
+	name, openArgs := openCommandForOS(runtime.GOOS, url)
+	c := exec.CommandContext(cmd.Context(), name, openArgs...)
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("xdg-open failed: %w", err)
+		return fmt.Errorf("%s failed: %w", name, err)
 	}
 	return nil
+}
+
+// openCommandForOS returns the launcher that opens a URL in the platform's
+// default browser. xdg-open does not exist on a stock macOS or Windows
+// install, both first-class srv platforms.
+func openCommandForOS(goos, url string) (string, []string) {
+	switch goos {
+	case "darwin":
+		return "open", []string{url}
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", url}
+	default:
+		return "xdg-open", []string{url}
+	}
 }

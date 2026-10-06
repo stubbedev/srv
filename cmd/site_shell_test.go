@@ -57,3 +57,26 @@ func TestRunOpenMissingSite(t *testing.T) {
 		t.Error("expected err")
 	}
 }
+
+// xdg-open does not exist on a stock macOS or Windows install; the launcher
+// must follow the platform.
+func TestOpenCommandForOS(t *testing.T) {
+	cases := []struct {
+		goos string
+		want string
+	}{
+		{"linux", "xdg-open"},
+		{"darwin", "open"},
+		{"windows", "rundll32"},
+		{"freebsd", "xdg-open"},
+	}
+	for _, c := range cases {
+		name, args := openCommandForOS(c.goos, "https://a.test")
+		if name != c.want {
+			t.Errorf("openCommandForOS(%q) = %q, want %q", c.goos, name, c.want)
+		}
+		if len(args) == 0 || args[len(args)-1] != "https://a.test" {
+			t.Errorf("openCommandForOS(%q) args = %v, want the URL last", c.goos, args)
+		}
+	}
+}

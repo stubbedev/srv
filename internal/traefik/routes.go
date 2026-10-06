@@ -166,6 +166,11 @@ func routeMatcher(r RouteSpec) (string, error) {
 		return "", errors.New("set exactly one of path / path_regex")
 	case r.Path == "" && r.PathRegex == "":
 		return "", errors.New("missing path / path_regex")
+	case strings.Contains(r.Path, "`") || strings.Contains(r.PathRegex, "`"):
+		// Traefik rule literals are backtick-delimited with no escape
+		// sequence; a backtick would terminate the literal and either inject
+		// extra matchers or make Traefik reject the whole routes file.
+		return "", errors.New("path / path_regex must not contain backticks")
 	case r.PathRegex != "":
 		if _, err := regexp.Compile(r.PathRegex); err != nil {
 			return "", fmt.Errorf("invalid path_regex: %w", err)

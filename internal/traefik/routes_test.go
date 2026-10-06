@@ -75,6 +75,11 @@ func TestRouteMatcher(t *testing.T) {
 			spec:    RouteSpec{PathRegex: "(unterminated"},
 			wantErr: "invalid path_regex",
 		},
+		{
+			name:    "backtick breaks out of the rule literal",
+			spec:    RouteSpec{Path: "/x`) && (PathPrefix(`/other"},
+			wantErr: "backticks",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

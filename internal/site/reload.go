@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -264,6 +265,12 @@ func ValidateMetadata(meta *SiteMetadata) error {
 		}
 		if (r.Path == "") == (r.PathRegex == "") {
 			return fmt.Errorf("route %q: exactly one of `path` or `path_regex` is required", r.ID)
+		}
+		// Route values land inside backtick-delimited Traefik rule literals,
+		// which have no escape sequence: a backtick would break out of the
+		// literal and inject matchers (or reject the whole routes file).
+		if strings.Contains(r.Path, "`") || strings.Contains(r.PathRegex, "`") {
+			return fmt.Errorf("route %q: `path` and `path_regex` must not contain backticks", r.ID)
 		}
 		if r.Rewrite != "" && r.PathRegex == "" {
 			return fmt.Errorf("route %q: `rewrite` requires `path_regex`", r.ID)

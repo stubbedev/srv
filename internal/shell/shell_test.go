@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -274,6 +275,25 @@ func TestOSRunnerRunWithStdin(t *testing.T) {
 	r := OSRunner{}
 	if err := r.RunWithStdin("data", "cat"); err != nil {
 		t.Errorf("err: %v", err)
+	}
+}
+
+func TestStageForSudo(t *testing.T) {
+	path, cleanup, err := stageForSudo("drop-in content\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("staged file unreadable: %v", err)
+	}
+	if string(data) != "drop-in content\n" {
+		t.Errorf("staged content = %q", data)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("cleanup left %s behind (stat err = %v)", path, err)
 	}
 }
 

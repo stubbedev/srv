@@ -14,6 +14,25 @@ func TestTypeLabel(t *testing.T) {
 	}
 }
 
+// A typo like --format JSON used to fall through to the table renderer with
+// exit 0, handing scripts table text they tried to parse as JSON.
+func TestOutputFormatFlagRejectsUnknownValues(t *testing.T) {
+	f := &outputFormatFlag{value: "table"}
+	for _, bad := range []string{"JSON", "yaml", "jso", ""} {
+		if err := f.Set(bad); err == nil {
+			t.Errorf("Set(%q) = nil error, want a rejection", bad)
+		}
+	}
+	for _, good := range []string{"table", "json"} {
+		if err := f.Set(good); err != nil {
+			t.Errorf("Set(%q) = %v, want accepted", good, err)
+		}
+		if f.value != good {
+			t.Errorf("value = %q after Set(%q)", f.value, good)
+		}
+	}
+}
+
 func TestCommandExists(t *testing.T) {
 	if !CommandExists("sh") {
 		t.Error("sh should exist")

@@ -31,9 +31,8 @@ var (
 	BuildDate = constants.DefaultBuildDate
 
 	// Root command flags.
-	verbose      bool
-	quiet        bool
-	outputFormat string
+	verbose bool
+	quiet   bool
 )
 
 // RootCmd is the root command for srv.
@@ -47,10 +46,30 @@ var RootCmd = &cobra.Command{
 	SilenceErrors: true,
 }
 
+// outputFormatFlag is the --format flag as a pflag.Value so typos fail at
+// parse time. A free-form string silently fell through to the table renderer,
+// handing scripts that asked for --format JSON colourless-but-table text.
+type outputFormatFlag struct{ value string }
+
+func (f *outputFormatFlag) String() string { return f.value }
+
+func (f *outputFormatFlag) Set(v string) error {
+	switch v {
+	case "table", "json":
+		f.value = v
+		return nil
+	}
+	return fmt.Errorf("invalid format %q: must be 'table' or 'json'", v)
+}
+
+func (f *outputFormatFlag) Type() string { return "format" }
+
+var formatFlag = &outputFormatFlag{value: "table"}
+
 func init() {
 	RootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	RootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Suppress informational diagnostic output (errors still printed)")
-	RootCmd.PersistentFlags().StringVar(&outputFormat, "format", "table", "Output format for list/inspect commands: 'table' (default, human-readable) or 'json' (scriptable)")
+	RootCmd.PersistentFlags().Var(formatFlag, "format", "Output format for list/inspect commands: 'table' (default, human-readable) or 'json' (scriptable)")
 
 	// Define command groups
 	RootCmd.AddGroup(
@@ -84,7 +103,7 @@ func SetVersion(version, commit, buildDate string) {
 // --format json. List/inspect commands branch on this to emit json instead of
 // a coloured table.
 func jsonOutput() bool {
-	return outputFormat == "json"
+	return formatFlag.value == "json"
 }
 
 // GetSiteNames returns a list of all registered site names for shell completion.

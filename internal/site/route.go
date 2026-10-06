@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/stubbedev/srv/internal/constants"
@@ -190,8 +191,10 @@ func SplitContainerPort(s string) (string, int, error) {
 	if name == "" {
 		return "", 0, errors.New("container name cannot be empty")
 	}
-	var port int
-	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+	// Sscanf would accept "8080x" (parses 8080, ignores the rest); the port
+	// goes straight into a Traefik service URL, so parse it strictly.
+	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	if err != nil {
 		return "", 0, fmt.Errorf("invalid container port %q", portStr)
 	}
 	if port < constants.PortMin || port > constants.PortMax {

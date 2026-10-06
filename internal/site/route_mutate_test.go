@@ -75,7 +75,9 @@ func TestDropRouteRemovesEveryMatch(t *testing.T) {
 
 // route_test.go covers the common shapes; these are the edges it leaves out.
 func TestSplitContainerPortEdgeCases(t *testing.T) {
-	for _, bad := range []string{"", "api:", ":3000", "api:70000", "api:-1"} {
+	// "8080x" parses under fmt.Sscanf (trailing text ignored) but must be
+	// rejected: the port goes straight into a Traefik service URL.
+	for _, bad := range []string{"", "api:", ":3000", "api:70000", "api:-1", "api:8080x", "api:80 80", "api:0x80"} {
 		if _, _, err := SplitContainerPort(bad); err == nil {
 			t.Errorf("SplitContainerPort(%q) = nil error, want a rejection", bad)
 		}

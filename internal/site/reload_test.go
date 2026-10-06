@@ -80,6 +80,14 @@ func TestValidateMetadata(t *testing.T) {
 			wantErr: "invalid path_regex",
 		},
 		{
+			name: "backtick in path breaks out of the traefik rule literal",
+			meta: &SiteMetadata{
+				Domains: []string{"a.test"},
+				Routes:  []Route{{ID: "r", Path: "/x`) && (PathPrefix(`/other", Upstream: Upstream{Kind: "localhost", Port: 1}}},
+			},
+			wantErr: "backticks",
+		},
+		{
 			name: "unknown upstream kind",
 			meta: &SiteMetadata{
 				Domains: []string{"a.test"},

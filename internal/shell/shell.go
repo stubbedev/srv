@@ -8,6 +8,7 @@ package shell
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -209,7 +210,38 @@ func (r OSRunner) SudoRunQuiet(args ...string) ([]byte, error) {
 }
 
 func (r OSRunner) SudoWrite(path, content string) error {
-	return r.RunWithStdin(content, "sudo", sudoArgs([]string{"tee", path})...)
+	tmp, cleanup, err := stageForSudo(content)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	// install(1) swaps the target atomically. Piping through `sudo tee`
+	// truncates in place, so an interrupted write (Ctrl-C mid-pipe, ENOSPC)
+	// left a partial drop-in that silently changed resolver behavior at the
+	// next daemon restart.
+	_, err = r.RunQuiet("sudo", sudoArgs([]string{"install", "-m", "0644", tmp, path})...)
+	return err
+}
+
+// stageForSudo writes content to a temp file root can read, for a subsequent
+// atomic `sudo install` into a privileged path.
+func stageForSudo(content string) (string, func(), error) {
+	f, err := os.CreateTemp("", "srv-sudowrite-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("stage sudo write: %w", err)
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("stage sudo write: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("stage sudo write: %w", err)
+	}
+	return path, cleanup, nil
 }
 
 func (r OSRunner) SudoMkdir(path string) error { return r.SudoRun("mkdir", "-p", path) }
