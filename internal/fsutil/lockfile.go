@@ -44,7 +44,10 @@ func WithFileLock(path string, fn func() error) error {
 		return fmt.Errorf("lock %s: %w", path, err)
 	}
 	muAny, _ := pathMu.LoadOrStore(path, &sync.Mutex{})
-	mu := muAny.(*sync.Mutex)
+	mu, ok := muAny.(*sync.Mutex)
+	if !ok {
+		return fmt.Errorf("lock %s: internal mutex table corrupted", path)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 

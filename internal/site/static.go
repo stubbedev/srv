@@ -291,17 +291,6 @@ func buildStaticComposeConfig(project, containerName, projectPath, nginxConfPath
 	}
 }
 
-// writeFile writes content to path.
-// If force is false and the file already exists, the write is skipped.
-func writeFile(path string, content []byte, force bool) error {
-	if !force {
-		if _, err := os.Stat(path); err == nil {
-			return nil // file exists — user may have customized it
-		}
-	}
-	return os.WriteFile(path, content, constants.FilePermDefault)
-}
-
 // WriteStaticSiteConfig writes the docker-compose.yml and nginx.conf for a static site.
 // If force is false, existing files are left untouched so user edits are preserved.
 // If force is true, files srv still owns (bytes unchanged since srv last wrote

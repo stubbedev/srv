@@ -16,9 +16,7 @@ func TestWithFileLockSerializesGoroutines(t *testing.T) {
 	var inUse, peak atomic.Int32
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := WithFileLock(path, func() error {
 				cur := inUse.Add(1)
 				for {
@@ -34,7 +32,7 @@ func TestWithFileLockSerializesGoroutines(t *testing.T) {
 			if err != nil {
 				t.Errorf("WithFileLock: %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if got := peak.Load(); got != 1 {

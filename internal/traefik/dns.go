@@ -810,9 +810,7 @@ func UpdateDnsmasqConfig() error {
 	if err != nil {
 		return err
 	}
-	return fsutil.WithFileLock(lockPath, func() error {
-		return updateDnsmasqConfigLocked()
-	})
+	return fsutil.WithFileLock(lockPath, updateDnsmasqConfigLocked)
 }
 
 // updateDnsmasqConfigLocked is UpdateDnsmasqConfig's body; the caller must

@@ -9,6 +9,45 @@ default:
     @just --list
 
 # =============================================================================
+# Dev Container
+# =============================================================================
+
+# Start the dev/test container (service `dev`, profile `dev`, compose.yaml).
+# When it is up, every go recipe below runs inside it through `go-run`, so
+# nothing the suite execs (sudo steps, trust stores, resolv.conf probes) can
+# ever reach the host terminal. golangci-lint inside is pinned to the exact
+# version CI installs, so local and CI gates cannot drift.
+dev-up:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker compose --profile dev up -d --build
+    # Fresh cache volumes start root-owned; the in-container user is uid 1000.
+    docker compose --profile dev exec -u root dev chown -R 1000:1000 /gocache
+
+dev-down:
+    docker compose --profile dev down
+
+# Interactive shell in the dev container
+dev-shell:
+    docker compose --profile dev exec dev bash
+
+# Run one command in the dev container, e.g. just dev go test ./internal/dnsd
+dev *CMD:
+    docker compose --profile dev exec dev {{CMD}}
+
+# Run a command in the dev container when it is up, on the host otherwise.
+# Every go/golangci-lint recipe funnels through here so the two environments
+# execute the same command and cannot drift apart.
+go-run *CMD:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if docker compose --profile dev ps --status running --services 2>/dev/null | grep -qx dev; then
+        docker compose --profile dev exec dev {{CMD}}
+    else
+        {{CMD}}
+    fi
+
+# =============================================================================
 # Setup & Dependencies
 # =============================================================================
 
@@ -42,11 +81,11 @@ build-release:
 # gci rewrites the import block, which is what makes an applied lint fix
 # compile, since the fixers swap imports but never regroup them.
 fmt:
-    golangci-lint fmt ./...
+    just go-run golangci-lint fmt ./...
 
 # Run go vet
 vet:
-    go vet ./...
+    just go-run go vet ./...
 
 # Format, then apply every fixable finding, then gate on what is left. The
 # mutating local-dev gate.
@@ -58,39 +97,39 @@ vet:
 # because a fixer that swaps fmt.Sprintf for strconv.Itoa leaves the imports
 # wrong on its own.
 lint: fmt
-    golangci-lint run --fix ./... || true
-    golangci-lint fmt ./...
-    golangci-lint run --fix ./...
-    golangci-lint fmt ./...
-    go vet ./...
+    just go-run golangci-lint run --fix ./... || true
+    just go-run golangci-lint fmt ./...
+    just go-run golangci-lint run --fix ./...
+    just go-run golangci-lint fmt ./...
+    just go-run go vet ./...
 
 # Auto-fix everything mechanically fixable, without the gate. Same two passes.
 lint-fix:
-    golangci-lint fmt ./...
-    golangci-lint run --fix ./... || true
-    golangci-lint fmt ./...
-    golangci-lint run --fix ./... || true
-    golangci-lint fmt ./...
+    just go-run golangci-lint fmt ./...
+    just go-run golangci-lint run --fix ./... || true
+    just go-run golangci-lint fmt ./...
+    just go-run golangci-lint run --fix ./... || true
+    just go-run golangci-lint fmt ./...
 
 # Strict read-only check — same logic CI runs, exposed for local pre-push
 # verification. Fails if formatting would change or any linter fires.
 lint-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    out=$(golangci-lint fmt --diff ./...)
+    out=$(just go-run golangci-lint fmt --diff ./...)
     if [ -n "$out" ]; then
         echo "code is not formatted; run 'just fmt':"
         printf '%s\n' "$out"
         exit 1
     fi
-    go vet ./...
-    golangci-lint run ./...
+    just go-run go vet ./...
+    just go-run golangci-lint run ./...
 
 # Regenerate JSON Schemas under schemas/ from Go structs
 schemas:
     #!/usr/bin/env bash
     set -euo pipefail
-    go run ./cmd/gen-schema
+    just go-run go run ./cmd/gen-schema
     if [ -n "$(git status --porcelain schemas/)" ]; then
         echo "schemas: regenerated schemas/"
     else
@@ -101,7 +140,7 @@ schemas:
 sync-docs:
     #!/usr/bin/env bash
     set -euo pipefail
-    go run ./cmd/gen-docs
+    just go-run go run ./cmd/gen-docs
     if [ -n "$(git status --porcelain docs/cli.md)" ]; then
         echo "sync-docs: regenerated docs/cli.md"
     else
@@ -112,7 +151,7 @@ sync-docs:
 sync-readme:
     #!/usr/bin/env bash
     set -euo pipefail
-    go run ./cmd/gen-readme
+    just go-run go run ./cmd/gen-readme
     if [ -n "$(git status --porcelain README.md)" ]; then
         echo "sync-readme: regenerated README.md"
     else
@@ -178,11 +217,13 @@ check: lint test schemas sync-docs sync-readme sync-flake
 # -timeout 60s caps every package so a hung test is visible in seconds
 # instead of go's 10-minute default.
 test:
-    go test -timeout 60s ./...
+    just go-run go test -timeout 60s ./...
 
 # Run end-to-end tests (build-tagged `e2e`). Boots a real Traefik via compose
 # and routes real HTTP through it. Needs a container engine + free
 # ports 80/443/88/8080; tests self-skip when those aren't available.
+# Runs on the host by design: the suite's compose files bind-mount host
+# SRV_ROOT paths, which a container-run would resolve against itself.
 #
 # ENGINE picks which engine the suite drives — the same SRV_CONTAINER_ENGINE
 # override srv itself reads, so `just test-e2e podman` proves parity end to end.
@@ -191,7 +232,7 @@ test-e2e ENGINE="docker":
 
 # Run tests with coverage
 test-cover:
-    go test -coverprofile=coverage.out ./...
+    just go-run go test -coverprofile=coverage.out ./...
     go tool cover -html=coverage.out -o coverage.html
     @echo "Coverage report: coverage.html"
 
