@@ -203,7 +203,7 @@ func writeEnvFile(path string, envMap map[string]string) error {
 
 	var content strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&content, "%s=%s\n", k, envMap[k])
+		fmt.Fprintf(&content, "%s=%s\n", k, quoteEnvValue(envMap[k]))
 	}
 
 	// Write atomically so a crash mid-write never produces a partial file.
@@ -211,6 +211,21 @@ func writeEnvFile(path string, envMap map[string]string) error {
 		return fmt.Errorf("failed to write env file: %w", err)
 	}
 	return nil
+}
+
+// quoteEnvValue keeps write and parse inverses of each other: parse strips
+// one matching outer quote pair, so any value that would not survive that —
+// or that dotenv consumers (compose env_file) would split on — is written
+// wrapped in double quotes. Stripping is positional, so embedded quotes
+// round-trip unharmed.
+func quoteEnvValue(v string) string {
+	if v == "" ||
+		strings.ContainsAny(v, " \t\r\n#") ||
+		strings.HasPrefix(v, `"`) ||
+		(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
+		return `"` + v + `"`
+	}
+	return v
 }
 
 // DnsmasqConf is the initial dnsmasq configuration (no domains).

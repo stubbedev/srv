@@ -122,46 +122,50 @@ func buildUpstream(in RouteInput) (Upstream, error) {
 
 // AddRoute appends a route to a site's metadata and reloads it.
 func AddRoute(name string, route Route) error {
-	meta, err := requireMeta(name)
-	if err != nil {
-		return err
-	}
-	for _, existing := range meta.Routes {
-		if existing.ID == route.ID {
-			return fmt.Errorf("route %q already exists on %s — remove it first or pick a different id", route.ID, name)
+	return withSiteLock(name, func() error {
+		meta, err := requireMeta(name)
+		if err != nil {
+			return err
 		}
-	}
-	meta.Routes = append(meta.Routes, route)
-	if err := ValidateMetadata(meta); err != nil {
-		return fmt.Errorf("route would produce invalid metadata: %w", err)
-	}
-	if err := WriteSiteMetadata(name, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := Reload(name); err != nil {
-		return fmt.Errorf("refresh routing config: %w", err)
-	}
-	return nil
+		for _, existing := range meta.Routes {
+			if existing.ID == route.ID {
+				return fmt.Errorf("route %q already exists on %s — remove it first or pick a different id", route.ID, name)
+			}
+		}
+		meta.Routes = append(meta.Routes, route)
+		if err := ValidateMetadata(meta); err != nil {
+			return fmt.Errorf("route would produce invalid metadata: %w", err)
+		}
+		if err := WriteSiteMetadata(name, *meta); err != nil {
+			return fmt.Errorf("write metadata: %w", err)
+		}
+		if _, err := Reload(name); err != nil {
+			return fmt.Errorf("refresh routing config: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemoveRoute drops a route by id from a site's metadata and reloads it.
 func RemoveRoute(name, id string) error {
-	meta, err := requireMeta(name)
-	if err != nil {
-		return err
-	}
-	filtered, removed := DropRoute(meta.Routes, id)
-	if !removed {
-		return fmt.Errorf("route %q not found on %s", id, name)
-	}
-	meta.Routes = filtered
-	if err := WriteSiteMetadata(name, *meta); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := Reload(name); err != nil {
-		return fmt.Errorf("refresh routing config: %w", err)
-	}
-	return nil
+	return withSiteLock(name, func() error {
+		meta, err := requireMeta(name)
+		if err != nil {
+			return err
+		}
+		filtered, removed := DropRoute(meta.Routes, id)
+		if !removed {
+			return fmt.Errorf("route %q not found on %s", id, name)
+		}
+		meta.Routes = filtered
+		if err := WriteSiteMetadata(name, *meta); err != nil {
+			return fmt.Errorf("write metadata: %w", err)
+		}
+		if _, err := Reload(name); err != nil {
+			return fmt.Errorf("refresh routing config: %w", err)
+		}
+		return nil
+	})
 }
 
 // DropRoute returns routes with the entry matching id removed, and whether one

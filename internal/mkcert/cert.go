@@ -15,6 +15,7 @@ import (
 	"net/mail"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -118,11 +119,51 @@ func (ca *localCA) makeCert(hosts []string, certFile, keyFile string) error {
 		}
 		return nil
 	}
-	if err := os.WriteFile(certFile, certPEM, 0o644); err != nil {
+	// Both halves are staged as temp siblings and swapped in via renames.
+	// Two plain WriteFiles could interleave with another issuer and pair one
+	// issuer's cert with the other's key — a state later checks consider
+	// valid (both files exist, the cert parses) and Traefik rejects forever.
+	certTmp, err := writeTempSibling(certFile, certPEM, 0o644)
+	if err != nil {
 		return fmt.Errorf("failed to save certificate: %w", err)
 	}
-	if err := os.WriteFile(keyFile, privPEM, 0o600); err != nil {
+	keyTmp, err := writeTempSibling(keyFile, privPEM, 0o600)
+	if err != nil {
+		_ = os.Remove(certTmp)
+		return fmt.Errorf("failed to save certificate key: %w", err)
+	}
+	if err := os.Rename(certTmp, certFile); err != nil {
+		_ = os.Remove(certTmp)
+		_ = os.Remove(keyTmp)
+		return fmt.Errorf("failed to save certificate: %w", err)
+	}
+	if err := os.Rename(keyTmp, keyFile); err != nil {
+		_ = os.Remove(keyTmp)
 		return fmt.Errorf("failed to save certificate key: %w", err)
 	}
 	return nil
+}
+
+// writeTempSibling stages data next to path for an atomic rename swap.
+func writeTempSibling(path string, data []byte, perm os.FileMode) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := f.Chmod(perm); err != nil {
+		_ = f.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	return name, nil
 }

@@ -5,54 +5,71 @@ package proxy
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/site"
 )
+
+// withProxyLock is the proxy twin of site's withSiteLock: the metadata
+// sidecar's read-modify-write cycle is serialized across processes.
+func withProxyLock(name string, fn func() error) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return fsutil.WithFileLock(filepath.Join(proxiesDir(cfg), name, ".metadata.lock"), fn)
+}
 
 // AddRoute appends a route to a proxy's metadata sidecar and regenerates its
 // Traefik routes file.
 func AddRoute(name string, route site.Route) error {
-	meta, err := Read(name)
-	if err != nil {
-		return err
-	}
-	if meta == nil {
-		return fmt.Errorf("proxy %q not found", name)
-	}
-	for _, existing := range meta.Routes {
-		if existing.ID == route.ID {
-			return fmt.Errorf("route %q already exists on %s — remove it first or pick a different id", route.ID, name)
+	return withProxyLock(name, func() error {
+		meta, err := Read(name)
+		if err != nil {
+			return err
 		}
-	}
-	meta.Routes = append(meta.Routes, route)
-	if err := Write(*meta); err != nil {
-		return fmt.Errorf("write proxy metadata: %w", err)
-	}
-	if err := Reload(name); err != nil {
-		return fmt.Errorf("refresh proxy routes: %w", err)
-	}
-	return nil
+		if meta == nil {
+			return fmt.Errorf("proxy %q not found", name)
+		}
+		for _, existing := range meta.Routes {
+			if existing.ID == route.ID {
+				return fmt.Errorf("route %q already exists on %s — remove it first or pick a different id", route.ID, name)
+			}
+		}
+		meta.Routes = append(meta.Routes, route)
+		if err := Write(*meta); err != nil {
+			return fmt.Errorf("write proxy metadata: %w", err)
+		}
+		if err := Reload(name); err != nil {
+			return fmt.Errorf("refresh proxy routes: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemoveRoute drops a route by id from a proxy's metadata sidecar.
 func RemoveRoute(name, id string) error {
-	meta, err := Read(name)
-	if err != nil {
-		return err
-	}
-	if meta == nil {
-		return fmt.Errorf("proxy %q not found", name)
-	}
-	filtered, removed := site.DropRoute(meta.Routes, id)
-	if !removed {
-		return fmt.Errorf("route %q not found on proxy %s", id, name)
-	}
-	meta.Routes = filtered
-	if err := Write(*meta); err != nil {
-		return fmt.Errorf("write proxy metadata: %w", err)
-	}
-	if err := Reload(name); err != nil {
-		return fmt.Errorf("refresh proxy routes: %w", err)
-	}
-	return nil
+	return withProxyLock(name, func() error {
+		meta, err := Read(name)
+		if err != nil {
+			return err
+		}
+		if meta == nil {
+			return fmt.Errorf("proxy %q not found", name)
+		}
+		filtered, removed := site.DropRoute(meta.Routes, id)
+		if !removed {
+			return fmt.Errorf("route %q not found on proxy %s", id, name)
+		}
+		meta.Routes = filtered
+		if err := Write(*meta); err != nil {
+			return fmt.Errorf("write proxy metadata: %w", err)
+		}
+		if err := Reload(name); err != nil {
+			return fmt.Errorf("refresh proxy routes: %w", err)
+		}
+		return nil
+	})
 }

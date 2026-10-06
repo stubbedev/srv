@@ -1,6 +1,7 @@
 package traefik
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -324,6 +325,46 @@ func TestUpdateDynamicConfigEmpty(t *testing.T) {
 	}
 	if !contains(string(data), "certificates: []") {
 		t.Errorf("expected empty cert list: %q", string(data))
+	}
+}
+
+// Byte-identical content must not rewrite the file: install regenerates the
+// dynamic config once per site, and N identical rewrites cost N fsync cycles
+// plus N Traefik file-provider reloads of unchanged content.
+func TestUpdateDynamicConfigSkipsIdenticalRewrite(t *testing.T) {
+	setupSrvRoot(t)
+	cfg, _ := config.Load()
+	if err := os.MkdirAll(cfg.TraefikConfDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateDynamicConfig(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamped := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, stamped, stamped); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateDynamicConfig(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(stamped) {
+		t.Error("identical content rewrote the dynamic config")
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, current) {
+		t.Error("content changed between identical regenerations")
 	}
 }
 

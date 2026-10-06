@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/validate"
 )
@@ -71,6 +72,19 @@ func requireMeta(siteName string) (*SiteMetadata, error) {
 	return meta, nil
 }
 
+// withSiteLock holds the per-site inter-process lock across a metadata
+// read-modify-write. The CLI, the daemon watcher and MCP tools are separate
+// processes; an in-process mutex alone let the loser's mutation be silently
+// overwritten by the winner's write. The lock file lives inside the site's
+// config directory, where the metadata watcher ignores it.
+func withSiteLock(siteName string, fn func() error) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return fsutil.WithFileLock(filepath.Join(cfg.SitesDir, siteName, ".metadata.lock"), fn)
+}
+
 // AddAlias adds an extra hostname to a site. Returns changed=false (no error)
 // when the alias is already present.
 func AddAlias(siteName, alias string) (changed bool, warnings []string, err error) {
@@ -78,64 +92,75 @@ func AddAlias(siteName, alias string) (changed bool, warnings []string, err erro
 	if err := validate.Domain(alias); err != nil {
 		return false, nil, fmt.Errorf("invalid alias: %w", err)
 	}
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return false, nil, err
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
+		}
+		if len(meta.Domains) == 0 {
+			return fmt.Errorf("site %q has no canonical domain", siteName)
+		}
+		if slices.Contains(meta.Domains, alias) {
+			return nil
+		}
+		meta.Domains = append(meta.Domains, alias)
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("update site metadata: %w", err)
+		}
+		changed = true
+		if meta.IsLocal {
+			warnings = append(warnings, refreshLocalCert(siteName, meta)...)
+		}
+		if err := regenerateRouting(siteName, meta); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh routing config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return false, warnings, err
 	}
-	if len(meta.Domains) == 0 {
-		return false, nil, fmt.Errorf("site %q has no canonical domain", siteName)
-	}
-	if slices.Contains(meta.Domains, alias) {
-		return false, nil, nil
-	}
-	meta.Domains = append(meta.Domains, alias)
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return false, nil, fmt.Errorf("update site metadata: %w", err)
-	}
-	if meta.IsLocal {
-		warnings = append(warnings, refreshLocalCert(siteName, meta)...)
-	}
-	if err := regenerateRouting(siteName, meta); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh routing config: %v", err))
-	}
-	return true, warnings, nil
+	return changed, warnings, nil
 }
 
 // RemoveAlias drops an extra hostname from a site. The canonical (first) domain
 // cannot be removed this way.
 func RemoveAlias(siteName, alias string) (warnings []string, err error) {
 	alias = strings.ToLower(strings.TrimSpace(alias))
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return nil, err
-	}
-	if len(meta.Domains) > 0 && meta.Domains[0] == alias {
-		return nil, fmt.Errorf("%s is the canonical domain — remove the site to drop it", alias)
-	}
-	filtered := meta.Domains[:0]
-	removed := false
-	for _, d := range meta.Domains {
-		if d == alias {
-			removed = true
-			continue
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
 		}
-		filtered = append(filtered, d)
-	}
-	if !removed {
-		return nil, fmt.Errorf("alias %q is not registered for %s", alias, siteName)
-	}
-	meta.Domains = filtered
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return nil, fmt.Errorf("update site metadata: %w", err)
-	}
-	if meta.IsLocal {
-		if err := traefik.UnregisterLocalDomain(alias); err != nil {
-			warnings = append(warnings, fmt.Sprintf("unregister DNS for %s: %v", alias, err))
+		if len(meta.Domains) > 0 && meta.Domains[0] == alias {
+			return fmt.Errorf("%s is the canonical domain — remove the site to drop it", alias)
 		}
-		warnings = append(warnings, refreshLocalCert(siteName, meta)...)
-	}
-	if err := regenerateRouting(siteName, meta); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh routing config: %v", err))
+		filtered := meta.Domains[:0]
+		removed := false
+		for _, d := range meta.Domains {
+			if d == alias {
+				removed = true
+				continue
+			}
+			filtered = append(filtered, d)
+		}
+		if !removed {
+			return fmt.Errorf("alias %q is not registered for %s", alias, siteName)
+		}
+		meta.Domains = filtered
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("update site metadata: %w", err)
+		}
+		if meta.IsLocal {
+			if err := traefik.UnregisterLocalDomain(alias); err != nil {
+				warnings = append(warnings, fmt.Sprintf("unregister DNS for %s: %v", alias, err))
+			}
+			warnings = append(warnings, refreshLocalCert(siteName, meta)...)
+		}
+		if err := regenerateRouting(siteName, meta); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh routing config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return warnings, err
 	}
 	return warnings, nil
 }
@@ -143,32 +168,38 @@ func RemoveAlias(siteName, alias string) (warnings []string, err error) {
 // SetInternalListener enables or disables the plain-HTTP `internal` entrypoint
 // for a site. Returns changed=false when already in the requested state.
 func SetInternalListener(siteName string, enable bool) (changed bool, warnings []string, err error) {
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return false, nil, err
-	}
-	has := HasListener(meta.Listeners, constants.ListenerInternal)
-	if has == enable {
-		return false, nil, nil
-	}
-	if enable {
-		meta.Listeners = append(meta.Listeners, constants.ListenerInternal)
-	} else {
-		filtered := meta.Listeners[:0]
-		for _, l := range meta.Listeners {
-			if l != constants.ListenerInternal {
-				filtered = append(filtered, l)
-			}
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
 		}
-		meta.Listeners = filtered
+		has := HasListener(meta.Listeners, constants.ListenerInternal)
+		if has == enable {
+			return nil
+		}
+		if enable {
+			meta.Listeners = append(meta.Listeners, constants.ListenerInternal)
+		} else {
+			filtered := meta.Listeners[:0]
+			for _, l := range meta.Listeners {
+				if l != constants.ListenerInternal {
+					filtered = append(filtered, l)
+				}
+			}
+			meta.Listeners = filtered
+		}
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("update site metadata: %w", err)
+		}
+		changed = true
+		if err := regenerateRouting(siteName, meta); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh routing config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return false, warnings, err
 	}
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return false, nil, fmt.Errorf("update site metadata: %w", err)
-	}
-	if err := regenerateRouting(siteName, meta); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh routing config: %v", err))
-	}
-	return true, warnings, nil
+	return changed, warnings, nil
 }
 
 // validateVolumeMount checks a bind-mount semantically. checkExists adds the
@@ -198,30 +229,35 @@ func validateVolumeMount(m VolumeMount, checkExists bool) error {
 // Compose-type sites are rejected: they own their docker-compose.yml, and the
 // volume belongs there so it survives regenerations the user controls.
 func AddVolume(siteName string, mount VolumeMount) (warnings []string, err error) {
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return nil, err
-	}
-	if meta.Type == SiteTypeCompose {
-		return nil, errors.New("compose sites own their docker-compose.yml — add the volume there directly so it survives container restarts")
-	}
-	if err := validateVolumeMount(mount, true); err != nil {
-		return nil, err
-	}
-	for _, existing := range meta.Volumes {
-		if existing.Target == mount.Target {
-			return nil, fmt.Errorf("a volume with target %q is already attached — remove it first", mount.Target)
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
 		}
-	}
-	if mount.Target == "/app" || strings.HasPrefix(mount.Target, "/app/") {
-		return nil, fmt.Errorf("target %q overlaps the project bind at /app — pick a different container path", mount.Target)
-	}
-	meta.Volumes = append(meta.Volumes, mount)
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return nil, fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := Reload(siteName); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		if meta.Type == SiteTypeCompose {
+			return errors.New("compose sites own their docker-compose.yml — add the volume there directly so it survives container restarts")
+		}
+		if err := validateVolumeMount(mount, true); err != nil {
+			return err
+		}
+		for _, existing := range meta.Volumes {
+			if existing.Target == mount.Target {
+				return fmt.Errorf("a volume with target %q is already attached — remove it first", mount.Target)
+			}
+		}
+		if mount.Target == "/app" || strings.HasPrefix(mount.Target, "/app/") {
+			return fmt.Errorf("target %q overlaps the project bind at /app — pick a different container path", mount.Target)
+		}
+		meta.Volumes = append(meta.Volumes, mount)
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("write metadata: %w", err)
+		}
+		if _, err := Reload(siteName); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return warnings, err
 	}
 	return warnings, nil
 }
@@ -236,84 +272,100 @@ func AttachNetwork(siteName, network string) (changed bool, warnings []string, e
 	if network == "" {
 		return false, nil, errors.New("network name is required")
 	}
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return false, nil, err
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
+		}
+		if meta.Type == SiteTypeCompose {
+			return errors.New("compose sites own their docker-compose.yml — attach the network there directly")
+		}
+		if !docker.NetworkExists(network) {
+			return fmt.Errorf("docker network %q does not exist — create it first (or check the name)", network)
+		}
+		if network == meta.NetworkName {
+			return fmt.Errorf("%q is the site's primary traefik network — already attached", network)
+		}
+		if slices.Contains(meta.ExtraNetworks, network) {
+			return nil
+		}
+		meta.ExtraNetworks = append(meta.ExtraNetworks, network)
+		slices.Sort(meta.ExtraNetworks)
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("write metadata: %w", err)
+		}
+		changed = true
+		if _, err := Reload(siteName); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return false, warnings, err
 	}
-	if meta.Type == SiteTypeCompose {
-		return false, nil, errors.New("compose sites own their docker-compose.yml — attach the network there directly")
-	}
-	if !docker.NetworkExists(network) {
-		return false, nil, fmt.Errorf("docker network %q does not exist — create it first (or check the name)", network)
-	}
-	if network == meta.NetworkName {
-		return false, nil, fmt.Errorf("%q is the site's primary traefik network — already attached", network)
-	}
-	if slices.Contains(meta.ExtraNetworks, network) {
-		return false, nil, nil
-	}
-	meta.ExtraNetworks = append(meta.ExtraNetworks, network)
-	slices.Sort(meta.ExtraNetworks)
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return false, nil, fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := Reload(siteName); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
-	}
-	return true, warnings, nil
+	return changed, warnings, nil
 }
 
 // DetachNetwork removes an extra Docker network from a site.
 func DetachNetwork(siteName, network string) (warnings []string, err error) {
 	network = strings.TrimSpace(network)
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return nil, err
-	}
-	idx := -1
-	for i, n := range meta.ExtraNetworks {
-		if n == network {
-			idx = i
-			break
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
 		}
-	}
-	if idx < 0 {
-		return nil, fmt.Errorf("network %q not attached to %s", network, siteName)
-	}
-	meta.ExtraNetworks = append(meta.ExtraNetworks[:idx], meta.ExtraNetworks[idx+1:]...)
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return nil, fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := Reload(siteName); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		idx := -1
+		for i, n := range meta.ExtraNetworks {
+			if n == network {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return fmt.Errorf("network %q not attached to %s", network, siteName)
+		}
+		meta.ExtraNetworks = append(meta.ExtraNetworks[:idx], meta.ExtraNetworks[idx+1:]...)
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("write metadata: %w", err)
+		}
+		if _, err := Reload(siteName); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return warnings, err
 	}
 	return warnings, nil
 }
 
 // RemoveVolume detaches a bind-mount by container target path.
 func RemoveVolume(siteName, target string) (warnings []string, err error) {
-	meta, err := requireMeta(siteName)
-	if err != nil {
-		return nil, err
-	}
-	filtered := meta.Volumes[:0]
-	removed := false
-	for _, v := range meta.Volumes {
-		if v.Target == target {
-			removed = true
-			continue
+	if err := withSiteLock(siteName, func() error {
+		meta, err := requireMeta(siteName)
+		if err != nil {
+			return err
 		}
-		filtered = append(filtered, v)
-	}
-	if !removed {
-		return nil, fmt.Errorf("no volume with target %q attached to %s", target, siteName)
-	}
-	meta.Volumes = filtered
-	if err := WriteSiteMetadata(siteName, *meta); err != nil {
-		return nil, fmt.Errorf("write metadata: %w", err)
-	}
-	if _, err := Reload(siteName); err != nil {
-		warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		filtered := meta.Volumes[:0]
+		removed := false
+		for _, v := range meta.Volumes {
+			if v.Target == target {
+				removed = true
+				continue
+			}
+			filtered = append(filtered, v)
+		}
+		if !removed {
+			return fmt.Errorf("no volume with target %q attached to %s", target, siteName)
+		}
+		meta.Volumes = filtered
+		if err := WriteSiteMetadata(siteName, *meta); err != nil {
+			return fmt.Errorf("write metadata: %w", err)
+		}
+		if _, err := Reload(siteName); err != nil {
+			warnings = append(warnings, fmt.Sprintf("refresh site config: %v", err))
+		}
+		return nil
+	}); err != nil {
+		return warnings, err
 	}
 	return warnings, nil
 }

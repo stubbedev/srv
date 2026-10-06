@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -177,6 +178,31 @@ func TestIssueCertFilePerms(t *testing.T) {
 	}
 	if got := keyInfo.Mode().Perm(); got != 0o600 {
 		t.Errorf("key perms = %o, want 600", got)
+	}
+}
+
+// A failed key write must not leave a cert without its key: the two halves
+// are staged as temps and swapped in via renames, so an interrupted issuance
+// leaves no half-pair for cert scans to publish.
+func TestIssueCertLeavesNoTornPairWhenKeyStagingFails(t *testing.T) {
+	carootSandbox(t)
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "app.test.crt")
+	keyPath := filepath.Join(dir, "missing-dir", "app.test.key")
+	if err := IssueCert(certPath, keyPath, []string{"app.test"}); err == nil {
+		t.Fatal("expected an error when the key cannot be staged")
+	}
+	if _, err := os.Stat(certPath); !os.IsNotExist(err) {
+		t.Errorf("cert left behind without its key (stat err = %v)", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("staged temp %q left behind", e.Name())
+		}
 	}
 }
 

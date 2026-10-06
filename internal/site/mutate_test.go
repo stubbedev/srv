@@ -1,6 +1,12 @@
 package site
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stubbedev/srv/internal/config"
+)
 
 // seedSite writes a non-local static site so mutators exercise the
 // metadata/routing path without touching mkcert or DNS.
@@ -45,6 +51,16 @@ func TestAddAlias(t *testing.T) {
 	}
 	if _, _, err := AddAlias("ghost", "x.test"); err == nil {
 		t.Error("expected error for missing site")
+	}
+
+	// The inter-process lock is released, not left behind, once the mutation
+	// completes — a leftover would trip every later writer's stale window.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.SitesDir, "blog", ".metadata.lock")); !os.IsNotExist(err) {
+		t.Errorf("lock file left behind (stat err = %v)", err)
 	}
 }
 

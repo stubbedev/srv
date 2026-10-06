@@ -497,6 +497,19 @@ func localDomainsFile() (string, error) {
 	return filepath.Join(cfg.TraefikDir, constants.LocalDomainsFile), nil
 }
 
+// dnsLockPath is the inter-process lock over the DNS registry's whole
+// read-modify-write cycle (local-domains.txt + dnsmasq.conf + hostsdir).
+// dnsConfigMu serializes writers within one process; the CLI, the daemon
+// and MCP tools are separate processes whose unlocked interleave silently
+// dropped registrations.
+func dnsLockPath() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cfg.Root, ".dns.lock"), nil
+}
+
 // LoadLocalDomains returns the list of registered local domains.
 func LoadLocalDomains() ([]string, error) {
 	path, err := localDomainsFile()
@@ -551,7 +564,7 @@ func SaveLocalDomains(domains []string) error {
 		content += "\n"
 	}
 
-	return os.WriteFile(path, []byte(content), constants.FilePermDefault)
+	return fsutil.AtomicWriteFile(path, []byte(content), constants.FilePermDefault)
 }
 
 // dnsConfigMu serializes every writer of the shared DNS state: the
@@ -582,7 +595,13 @@ func RegisterLocalDomain(domain string, wildcard bool) error {
 func RegisterLocalDomains(domains []string, wildcard bool) error {
 	dnsConfigMu.Lock()
 	defer dnsConfigMu.Unlock()
-	return registerLocalDomainsLocked(domains, wildcard)
+	lockPath, err := dnsLockPath()
+	if err != nil {
+		return err
+	}
+	return fsutil.WithFileLock(lockPath, func() error {
+		return registerLocalDomainsLocked(domains, wildcard)
+	})
 }
 
 func registerLocalDomainsLocked(domains []string, wildcard bool) error {
@@ -657,7 +676,16 @@ func registerLocalDomainsLocked(domains []string, wildcard bool) error {
 func UnregisterLocalDomain(domain string) error {
 	dnsConfigMu.Lock()
 	defer dnsConfigMu.Unlock()
+	lockPath, err := dnsLockPath()
+	if err != nil {
+		return err
+	}
+	return fsutil.WithFileLock(lockPath, func() error {
+		return unregisterLocalDomainLocked(domain)
+	})
+}
 
+func unregisterLocalDomainLocked(domain string) error {
 	domains, err := LoadLocalDomains()
 	if err != nil {
 		return err
@@ -778,7 +806,13 @@ func fileContentDiffers(path, want string) bool {
 func UpdateDnsmasqConfig() error {
 	dnsConfigMu.Lock()
 	defer dnsConfigMu.Unlock()
-	return updateDnsmasqConfigLocked()
+	lockPath, err := dnsLockPath()
+	if err != nil {
+		return err
+	}
+	return fsutil.WithFileLock(lockPath, func() error {
+		return updateDnsmasqConfigLocked()
+	})
 }
 
 // updateDnsmasqConfigLocked is UpdateDnsmasqConfig's body; the caller must

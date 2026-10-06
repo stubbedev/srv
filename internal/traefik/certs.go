@@ -1,6 +1,7 @@
 package traefik
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -126,31 +127,35 @@ func GenerateLocalCert(siteName string, domains []string, wildcard bool) error {
 		return err
 	}
 
-	// 0700: the directory holds private keys. The engine writes the *.key
-	// files 0600, but a private cert dir keeps the .crt files and the listing
-	// itself from being world-readable too.
-	certDir := cfg.SiteCertsDir(siteName)
-	if err := os.MkdirAll(certDir, constants.DirPermPrivate); err != nil {
-		return fmt.Errorf("failed to create certs directory: %w", err)
-	}
-
-	primary := domains[0]
-	certFile := filepath.Join(certDir, primary+constants.ExtCert)
-	keyFile := filepath.Join(certDir, primary+constants.ExtKey)
-
-	var sans []string
-	for _, d := range domains {
-		sans = append(sans, d)
-		if wildcard {
-			sans = append(sans, "*."+d)
+	// The issue step is serialized across processes (CLI vs daemon/MCP racing
+	// an issuance): two interleaved writers could pair one issuer's cert with
+	// the other's key — a state every later check considers valid.
+	return fsutil.WithFileLock(filepath.Join(cfg.Root, ".certs.lock"), func() error {
+		// 0700: the directory holds private keys. The engine writes the *.key
+		// files 0600, but a private cert dir keeps the .crt files and the
+		// listing itself from being world-readable too.
+		certDir := cfg.SiteCertsDir(siteName)
+		if err := os.MkdirAll(certDir, constants.DirPermPrivate); err != nil {
+			return fmt.Errorf("failed to create certs directory: %w", err)
 		}
-	}
 
-	if err := mkcert.IssueCert(certFile, keyFile, sans); err != nil {
-		return fmt.Errorf("failed to generate certificate for %s: %w", primary, err)
-	}
+		primary := domains[0]
+		certFile := filepath.Join(certDir, primary+constants.ExtCert)
+		keyFile := filepath.Join(certDir, primary+constants.ExtKey)
 
-	return nil
+		var sans []string
+		for _, d := range domains {
+			sans = append(sans, d)
+			if wildcard {
+				sans = append(sans, "*."+d)
+			}
+		}
+
+		if err := mkcert.IssueCert(certFile, keyFile, sans); err != nil {
+			return fmt.Errorf("failed to generate certificate for %s: %w", primary, err)
+		}
+		return nil
+	})
 }
 
 // RenewThresholdDays is the number of days before expiry to trigger auto-renewal.
@@ -259,10 +264,18 @@ func UpdateDynamicConfig() error {
 		return err
 	}
 
+	// Byte-identical content short-circuits: install regenerates per site,
+	// and N identical rewrites cost N fsync cycles plus N Traefik file-provider
+	// reloads of unchanged content.
+	dynamicPath := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
+	content := []byte(renderDynamicConfig(certs))
+	if existing, err := os.ReadFile(dynamicPath); err == nil && bytes.Equal(existing, content) {
+		return nil
+	}
+
 	// Write atomically so Traefik (which watches this file) never reads a
 	// partial/truncated config between the truncate and the final write.
-	dynamicPath := filepath.Join(cfg.TraefikConfDir(), "traefik-dynamic.yml")
-	if err := fsutil.AtomicWriteFile(dynamicPath, []byte(renderDynamicConfig(certs)), constants.FilePermDefault); err != nil {
+	if err := fsutil.AtomicWriteFile(dynamicPath, content, constants.FilePermDefault); err != nil {
 		return fmt.Errorf("failed to write dynamic config: %w", err)
 	}
 
