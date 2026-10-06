@@ -196,6 +196,12 @@ type Server struct {
 	// the platform's event latency.
 	newFileWatcher func() (fileWatcher, error)
 	pollEvery      time.Duration
+
+	// loopReady closes once watchLoop has finished its initial sync and its
+	// poll ticker is live, so a test can order its file writes after the
+	// watcher is fully up instead of racing Watch's startup.
+	loopReady     chan struct{}
+	loopReadyOnce sync.Once
 }
 
 // New creates a server bound to bindAddr:port without serving yet. The zone
@@ -227,6 +233,7 @@ func New(bindAddr string, port int, confPath, hostsPath string) (*Server, error)
 			return fsnotifyWatcher{w}, nil
 		},
 		pollEvery: pollInterval,
+		loopReady: make(chan struct{}),
 	}
 	mux := miekg.NewServeMux()
 	mux.HandleFunc(".", s.handleQuery)
@@ -420,6 +427,7 @@ func (s *Server) watchLoop(events <-chan fsnotify.Event, errs <-chan error) erro
 	}
 	poll := time.NewTicker(s.pollEvery)
 	defer poll.Stop()
+	s.loopReadyOnce.Do(func() { close(s.loopReady) })
 	for {
 		select {
 		case <-s.ctx.Done():

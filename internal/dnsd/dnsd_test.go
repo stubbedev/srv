@@ -229,11 +229,11 @@ func TestReloadPicksUpFileChanges(t *testing.T) {
 // TestWatchReloadsOnChange runs the real platform path end to end: a real
 // fsnotify watcher on the real directory, an atomic rename-over exactly
 // like fsutil.AtomicWriteFile, and the record served through the real
-// socket. The assertion deadline is derived from the stat-poll safety net
-// (tightened via s.pollEvery), never from fsnotify's delivery latency: a
-// platform whose events arrive late still reloads within the bound the code
-// owns, and every startup interleaving — rename before the initial sync,
-// after it, event delivered or not — converges inside that same bound.
+// socket. The rename waits on a handshake with the watch loop (initial
+// sync done, poll ticker live), and the assertion deadline is derived from
+// the tightened stat-poll bound rather than fsnotify's delivery latency:
+// whether the platform's event arrives early, late, or never, the poll
+// converges inside the bound the code owns.
 func TestWatchReloadsOnChange(t *testing.T) {
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, "dnsmasq.conf")
@@ -265,6 +265,16 @@ func TestWatchReloadsOnChange(t *testing.T) {
 		s.Shutdown()
 		<-watchDone
 	})
+
+	// Handshake: the initial sync has run and the poll ticker is live. Only
+	// now is the rename ordered after the watcher — Watch's startup (watcher
+	// creation, Add, initial reload) can take seconds on a loaded runner and
+	// must not eat into the deadline below.
+	select {
+	case <-s.loopReady:
+	case <-watchDone:
+		t.Fatal("Watch exited before its initial sync")
+	}
 
 	// Atomic-rename write, exactly what fsutil.AtomicWriteFile does.
 	tmp := hostsPath + ".tmp"
