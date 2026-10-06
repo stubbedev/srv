@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["**"]
 
+# Read-only default for every job; autofix and nix widen their own token where
+# they push back.
+permissions:
+  contents: read
+
 # Collapse the duplicate push + pull_request runs for the same commit into one,
 # and cancel a superseded run when a branch is force-pushed. Keyed on the head
 # SHA so the push-event and pull_request-event runs share a group.
