@@ -264,10 +264,13 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- Formula/srv.rb; then
+          # git diff --quiet is vacuously clean while the formula is still
+          # untracked, so stage first and diff against the index — otherwise
+          # the first bump (and every one after it) no-ops with success.
+          git add Formula/srv.rb
+          if git diff --cached --quiet -- Formula/srv.rb; then
             echo "Formula already up to date for ${VERSION}; nothing to do."
             exit 0
           fi
-          git add Formula/srv.rb
           git commit -m "srv ${VERSION}"
           git push
