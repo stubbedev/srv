@@ -1,0 +1,25 @@
+# Dev/test image: run the whole test suite inside Docker instead of on the
+# host, so nothing a test execs (sudo steps, trust stores, resolv.conf
+# probes) can ever reach the developer's terminal.
+#
+# Built and run through compose.yaml (service `dev`, profile `dev`):
+#
+#   docker compose --profile dev up -d --build
+#   docker compose --profile dev exec dev go test ./...
+#   docker compose --profile dev down
+#
+# The dev user (uid 1000) matches a typical host login, so files the test
+# run writes stay owned by the host user; passwordless sudo mirrors the
+# container's root access for code paths that literally exec sudo.
+FROM golang:1.27-bookworm
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends sudo docker.io ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd -m -u 1000 dev \
+ && echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev \
+ && chmod 440 /etc/sudoers.d/dev
+
+USER dev
+ENV GOCACHE=/gocache
+WORKDIR /work

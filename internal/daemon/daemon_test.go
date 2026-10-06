@@ -11,6 +11,8 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/logfile"
+	"github.com/stubbedev/srv/internal/shell"
+	"github.com/stubbedev/srv/internal/shell/shelltest"
 	"github.com/stubbedev/srv/internal/site"
 )
 
@@ -319,6 +321,11 @@ func TestRefreshContainerMappingWithSites(t *testing.T) {
 func newDaemonForTest(t *testing.T) (*Daemon, error) {
 	t.Helper()
 	setupSrvRoot(t)
+	// Run() refreshes the system resolver routing (SetupDNS) on its embedded
+	// DNS path; with the real shell runner that reaches `sudo` on the
+	// developer's terminal. Every daemon test runs against the recording
+	// fake instead — sudo steps fail fast, never prompt.
+	t.Cleanup(shell.SwapDefault(shelltest.New(nil)))
 	return New()
 }
 

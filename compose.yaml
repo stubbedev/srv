@@ -1,0 +1,29 @@
+# Dev/test environments. The `dev` profile keeps the suite off the host so
+# nothing a test execs (sudo steps, trust stores, resolv.conf probes) can
+# ever reach the developer's terminal.
+#
+#   docker compose --profile dev up -d --build
+#   docker compose --profile dev exec dev go test ./...
+#   docker compose --profile dev down
+services:
+  dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: srv-dev
+    container_name: srv-dev
+    command: sleep infinity
+    volumes:
+      - .:/work
+      # Share the host module cache; uid 1000 in the container matches the
+      # host login that owns it, so writes stay consistent both ways.
+      - ${HOME}/go/pkg/mod:/go/pkg/mod
+      - srv-gocache:/gocache
+      # Drive the host engine for the e2e suites (passwordless on the host).
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      GOCACHE: /gocache
+
+volumes:
+  srv-gocache:

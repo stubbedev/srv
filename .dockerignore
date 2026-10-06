@@ -1,0 +1,5 @@
+.git
+.gitignore
+result
+coverage.out
+srv
