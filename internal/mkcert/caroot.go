@@ -12,6 +12,11 @@ import (
 // standalone mkcert tool.
 func CAROOT() string { return getCAROOT() }
 
+// CARootCertPath returns the path of the local CA certificate file inside
+// CAROOT, so callers outside this package can trust the exact CA srv issues
+// certificates from without duplicating its filename.
+func CARootCertPath() string { return filepath.Join(CAROOT(), rootName) }
+
 func getCAROOT() string {
 	if env := os.Getenv("CAROOT"); env != "" {
 		return env

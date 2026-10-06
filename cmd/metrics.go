@@ -5,6 +5,7 @@ package cmd
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/metrics"
+	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -199,21 +201,36 @@ func reportMetricsEndpoint(label, domain string) {
 	}
 }
 
+// metricsTLSConfig trusts the system pool plus srv's vendored mkcert root CA
+// — the CA that signs the certificates Traefik serves for the metrics domains.
+// The mkcert cert is not in this process's trust store, so the CA file is
+// loaded explicitly; a handshake against a certificate neither trust root
+// covers fails, and the endpoint honestly reports as not responding.
+func metricsTLSConfig() *tls.Config {
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if caPEM, err := os.ReadFile(mkcert.CARootCertPath()); err == nil {
+		pool.AppendCertsFromPEM(caPEM)
+	}
+	return &tls.Config{RootCAs: pool}
+}
+
 // metricsURLResponds reports whether the URL returns a usable HTTP response.
-// The mkcert cert is not in this process's trust store, so TLS verification is
-// skipped — we only care that Traefik routed the request to a live backend.
 // A 502 means Traefik could not reach the container, which is exactly the
 // failure we want to surface, so it counts as "not responding".
 //
 // Every connection is dialed straight at Traefik on 127.0.0.1:443 so the probe
 // does not depend on the system resolver (which, unlike a browser, may not
-// route .local through dnsmasq for this process).
+// route .local through dnsmasq for this process). Certificate name checking
+// still uses the URL host, so dialing the loopback does not weaken the check.
 func metricsURLResponds(url string) bool {
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	client := &http.Client{
 		Timeout: 4 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // local reachability probe only
+			TLSClientConfig: metricsTLSConfig(),
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return dialer.DialContext(ctx, network, "127.0.0.1:443")
 			},
