@@ -9,6 +9,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
+	"github.com/stubbedev/srv/internal/firewall"
 	"github.com/stubbedev/srv/internal/traefik"
 	"github.com/stubbedev/srv/internal/ui"
 )
@@ -127,7 +128,18 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		ui.Dim("Network not found")
 	}
 
-	// Step 5: Remove config directory
+	// Step 5: Close the firewall ports install opened, so nothing stays
+	// LAN-exposed after the stack is gone. Best-effort: a firewall srv cannot
+	// touch is a warning, not a failed uninstall.
+	ui.Info("Closing firewall ports (80/443)...")
+	if err := firewall.ClosePorts(); err != nil {
+		ui.Warn("Failed to close firewall ports: %v", err)
+		ui.Dim("Ports 80 and 443 may still be open")
+	} else {
+		ui.Success("Firewall ports closed")
+	}
+
+	// Step 6: Remove config directory
 	ui.Info("Removing config directory...")
 	if cfg != nil {
 		if err := os.RemoveAll(cfg.Root); err != nil {
@@ -139,7 +151,7 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 		ui.Dim("Config directory not found")
 	}
 
-	// Step 6: Remove srv binary
+	// Step 7: Remove srv binary
 	ui.Info("Removing srv binary...")
 	if execErr != nil {
 		ui.Warn("Could not determine binary path: %v", execErr)

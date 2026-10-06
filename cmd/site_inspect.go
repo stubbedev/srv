@@ -234,8 +234,6 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	ui.Print("  SSL:     %s", ui.TypeColor(s.IsLocal))
 
 	// Site type info
-	meta, _ := site.ReadSiteMetadata(s.Name)
-	_ = meta // metadata is still used elsewhere by callers; keep reference live.
 	switch s.Type {
 	case site.SiteTypeStatic:
 		if s.DaemonServed {
@@ -273,9 +271,10 @@ func runInfo(cmd *cobra.Command, args []string) error {
 
 	ui.Blank()
 
-	// SSL certificate info for local sites
+	// SSL certificate info for local sites: one file read, not a scan of
+	// every site's certificates.
 	if s.IsLocal && s.Domain() != "" {
-		showCertInfo(s.Domain())
+		showCertInfo(s.Name, s.Domain())
 	}
 
 	// Show URL if running
@@ -288,30 +287,26 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// showCertInfo displays SSL certificate information for a domain.
-func showCertInfo(domain string) {
-	certs := traefik.ListLocalCerts()
-	for _, cert := range certs {
-		if cert.Domain == domain {
-			ui.Bold("SSL Certificate")
-			ui.Print("  Domain:  %s", cert.Domain)
+// showCertInfo displays SSL certificate information for one site's domain.
+func showCertInfo(siteName, domain string) {
+	cert := traefik.GetLocalCertInfo(siteName, domain)
+	ui.Bold("SSL Certificate")
+	if !cert.Exists || cert.Corrupt {
+		ui.Dim("  No certificate found for %s", domain)
+		ui.IndentedDim(1, "Certificate will be generated on 'srv start'")
+		return
+	}
+	ui.Print("  Domain:  %s", cert.Domain)
 
-			if cert.IsExpired {
-				ui.Print("  Status:  %s", ui.StatusColor("expired"))
-			} else if cert.DaysLeft <= constants.CertExpiryWarningDays {
-				ui.Print("  Status:  %s (%d days left)", ui.StatusColor("expiring"), cert.DaysLeft)
-			} else {
-				ui.Print("  Status:  %s (%d days left)", ui.StatusColor("valid"), cert.DaysLeft)
-			}
-
-			ui.Print("  Expires: %s", cert.ExpiresAt.Format(constants.DateFormat))
-			return
-		}
+	if cert.IsExpired {
+		ui.Print("  Status:  %s", ui.StatusColor("expired"))
+	} else if cert.DaysLeft <= constants.CertExpiryWarningDays {
+		ui.Print("  Status:  %s (%d days left)", ui.StatusColor("expiring"), cert.DaysLeft)
+	} else {
+		ui.Print("  Status:  %s (%d days left)", ui.StatusColor("valid"), cert.DaysLeft)
 	}
 
-	ui.Bold("SSL Certificate")
-	ui.Dim("  No certificate found for %s", domain)
-	ui.IndentedDim(1, "Certificate will be generated on 'srv start'")
+	ui.Print("  Expires: %s", cert.ExpiresAt.Format(constants.DateFormat))
 }
 
 // =============================================================================

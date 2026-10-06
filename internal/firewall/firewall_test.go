@@ -3,6 +3,7 @@ package firewall
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stubbedev/srv/internal/shell"
@@ -30,6 +31,54 @@ func TestFirewallTypeString(t *testing.T) {
 func swapShell(t *testing.T, r shell.Runner) {
 	t.Helper()
 	t.Cleanup(shell.SwapDefault(r))
+}
+
+// ClosePorts must remove exactly the rules OpenPorts added, per backend.
+func TestClosePortsArgs(t *testing.T) {
+	t.Run("ufw", func(t *testing.T) {
+		fake := shelltest.New(map[string]shelltest.Response{
+			"ufw":      {Exists: true},
+			"sudo:ufw": {Out: []byte("Status: active")},
+		})
+		swapShell(t, fake)
+		if err := ClosePorts(); err != nil {
+			t.Fatalf("ClosePorts: %v", err)
+		}
+		for _, want := range [][]string{{"sudo", "ufw", "delete", "allow", "80/tcp"}, {"sudo", "ufw", "delete", "allow", "443/tcp"}} {
+			found := false
+			for _, c := range fake.Snapshot() {
+				if slices.Equal(append([]string{c.Name}, c.Args...), want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("ClosePorts never ran %v", want)
+			}
+		}
+	})
+
+	t.Run("firewalld", func(t *testing.T) {
+		fake := shelltest.New(map[string]shelltest.Response{
+			"ufw":          {Exists: false},
+			"firewall-cmd": {Exists: true, Out: []byte("running")},
+		})
+		swapShell(t, fake)
+		if err := ClosePorts(); err != nil {
+			t.Fatalf("ClosePorts: %v", err)
+		}
+		for _, svc := range []string{"http", "https"} {
+			found := false
+			for _, c := range fake.Snapshot() {
+				if c.Name == "sudo" && len(c.Args) > 2 && c.Args[0] == "firewall-cmd" && c.Args[2] == "--remove-service="+svc {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("ClosePorts never removed the %s service", svc)
+			}
+		}
+	})
 }
 
 func TestDetectUFW(t *testing.T) {

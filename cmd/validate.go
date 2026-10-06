@@ -40,21 +40,34 @@ func init() {
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	var names []string
-	if validateFlags.all {
-		names = GetSiteNames()
-	} else {
-		names = []string{args[0]}
-	}
-
 	failed := 0
-	for _, name := range names {
-		if err := validateOne(name); err != nil {
-			ui.Warn("%s: %v", name, err)
-			failed++
-			continue
+	if validateFlags.all {
+		// One scan: ListBasic already parsed every metadata.yml.
+		sites, err := site.ListBasic()
+		if err != nil {
+			return err
 		}
-		ui.Success("%s: ok", name)
+		for _, s := range sites {
+			meta := s.Metadata()
+			if meta == nil {
+				ui.Warn("%s: unreadable metadata", s.Name)
+				failed++
+				continue
+			}
+			if err := site.ValidateMetadata(meta); err != nil {
+				ui.Warn("%s: %v", s.Name, err)
+				failed++
+				continue
+			}
+			ui.Success("%s: ok", s.Name)
+		}
+	} else {
+		if err := validateOne(args[0]); err != nil {
+			ui.Warn("%s: %v", args[0], err)
+			failed = 1
+		} else {
+			ui.Success("%s: ok", args[0])
+		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d site(s) failed validation", failed)

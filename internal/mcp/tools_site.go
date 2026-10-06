@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -225,13 +226,7 @@ func removeAliasTool(ctx context.Context, req *mcpsdk.CallToolRequest, in aliasI
 		if err != nil {
 			return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 		}
-		found := false
-		for _, d := range meta.Domains {
-			if d == in.Alias {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(meta.Domains, in.Alias)
 		if !found {
 			return nil, okOut{Error: fmt.Sprintf("alias %q is not registered for %s", in.Alias, in.Name)}, nil
 		}

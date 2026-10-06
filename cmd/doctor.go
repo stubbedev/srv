@@ -284,15 +284,22 @@ func checkPorts(engineUp bool) int {
 	type portInfo struct {
 		port      int
 		name      string
-		ownedByFn func() bool
+		ownedBy   bool
 		container string // empty for the daemon-hosted DNS server
 	}
+	// One inspect each: the old table ran traefik.IsRunning four times (once
+	// per port) plus the image-version probe, all against the same container.
+	traefikRunning := traefik.IsRunning()
+	traefikVersion := ""
+	if traefikRunning {
+		traefikVersion = docker.GetContainerImageVersion(docker.ContainerTraefik)
+	}
 	ports := []portInfo{
-		{constants.PortHTTP, constants.PortNameHTTP, traefik.IsRunning, docker.ContainerTraefik},
-		{constants.PortHTTPS, constants.PortNameHTTPS, traefik.IsRunning, docker.ContainerTraefik},
-		{constants.PortInternal, constants.PortNameInternal, traefik.IsRunning, docker.ContainerTraefik},
-		{constants.PortDashboard, constants.PortNameDashboard, traefik.IsRunning, docker.ContainerTraefik},
-		{constants.PortDNS, constants.PortNameDNS, traefik.IsDNSRunning, ""},
+		{constants.PortHTTP, constants.PortNameHTTP, traefikRunning, docker.ContainerTraefik},
+		{constants.PortHTTPS, constants.PortNameHTTPS, traefikRunning, docker.ContainerTraefik},
+		{constants.PortInternal, constants.PortNameInternal, traefikRunning, docker.ContainerTraefik},
+		{constants.PortDashboard, constants.PortNameDashboard, traefikRunning, docker.ContainerTraefik},
+		{constants.PortDNS, constants.PortNameDNS, traefik.IsDNSRunning(), ""},
 	}
 
 	for _, p := range ports {
@@ -301,10 +308,9 @@ func checkPorts(engineUp bool) int {
 			continue
 		}
 
-		if p.ownedByFn() {
+		if p.ownedBy {
 			if p.container != "" && engineUp {
-				version := docker.GetContainerImageVersion(p.container)
-				ui.IndentedSuccess(1, ":%d (%s) - in use by srv [%s:%s]", p.port, p.name, p.container, version)
+				ui.IndentedSuccess(1, ":%d (%s) - in use by srv [%s:%s]", p.port, p.name, p.container, traefikVersion)
 			} else {
 				ui.IndentedSuccess(1, ":%d (%s) - in use by the srv daemon (embedded DNS)", p.port, p.name)
 			}
@@ -554,9 +560,11 @@ func checkSitesValid() int {
 	}
 	issues := 0
 	for _, s := range sites {
-		meta, err := site.ReadSiteMetadata(s.Name)
-		if err != nil {
-			ui.IndentedWarn(1, "%s: %v", s.Name, err)
+		// ListBasic already parsed every metadata.yml; re-reading each file
+		// doubled the cost of the check.
+		meta := s.Metadata()
+		if meta == nil {
+			ui.IndentedWarn(1, "%s: unreadable metadata", s.Name)
 			issues++
 			continue
 		}

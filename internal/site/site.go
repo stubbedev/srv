@@ -46,6 +46,20 @@ type Site struct {
 	SPA                bool     // Static site options, honoured by both the nginx renderer and the daemon server
 	Cache              bool
 	CORS               bool
+
+	// meta is the metadata.yml the Site was loaded from, carried so list
+	// consumers (doctor, validate, install) reuse the parse instead of
+	// re-reading every file. Unexported: never serialized, never mutated.
+	meta *SiteMetadata
+}
+
+// Metadata returns the metadata.yml the site was loaded from (nil when the
+// site is broken). Reuse this instead of ReadSiteMetadata after a ListBasic.
+func (s *Site) Metadata() *SiteMetadata {
+	if s == nil {
+		return nil
+	}
+	return s.meta
 }
 
 // Domain returns the canonical (first) hostname for the site, or "" if none.
@@ -79,6 +93,7 @@ func loadSite(cfg *config.Config, name string) (Site, bool) {
 // check.
 func siteFromMetadata(cfg *config.Config, name string, meta *SiteMetadata) (Site, bool) {
 	s := Site{Name: name}
+	s.meta = meta
 	s.Domains = meta.Domains
 	s.IsLocal = meta.IsLocal
 	s.Wildcard = meta.Wildcard

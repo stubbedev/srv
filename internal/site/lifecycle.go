@@ -57,7 +57,7 @@ func (r *Runner) Start(s *Site, build bool) error {
 	}
 	// A stopped daemon-served site has no route file while its metadata is
 	// unchanged, so the hash short-circuit would leave it unrouted: force.
-	res, err := reload(s.Name, s.DaemonServed && !s.routed())
+	res, err := reload(s.Name, s.DaemonServed && !s.routed(), reloadOpts{})
 	if err != nil {
 		return fmt.Errorf("reload site before start: %w", err)
 	}

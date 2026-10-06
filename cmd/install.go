@@ -245,9 +245,36 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			ui.Warn("Failed to regenerate metrics stack: %v", err)
 		}
 	}
+	// Reload every site without the per-site DNS pipeline (each registration
+	// used to re-run the redirect scan and DNS alias resolution); the domains
+	// are registered in two batched calls below.
+	var plainDomains, wildcardDomains []string
 	for _, s := range sites {
-		if _, err := site.ForceReload(s.Name); err != nil {
+		if _, err := site.ForceReloadWithoutDNS(s.Name); err != nil {
 			ui.Warn("Failed to regenerate config for %s: %v", s.Name, err)
+			continue
+		}
+		if meta := s.Metadata(); meta != nil && meta.IsLocal {
+			if meta.Wildcard {
+				wildcardDomains = append(wildcardDomains, meta.Domains...)
+			} else {
+				plainDomains = append(plainDomains, meta.Domains...)
+			}
+		}
+	}
+	if len(plainDomains) > 0 {
+		if err := traefik.RegisterLocalDomains(plainDomains, false); err != nil {
+			ui.Warn("Failed to register local domains: %v", err)
+		}
+	}
+	if len(wildcardDomains) > 0 {
+		if err := traefik.RegisterLocalDomains(wildcardDomains, true); err != nil {
+			ui.Warn("Failed to register wildcard domains: %v", err)
+		}
+	}
+	if len(plainDomains) > 0 || len(wildcardDomains) > 0 {
+		if err := traefik.UpdateDynamicConfig(); err != nil {
+			ui.Warn("Failed to refresh Traefik dynamic config: %v", err)
 		}
 	}
 	if err := docker.RemoveComposeProjectContainers(constants.ComposeProjectName); err != nil {

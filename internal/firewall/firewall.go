@@ -229,6 +229,54 @@ func openIPTablesPorts() error {
 	return nil
 }
 
+// ClosePorts removes the 80/443 rules OpenPorts added, so an uninstall does
+// not leave LAN-exposed ports pointing at a stack that no longer exists.
+// Best-effort by design: the caller warns on failure instead of failing the
+// uninstall over a firewall it could not touch.
+func ClosePorts() error {
+	switch Detect() {
+	case FirewallUFW:
+		return closeUFWPorts()
+	case FirewallFirewalld:
+		return closeFirewalldPorts()
+	case FirewallIPTables:
+		return closeIPTablesPorts()
+	default:
+		return nil // No firewall was configured
+	}
+}
+
+func closeUFWPorts() error {
+	for _, port := range []string{constants.PortHTTPStr, constants.PortHTTPSStr} {
+		if err := shell.SudoRun("ufw", "delete", "allow", port+"/tcp"); err != nil {
+			return fmt.Errorf("failed to close port %s: %w", port, err)
+		}
+	}
+	return nil
+}
+
+func closeFirewalldPorts() error {
+	for _, svc := range []string{"http", "https"} {
+		if err := shell.SudoRun("firewall-cmd", "--permanent", "--remove-service="+svc); err != nil {
+			return fmt.Errorf("failed to remove %s service: %w", svc, err)
+		}
+	}
+	if err := shell.SudoRun("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewall: %w", err)
+	}
+	return nil
+}
+
+func closeIPTablesPorts() error {
+	// -D fails when the rule is absent; only srv's own ACCEPT rules are
+	// deleted, and their absence is the desired end state.
+	for _, port := range []string{constants.PortHTTPStr, constants.PortHTTPSStr} {
+		_ = shell.SudoRun("iptables", "-D", "INPUT", "-p", "tcp", "--dport", port, "-j", "ACCEPT")
+	}
+	persistIPTablesRules()
+	return nil
+}
+
 // persistIPTablesRules attempts to persist iptables rules.
 // This is a best-effort operation - failure is not critical as rules are already
 // applied, but every failure is surfaced on stderr: rules that vanish on reboot

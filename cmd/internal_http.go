@@ -106,8 +106,8 @@ func runInternalList(cmd *cobra.Command, args []string) error {
 	}
 	found := false
 	for _, s := range sites {
-		meta, err := site.ReadSiteMetadata(s.Name)
-		if err != nil || meta == nil {
+		meta := s.Metadata()
+		if meta == nil {
 			continue
 		}
 		if site.HasListener(meta.Listeners, constants.ListenerInternal) {

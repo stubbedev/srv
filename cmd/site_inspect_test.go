@@ -146,7 +146,7 @@ func TestSetupColoredHelp(t *testing.T) {
 
 func TestShowCertInfoNoCerts(t *testing.T) {
 	setupSrvRoot(t)
-	showCertInfo("missing.local")
+	showCertInfo("missing", "missing.local")
 }
 
 func TestRunInfoBroken(t *testing.T) {

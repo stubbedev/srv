@@ -76,15 +76,27 @@ func writeLastReloadHash(cfg *config.Config, name, hash string) {
 // no-op for compose sites and a deterministic regeneration for srv-managed sites.
 // Returns an error only when the site cannot be validated or written; cert /
 // DNS subsystem failures are reported as Warnings on the result.
-func Reload(name string) (*ReloadResult, error) { return reload(name, false) }
+func Reload(name string) (*ReloadResult, error) { return reload(name, false, reloadOpts{}) }
 
 // ForceReload regenerates a site's artifacts even when its metadata is unchanged
 // since the last apply. Used by `srv install` to migrate generated files (e.g.
 // the compose project name) to the current binary's templates without needing a
 // metadata edit.
-func ForceReload(name string) (*ReloadResult, error) { return reload(name, true) }
+func ForceReload(name string) (*ReloadResult, error) { return reload(name, true, reloadOpts{}) }
 
-func reload(name string, force bool) (*ReloadResult, error) {
+// ForceReloadWithoutDNS is ForceReload for batch flows (srv install) that
+// register every domain once afterwards: N sites cost one dnsmasq regen
+// pipeline (redirect scan + DNS alias resolution) instead of N.
+func ForceReloadWithoutDNS(name string) (*ReloadResult, error) {
+	return reload(name, true, reloadOpts{skipDNS: true})
+}
+
+// reloadOpts tunes a reload for batch callers. skipDNS defers the DNS
+// registry/dynamic-config steps to one batched call; it is a deliberate
+// deferral, so it never marks the reload as incompletely applied.
+type reloadOpts struct{ skipDNS bool }
+
+func reload(name string, force bool, opts reloadOpts) (*ReloadResult, error) {
 	meta, err := ReadSiteMetadata(name)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
@@ -178,13 +190,17 @@ func reload(name string, force bool) (*ReloadResult, error) {
 	}
 
 	// Local SSL + DNS: idempotent; re-issues the cert only if the SAN set
-	// would change (handled inside EnsureLocalCert).
+	// would change (handled inside EnsureLocalCert). The DNS registry and the
+	// dynamic-config refresh defer to one batched call when skipDNS is set
+	// (the cert is still per-site — it is the site's own artifact).
 	if meta.IsLocal && len(meta.Domains) > 0 {
-		if err := traefik.RegisterLocalDomains(meta.Domains, meta.Wildcard); err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("DNS register: %v", err))
-			applied = false
-		} else {
-			res.DNSRegistered = len(meta.Domains)
+		if !opts.skipDNS {
+			if err := traefik.RegisterLocalDomains(meta.Domains, meta.Wildcard); err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("DNS register: %v", err))
+				applied = false
+			} else {
+				res.DNSRegistered = len(meta.Domains)
+			}
 		}
 		if err := traefik.CheckMkcert(); err == nil {
 			renewed, certErr := traefik.EnsureLocalCert(name, meta.Domains, meta.Wildcard)
@@ -199,9 +215,11 @@ func reload(name string, force bool) (*ReloadResult, error) {
 			res.Warnings = append(res.Warnings, "mkcert unavailable; local TLS not refreshed")
 			applied = false
 		}
-		if err := traefik.UpdateDynamicConfig(); err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("dynamic config: %v", err))
-			applied = false
+		if !opts.skipDNS {
+			if err := traefik.UpdateDynamicConfig(); err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("dynamic config: %v", err))
+				applied = false
+			}
 		}
 	}
 

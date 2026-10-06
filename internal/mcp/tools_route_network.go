@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -181,12 +182,10 @@ func detachNetworkTool(ctx context.Context, req *mcpsdk.CallToolRequest, in deta
 		if err != nil {
 			return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
 		}
-		for _, n := range meta.ExtraNetworks {
-			if n == in.Network {
-				return nil, okOut{OK: true, Preview: &dryRunPreview{Target: in.Network, Kind: "network", WouldRemove: []string{
-					"network " + in.Network + " from site " + in.Name + " (restarted without it)",
-				}}}, nil
-			}
+		if slices.Contains(meta.ExtraNetworks, in.Network) {
+			return nil, okOut{OK: true, Preview: &dryRunPreview{Target: in.Network, Kind: "network", WouldRemove: []string{
+				"network " + in.Network + " from site " + in.Name + " (restarted without it)",
+			}}}, nil
 		}
 		return nil, okOut{Error: fmt.Sprintf("network %q not attached to %s", in.Network, in.Name)}, nil
 	}
