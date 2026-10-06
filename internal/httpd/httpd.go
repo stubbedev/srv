@@ -247,6 +247,11 @@ var cacheableExtensions = map[string]bool{
 }
 
 func (t Target) serve(w http.ResponseWriter, r *http.Request, roots *rootCache) {
+	// Base headers precede every early return: a preflight 204 without the
+	// CORS set always fails the browser's check, and a 405 must keep the
+	// security headers (the nginx renderer adds them with `always`).
+	t.applyBaseHeaders(w)
+
 	if r.Method == http.MethodOptions && t.CORS {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -256,8 +261,6 @@ func (t Target) serve(w http.ResponseWriter, r *http.Request, roots *rootCache) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	t.setHeaders(w, r.URL.Path)
 
 	// The root handle is shared across requests and owned by the cache.
 	root, err := roots.get(t.Root)
@@ -302,6 +305,15 @@ func (t Target) serve(w http.ResponseWriter, r *http.Request, roots *rootCache) 
 		defer func() { _ = f.Close() }()
 	}
 
+	// Immutable caching is keyed on the request actually resolving to the
+	// named asset. SPA fallbacks and custom 404 pages serve different content
+	// under that URL (nginx scopes `expires 1y` to the asset location, which an
+	// internal redirect to /index.html or /404.html does not match); stamping
+	// them immutable would pin the shell or error page for a year.
+	if t.Cache && cacheableExtensions[extLower(r.URL.Path)] {
+		h := w.Header()
+		h[immutableCacheHeader.key] = immutableCacheHeader.value
+	}
 	serveFile(w, r, st, f)
 }
 
@@ -381,7 +393,7 @@ var (
 
 // compileHeaders derives a target's per-request header set from its options.
 // The one path-dependent header (immutable caching for asset extensions) is
-// added by setHeaders.
+// applied by serve, only when the request resolves to that exact asset.
 func compileHeaders(t Target) []headerField {
 	var cors, noCache []headerField
 	if t.CORS {
@@ -393,15 +405,12 @@ func compileHeaders(t Target) []headerField {
 	return slices.Concat(securityHeaders, cors, noCache)
 }
 
-// setHeaders applies the target's compiled header set: security headers
+// applyBaseHeaders sets the target's compiled header set: security headers
 // always, cache policy and CORS per the site's options.
-func (t Target) setHeaders(w http.ResponseWriter, reqPath string) {
+func (t Target) applyBaseHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	for _, f := range t.headers {
 		h[f.key] = f.value
-	}
-	if t.Cache && cacheableExtensions[extLower(reqPath)] {
-		h[immutableCacheHeader.key] = immutableCacheHeader.value
 	}
 }
 

@@ -197,6 +197,35 @@ func TestCacheHeaders(t *testing.T) {
 	}
 }
 
+// A Cache+SPA site serves index.html for a missing asset URL; that response
+// must not carry the immutable asset header, or the shell is pinned at the
+// asset's URL for a year and deploys can never replace it. The custom 404
+// page is the same story.
+func TestCacheHeadersNeverStampFallbacks(t *testing.T) {
+	spa := t.TempDir()
+	writeFile(t, spa, "index.html", "shell")
+	writeFile(t, spa, "404.html", "gone")
+	s := New("127.0.0.1:0")
+	s.SetTargets(map[string]Target{"s.test": {Root: spa, Cache: true, SPA: true}}, nil)
+
+	code, _, h := get(t, s, "s.test", "/missing.js")
+	if code != http.StatusOK {
+		t.Fatalf("SPA fallback: code = %d", code)
+	}
+	if cc := h.Get("Cache-Control"); strings.Contains(cc, "immutable") {
+		t.Errorf("SPA fallback Cache-Control = %q, must not be immutable", cc)
+	}
+
+	plain := t.TempDir()
+	writeFile(t, plain, "404.html", "gone")
+	s2 := New("127.0.0.1:0")
+	s2.SetTargets(map[string]Target{"p.test": {Root: plain, Cache: true}}, nil)
+	_, _, h = get(t, s2, "p.test", "/missing.css")
+	if cc := h.Get("Cache-Control"); strings.Contains(cc, "immutable") {
+		t.Errorf("custom 404 Cache-Control = %q, must not be immutable", cc)
+	}
+}
+
 func TestCORS(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "index.html", "hi")
@@ -208,12 +237,22 @@ func TestCORS(t *testing.T) {
 		t.Errorf("Allow-Origin = %q, want *", aco)
 	}
 
+	// A preflight 204 without the CORS set always fails the browser's check;
+	// the nginx renderer emits these headers on its 204 too.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodOptions, "http://s.test/", nil)
 	req.Host = "s.test"
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("OPTIONS preflight: code = %d, want 204", rec.Code)
+	}
+	for name, want := range map[string]string{
+		"Access-Control-Allow-Origin":  "*",
+		"Access-Control-Allow-Methods": "GET, POST, OPTIONS, HEAD",
+	} {
+		if got := rec.Header().Get(name); got != want {
+			t.Errorf("preflight %s = %q, want %q", name, got, want)
+		}
 	}
 }
 
