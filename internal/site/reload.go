@@ -134,10 +134,17 @@ func reload(name string, force bool) (*ReloadResult, error) {
 		}
 		res.NeedsRestart = true
 	case SiteTypeDockerfile:
-		// These have their own Write helpers; regenerating their compose
-		// file picks up label changes. Caller restarts the container.
-		// (Skipping explicit per-type re-write here keeps Reload type-agnostic;
-		// a future P-phase introduces a unified WriteSiteConfig dispatcher.)
+		// Regenerate the compose file so metadata changes (aliases, listeners,
+		// volumes, networks) reach the container's labels and mounts — the
+		// file was previously written only by `srv add`, so every later
+		// mutation silently never applied. The ownership mechanism preserves
+		// a compose file the user has since edited. Caller restarts the
+		// container.
+		regenWarnings, err := WriteDockerfileSiteConfig(name, *meta, &DockerfileSiteInfo{Port: meta.DockerfilePort}, true)
+		res.Warnings = append(res.Warnings, regenWarnings...)
+		if err != nil {
+			return res, fmt.Errorf("regenerate dockerfile site config: %w", err)
+		}
 		res.NeedsRestart = true
 	case SiteTypeCompose:
 		// Compose sites use the Traefik file provider. Refresh that file in place;
@@ -155,6 +162,7 @@ func reload(name string, force bool) (*ReloadResult, error) {
 		}
 	}
 
+	applied := true
 	// Always refresh the per-site extra-routes Traefik file (or remove it
 	// when meta has no routes). Picked up by Traefik's file provider with
 	// no container restart. A compile failure is fatal: validation has
@@ -166,6 +174,7 @@ func reload(name string, force bool) (*ReloadResult, error) {
 	}
 	if err := traefik.WriteRoutesConfig(cfg, routes); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("routes: %v", err))
+		applied = false
 	}
 
 	// Local SSL + DNS: idempotent; re-issues the cert only if the SAN set
@@ -173,6 +182,7 @@ func reload(name string, force bool) (*ReloadResult, error) {
 	if meta.IsLocal && len(meta.Domains) > 0 {
 		if err := traefik.RegisterLocalDomains(meta.Domains, meta.Wildcard); err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("DNS register: %v", err))
+			applied = false
 		} else {
 			res.DNSRegistered = len(meta.Domains)
 		}
@@ -180,21 +190,26 @@ func reload(name string, force bool) (*ReloadResult, error) {
 			renewed, certErr := traefik.EnsureLocalCert(name, meta.Domains, meta.Wildcard)
 			if certErr != nil {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("cert: %v", certErr))
+				applied = false
 			} else {
 				res.RegeneratedCert = renewed
 				res.CertCovered = true
 			}
 		} else {
 			res.Warnings = append(res.Warnings, "mkcert unavailable; local TLS not refreshed")
+			applied = false
 		}
 		if err := traefik.UpdateDynamicConfig(); err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("dynamic config: %v", err))
+			applied = false
 		}
 	}
 
-	// Persist the hash so the next Reload can short-circuit. Failures here
-	// only cost us an extra regen next time — never block the caller.
-	if currentHash != "" {
+	// Persist the hash only when every derivable step actually applied: a
+	// transient failure recorded as "applied" short-circuited every later
+	// reload until the metadata changed, silently keeping broken TLS, routes
+	// or DNS (only Start compensated, via its cert check).
+	if currentHash != "" && applied {
 		writeLastReloadHash(cfg, name, currentHash)
 	}
 	return res, nil

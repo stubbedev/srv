@@ -70,26 +70,21 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 	}
 
 	proxyFile := filepath.Join(cfg.TraefikConfDir(), constants.ProxyConfigPrefix+name+constants.ExtYAML)
-	if !spec.Force {
-		if _, statErr := os.Stat(proxyFile); statErr == nil {
-			return nil, fmt.Errorf("proxy %q already exists (set force to overwrite)", name)
-		}
+	_, statErr := os.Stat(proxyFile)
+	isNew := os.IsNotExist(statErr)
+	if !spec.Force && !isNew {
+		return nil, fmt.Errorf("proxy %q already exists (set force to overwrite)", name)
 	}
 
-	if _, err := traefik.EnsureResourceCert(CertSiteName(name), spec.Domain, spec.Wildcard); err != nil {
-		return nil, err
-	}
-
-	res := &AddResult{Name: name, Domain: spec.Domain}
-
-	if err := traefik.RegisterLocalDomain(spec.Domain, spec.Wildcard); err != nil {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("register DNS for %s: %v", spec.Domain, err))
-	}
-
+	// Docker-side resolution and the fallback preconditions are checked
+	// BEFORE anything is issued: a failure past this point used to orphan
+	// the cert and the DNS registration — the metadata sidecar had never
+	// been written, so RemoveProxy could not find them to clean up.
 	targetURL, warn, err := resolveTarget(cfg, isContainer, containerName, containerPort, spec.Port)
 	if err != nil {
 		return nil, err
 	}
+	res := &AddResult{Name: name, Domain: spec.Domain}
 	if warn != "" {
 		res.Warnings = append(res.Warnings, warn)
 	}
@@ -113,6 +108,33 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 	}
 	res.TargetURL = targetURL
 
+	if _, err := traefik.EnsureResourceCert(CertSiteName(name), spec.Domain, spec.Wildcard); err != nil {
+		return nil, err
+	}
+	registered := false
+	if err := traefik.RegisterLocalDomain(spec.Domain, spec.Wildcard); err != nil {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("register DNS for %s: %v", spec.Domain, err))
+	} else {
+		registered = true
+	}
+
+	// A failure from here on rolls the issuance back — but only for a proxy
+	// this add created: overwriting (force) an existing proxy keeps its cert
+	// and DNS registration.
+	rollback := func(reason error) (*AddResult, error) {
+		if isNew {
+			if err := traefik.RemoveLocalCerts(CertSiteName(name), spec.Domain); err != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("rollback certificate: %v", err))
+			}
+			if registered {
+				if err := traefik.UnregisterLocalDomain(spec.Domain); err != nil {
+					res.Warnings = append(res.Warnings, fmt.Sprintf("rollback DNS registration: %v", err))
+				}
+			}
+		}
+		return nil, reason
+	}
+
 	// Preserve any existing routes when overwriting via Force.
 	var existingRoutes []site.Route
 	if pmeta, _ := Read(name); pmeta != nil {
@@ -134,14 +156,14 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 
 	route, err := proxyRoute(localZone, &meta, targetURL)
 	if err != nil {
-		return nil, err
+		return rollback(err)
 	}
 	route.Container = containerName
 	if route.FallbackServerName != "" {
 		res.Notes = append(res.Notes, fmt.Sprintf("%s is served by srv locally, so the fallback dials its upstream address %s directly", route.FallbackServerName, route.FallbackURL))
 	}
 	if err := traefik.WriteProxyConfig(cfg, route); err != nil {
-		return nil, err
+		return rollback(err)
 	}
 
 	if err := Write(meta); err != nil {

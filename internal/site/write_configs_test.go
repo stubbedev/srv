@@ -105,7 +105,7 @@ func TestWriteDockerfileSiteConfig(t *testing.T) {
 		NetworkName: "tnet",
 	}
 	info := &DockerfileSiteInfo{Port: 8080}
-	if err := WriteDockerfileSiteConfig("app", meta, info, true); err != nil {
+	if _, err := WriteDockerfileSiteConfig("app", meta, info, true); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	compose, err := os.ReadFile(filepath.Join(root, "sites", "app", "docker-compose.yml"))

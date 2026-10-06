@@ -365,36 +365,48 @@ func writeAddFiles(cfg *config.Config, s *addSetup) (meta SiteMetadata, warnings
 		meta.ServiceName = "srv-" + s.siteName + "-app"
 	}
 
-	if err := WriteSiteMetadata(s.siteName, meta); err != nil {
-		return meta, warnings, fmt.Errorf("write site metadata: %w", err)
+	// Type artifacts first, metadata last: metadata.yml is the registration
+	// record, and a failed artifact write must not leave a half-registered
+	// site that a later `srv add` refuses to re-create ("already exists").
+	fresh := !Exists(s.siteName)
+	writeErr := func() error {
+		switch {
+		case s.daemonServed:
+			return writeDaemonRouteConfig(cfg, s.siteName, &meta)
+		case s.isDockerfile:
+			_, err := WriteDockerfileSiteConfig(s.siteName, meta, s.dockerfileInfo, s.opts.Force)
+			return err
+		case s.isStatic:
+			var err error
+			warnings, err = WriteStaticSiteConfig(s.siteName, meta, s.opts.Force)
+			return err
+		default:
+			return traefik.WriteSiteRouteConfig(cfg, traefik.SiteRouteConfig{
+				Name:        s.siteName,
+				Domains:     s.allDomains(),
+				ServiceName: s.serviceName,
+				Port:        s.port,
+				IsLocal:     s.opts.Local,
+				Wildcard:    s.opts.Wildcard,
+				Listeners:   meta.Listeners,
+			})
+		}
+	}()
+	if writeErr != nil {
+		if fresh {
+			// Best-effort undo of partial artifacts: without metadata the site
+			// is unregistered, and a stray route file would route to nothing.
+			// An overwrite (force) of an existing site keeps its old artifacts.
+			_ = os.Remove(traefik.SiteRouteConfigPath(cfg, s.siteName))
+			if s.isDockerfile || s.isStatic {
+				_ = os.RemoveAll(SiteConfigDir(cfg, s.siteName))
+			}
+		}
+		return meta, warnings, writeErr
 	}
 
-	switch {
-	case s.daemonServed:
-		if err := writeDaemonRouteConfig(cfg, s.siteName, &meta); err != nil {
-			return meta, warnings, fmt.Errorf("write traefik config: %w", err)
-		}
-	case s.isDockerfile:
-		if err := WriteDockerfileSiteConfig(s.siteName, meta, s.dockerfileInfo, s.opts.Force); err != nil {
-			return meta, warnings, fmt.Errorf("write Dockerfile site config: %w", err)
-		}
-	case s.isStatic:
-		warnings, err = WriteStaticSiteConfig(s.siteName, meta, s.opts.Force)
-		if err != nil {
-			return meta, warnings, fmt.Errorf("write static site config: %w", err)
-		}
-	default:
-		if err := traefik.WriteSiteRouteConfig(cfg, traefik.SiteRouteConfig{
-			Name:        s.siteName,
-			Domains:     s.allDomains(),
-			ServiceName: s.serviceName,
-			Port:        s.port,
-			IsLocal:     s.opts.Local,
-			Wildcard:    s.opts.Wildcard,
-			Listeners:   meta.Listeners,
-		}); err != nil {
-			return meta, warnings, fmt.Errorf("write traefik config: %w", err)
-		}
+	if err := WriteSiteMetadata(s.siteName, meta); err != nil {
+		return meta, warnings, fmt.Errorf("write site metadata: %w", err)
 	}
 	return meta, warnings, nil
 }

@@ -106,6 +106,27 @@ func TestAddLocalhostPortWritesConfigAndMetadata(t *testing.T) {
 	}
 }
 
+// A failure after issuance (the Traefik config cannot be written) rolls the
+// cert and DNS registration back: the metadata sidecar was never written, so
+// RemoveProxy could not find them — the orphans used to be permanent.
+func TestAddFailingConfigWriteRollsBackIssuedCert(t *testing.T) {
+	cfg := addEnv(t)
+	if err := os.RemoveAll(cfg.TraefikConfDir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg.TraefikConfDir(), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Add(cfg, AddSpec{Domain: "app.test", Port: "8080"}); err == nil {
+		t.Fatal("expected the config write failure to fail Add")
+	}
+	entries, err := os.ReadDir(cfg.SiteCertsDir(CertSiteName("app-test")))
+	if err == nil && len(entries) > 0 {
+		t.Errorf("cert orphaned after the failed add: %d files", len(entries))
+	}
+}
+
 func TestAddHonoursExplicitName(t *testing.T) {
 	cfg := addEnv(t)
 	res, err := Add(cfg, AddSpec{Name: "custom", Domain: "app.test", Port: "8080"})

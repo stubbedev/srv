@@ -86,8 +86,11 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 	if _, err := traefik.EnsureResourceCert(certSiteName(name), spec.Domain, spec.Wildcard); err != nil {
 		return nil, err
 	}
+	registered := false
 	if err := traefik.RegisterLocalDomain(spec.Domain, spec.Wildcard); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("register DNS for %s: %v", spec.Domain, err))
+	} else {
+		registered = true
 	}
 	if err := traefik.WriteRedirectConfig(cfg, traefik.HTTPRedirect{
 		Name:      name,
@@ -96,6 +99,17 @@ func Add(cfg *config.Config, spec AddSpec) (*AddResult, error) {
 		Permanent: spec.Permanent,
 		Wildcard:  spec.Wildcard,
 	}); err != nil {
+		// The redirect was never created: undo the issuance so a retried add
+		// does not trip over a cert and DNS registration RemoveRedirect cannot
+		// see (its sidecar was never written).
+		if rmErr := traefik.RemoveLocalCerts(certSiteName(name), spec.Domain); rmErr != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("rollback certificate: %v", rmErr))
+		}
+		if registered {
+			if rmErr := traefik.UnregisterLocalDomain(spec.Domain); rmErr != nil {
+				res.Warnings = append(res.Warnings, fmt.Sprintf("rollback DNS registration: %v", rmErr))
+			}
+		}
 		return nil, err
 	}
 	if err := traefik.UpdateDynamicConfig(); err != nil {

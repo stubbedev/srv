@@ -93,7 +93,7 @@ func TestWriteDockerfileSiteConfigInternalListener(t *testing.T) {
 		NetworkName: "n",
 		Listeners:   []string{"internal"},
 	}
-	if err := WriteDockerfileSiteConfig("app", meta, &DockerfileSiteInfo{Port: 8080}, true); err != nil {
+	if _, err := WriteDockerfileSiteConfig("app", meta, &DockerfileSiteInfo{Port: 8080}, true); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 }
