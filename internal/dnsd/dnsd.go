@@ -73,6 +73,22 @@ const (
 	pollIntervalDegraded = time.Second
 )
 
+// fileWatcher is the fsnotify surface Watch depends on. Tests substitute a
+// synchronous fake so platform event latency never decides a test outcome.
+type fileWatcher interface {
+	Add(dir string) error
+	Events() <-chan fsnotify.Event
+	Errors() <-chan error
+	Close() error
+}
+
+// fsnotifyWatcher adapts *fsnotify.Watcher, whose Events and Errors are
+// channels rather than methods, to fileWatcher.
+type fsnotifyWatcher struct{ *fsnotify.Watcher }
+
+func (w fsnotifyWatcher) Events() <-chan fsnotify.Event { return w.Watcher.Events }
+func (w fsnotifyWatcher) Errors() <-chan error          { return w.Watcher.Errors }
+
 // ZoneSnapshot is one immutable set of zones. The handler reads the combined
 // snapshot through an atomic pointer: SetZones and Reload swap the pointer,
 // queries never block on a mutex.
@@ -173,6 +189,13 @@ type Server struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 	done      chan struct{}
+
+	// newFileWatcher builds the watcher Watch runs on; pollEvery bounds its
+	// stat-poll safety net. Both default to production values and are
+	// tightened by tests, which assert the bound the code owns instead of
+	// the platform's event latency.
+	newFileWatcher func() (fileWatcher, error)
+	pollEvery      time.Duration
 }
 
 // New creates a server bound to bindAddr:port without serving yet. The zone
@@ -196,6 +219,14 @@ func New(bindAddr string, port int, confPath, hostsPath string) (*Server, error)
 		ctx:       ctx,
 		cancel:    cancel,
 		done:      make(chan struct{}),
+		newFileWatcher: func() (fileWatcher, error) {
+			w, err := fsnotify.NewWatcher()
+			if err != nil {
+				return nil, err
+			}
+			return fsnotifyWatcher{w}, nil
+		},
+		pollEvery: pollInterval,
 	}
 	mux := miekg.NewServeMux()
 	mux.HandleFunc(".", s.handleQuery)
@@ -311,7 +342,7 @@ func (s *Server) Shutdown() {
 // between New and Add produces events nobody was watching for, so the
 // watcher's first act is to sync once from disk.
 func (s *Server) Watch() error {
-	watcher, err := fsnotify.NewWatcher()
+	watcher, err := s.newFileWatcher()
 	if err != nil {
 		return fmt.Errorf("DNS watcher: %w", err)
 	}
@@ -328,7 +359,7 @@ func (s *Server) Watch() error {
 			return fmt.Errorf("watch %s: %w", hostsDir, err)
 		}
 	}
-	return s.watchLoop(watcher.Events, watcher.Errors)
+	return s.watchLoop(watcher.Events(), watcher.Errors())
 }
 
 // SetZones installs a snapshot built from the structured config as the
@@ -387,7 +418,7 @@ func (s *Server) watchLoop(events <-chan fsnotify.Event, errs <-chan error) erro
 			debounce.Reset(reloadDebounce)
 		}
 	}
-	poll := time.NewTicker(pollInterval)
+	poll := time.NewTicker(s.pollEvery)
 	defer poll.Stop()
 	for {
 		select {
@@ -405,7 +436,7 @@ func (s *Server) watchLoop(events <-chan fsnotify.Event, errs <-chan error) erro
 			log.Printf("dnsd: watch error: %v", err)
 			// An overflowed or failing watcher may have dropped events:
 			// lean on the stat poll from here on.
-			poll.Reset(pollIntervalDegraded)
+			poll.Reset(min(pollIntervalDegraded, s.pollEvery))
 		case <-poll.C:
 			// The safety net for events the platform never delivered.
 			markDirty()

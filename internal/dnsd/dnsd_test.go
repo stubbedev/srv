@@ -226,6 +226,14 @@ func TestReloadPicksUpFileChanges(t *testing.T) {
 	}
 }
 
+// TestWatchReloadsOnChange runs the real platform path end to end: a real
+// fsnotify watcher on the real directory, an atomic rename-over exactly
+// like fsutil.AtomicWriteFile, and the record served through the real
+// socket. The assertion deadline is derived from the stat-poll safety net
+// (tightened via s.pollEvery), never from fsnotify's delivery latency: a
+// platform whose events arrive late still reloads within the bound the code
+// owns, and every startup interleaving — rename before the initial sync,
+// after it, event delivered or not — converges inside that same bound.
 func TestWatchReloadsOnChange(t *testing.T) {
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, "dnsmasq.conf")
@@ -245,6 +253,9 @@ func TestWatchReloadsOnChange(t *testing.T) {
 	addr := s.Addr()
 	waitReady(t, addr)
 
+	// Tighten the poll net before Watch starts (goroutine start is the
+	// happens-before edge), so the bound below stays code-owned.
+	s.pollEvery = 250 * time.Millisecond
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
@@ -264,7 +275,7 @@ func TestWatchReloadsOnChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(s.pollEvery + 2*reloadDebounce + 2*time.Second)
 	for time.Now().Before(deadline) {
 		resp := queryA(t, addr, "watched.test.")
 		if len(resp.Answer) == 1 {

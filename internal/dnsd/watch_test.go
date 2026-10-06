@@ -3,11 +3,105 @@ package dnsd
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// fakeWatcher replaces fsnotify for Watch-level tests: the first Add is
+// signalled, every Add is recorded, and a test decides exactly which events
+// arrive and when — nothing here waits on platform event latency.
+type fakeWatcher struct {
+	events chan fsnotify.Event
+	errors chan error
+
+	mu          sync.Mutex
+	added       []string
+	addedSignal chan struct{}
+	addOnce     sync.Once
+}
+
+func newFakeWatcher() *fakeWatcher {
+	return &fakeWatcher{
+		events:      make(chan fsnotify.Event),
+		errors:      make(chan error),
+		addedSignal: make(chan struct{}),
+	}
+}
+
+func (w *fakeWatcher) Add(dir string) error {
+	w.mu.Lock()
+	w.added = append(w.added, dir)
+	w.mu.Unlock()
+	w.addOnce.Do(func() { close(w.addedSignal) })
+	return nil
+}
+
+func (w *fakeWatcher) Events() <-chan fsnotify.Event { return w.events }
+func (w *fakeWatcher) Errors() <-chan error          { return w.errors }
+func (w *fakeWatcher) Close() error                  { return nil }
+
+func (w *fakeWatcher) adds() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.added)
+}
+
+// Watch must watch the zone files' directory — never the files themselves,
+// which an atomic write replaces — and feed the watcher's events into the
+// reload loop. Both are observable on the fake without a real filesystem
+// backend in the picture: the add signal is a channel handshake, and the
+// unbuffered event send returns only once the loop has received the event,
+// so what follows (debounce, stat, reload) is code the test controls the
+// timing of, not the platform.
+func TestWatchWatchesZoneDirectoryAndFeedsEventsToLoop(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "dnsmasq.conf")
+	hostsPath := filepath.Join(dir, "dnsmasq.hosts")
+	for _, p := range []string{confPath, hostsPath} {
+		if err := os.WriteFile(p, []byte(""), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := New("127.0.0.1", 0, confPath, hostsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fw := newFakeWatcher()
+	s.newFileWatcher = func() (fileWatcher, error) { return fw, nil }
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		_ = s.Watch()
+	}()
+	t.Cleanup(func() {
+		// Never served, so skip Shutdown's graceful wait on Serve.
+		s.cancel()
+		<-watchDone
+		_ = s.conn.PacketConn.Close()
+		_ = s.tcp.Listener.Close()
+	})
+
+	select {
+	case <-fw.addedSignal:
+	case <-watchDone:
+		t.Fatal("Watch exited before installing any watch")
+	}
+	// confPath and hostsPath share a directory, so exactly one Add is right:
+	// the directory, not the two files (an inode watch dies on rename-over).
+	if got := fw.adds(); !slices.Equal(got, []string{dir}) {
+		t.Fatalf("watched %v, want exactly the zone files' directory [%s]", got, dir)
+	}
+
+	renameOver(t, hostsPath, "127.0.0.1 watched.test\n")
+	// A lone Remove for the zone file is kqueue's rename-over report; the
+	// loop must reload from on-disk state regardless of op or name.
+	fw.events <- fsnotify.Event{Name: hostsPath, Op: fsnotify.Remove}
+	waitFor(t, "watcher event never reloaded the zone file", func() bool { return hasExact(s, "watched.test.") })
+}
 
 // loopServer builds a Server over two temp zone files and runs watchLoop on
 // synthetic channels, so a test decides exactly which events arrive — the
