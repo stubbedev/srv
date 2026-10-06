@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -154,5 +155,89 @@ func TestEventsCancelReportsNothing(t *testing.T) {
 	case err := <-errCh:
 		t.Errorf("err = %v after cancel, want none", err)
 	default:
+	}
+}
+
+func TestSplitImageRef(t *testing.T) {
+	cases := []struct{ ref, name, tag string }{
+		{"traefik:v3.7", "traefik", "v3.7"},
+		{"nginx", "nginx", ""},
+		{"localhost:5000/myapp", "localhost:5000/myapp", ""},
+		{"reg.example:5000/img:2", "reg.example:5000/img", "2"},
+		{"img@sha256:abc", "img", ""},
+	}
+	for _, c := range cases {
+		name, tag := splitImageRef(c.ref)
+		if name != c.name || tag != c.tag {
+			t.Errorf("splitImageRef(%q) = (%q, %q), want (%q, %q)", c.ref, name, tag, c.name, c.tag)
+		}
+	}
+}
+
+// countingListener counts accepted connections so a test can prove the
+// shared per-endpoint transport pools connections instead of dialing per call.
+type countingListener struct {
+	net.Listener
+	mu      sync.Mutex
+	accepts int
+}
+
+func (l *countingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.mu.Lock()
+		l.accepts++
+		l.mu.Unlock()
+	}
+	return c, err
+}
+
+func (l *countingListener) accepted() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.accepts
+}
+
+// Every helper used to build a fresh transport per call, opening (and
+// abandoning) a socket per API round trip. Clients for one endpoint must now
+// share a transport and reuse its pooled connection.
+func TestClientsShareTransportAndConnections(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := &countingListener{Listener: base}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/_ping", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := &httptest.Server{
+		Listener: listener,
+		Config:   &http.Server{Handler: mux},
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	t.Setenv("DOCKER_HOST", "tcp://"+strings.TrimPrefix(srv.URL, "http://"))
+	t.Setenv("SRV_CONTAINER_ENGINE", "")
+	os.Unsetenv("SRV_CONTAINER_ENGINE")
+
+	first, err := newMiniClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newMiniClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.client.Transport != second.client.Transport {
+		t.Error("clients for one endpoint do not share a transport")
+	}
+	for _, cli := range []*miniClient{first, second} {
+		if err := cli.Ping(context.Background()); err != nil {
+			t.Fatalf("Ping: %v", err)
+		}
+	}
+	if got := listener.accepted(); got != 1 {
+		t.Errorf("server accepted %d connections for 2 API calls, want 1 (pooled)", got)
 	}
 }

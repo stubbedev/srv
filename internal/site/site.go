@@ -138,7 +138,12 @@ func siteContainerStatus(s Site) string {
 	case SiteTypeStatic, SiteTypeDockerfile:
 		// Single-container sites: service name IS the container name.
 		if s.ServiceName != "" {
-			return docker.ContainerStatusByName(s.ServiceName)
+			if status, err := docker.ContainerStatusByName(s.ServiceName); err == nil {
+				return status
+			}
+			// Transient inspect failure (daemon restarting, socket hiccup):
+			// fall through to the subprocess probe below rather than
+			// reporting a running site as stopped.
 		}
 	case SiteTypeCompose:
 		// Multi-container compose projects: query by working-dir label.

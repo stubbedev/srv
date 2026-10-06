@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -16,24 +17,6 @@ func swap(t *testing.T, f *fakeSDK) {
 func swapErr(t *testing.T, err error) {
 	t.Helper()
 	t.Cleanup(SwapNewClient(func() (sdkClient, error) { return nil, err }))
-}
-
-func TestIndexByte(t *testing.T) {
-	cases := []struct {
-		in   []byte
-		c    byte
-		want int
-	}{
-		{[]byte("hello"), 'l', 2},
-		{[]byte("hello"), 'x', -1},
-		{[]byte(""), 'a', -1},
-		{[]byte("abc"), 'a', 0},
-	}
-	for _, tt := range cases {
-		if got := indexByte(tt.in, tt.c); got != tt.want {
-			t.Errorf("indexByte(%q, %q) = %d, want %d", tt.in, tt.c, got, tt.want)
-		}
-	}
 }
 
 func TestPrefixWriterCompleteLine(t *testing.T) {
@@ -384,6 +367,22 @@ func TestPullClientErr(t *testing.T) {
 	}
 }
 
+// The pull endpoint answers 200 and reports failures (auth denial, missing
+// manifest, network drop) as {"error": ...} events in the stream. Hitting EOF
+// after such an event must fail the pull, not report success.
+func TestPullStreamError(t *testing.T) {
+	swap(t, &fakeSDK{pullReader: io.NopCloser(strings.NewReader(
+		`{"status":"Pulling from traefik"}` + "\n" +
+			`{"error":"denied: requested access to the resource is denied"}` + "\n"))})
+	err := Pull("traefik:v3.7", nil)
+	if err == nil {
+		t.Fatal("expected the in-stream error event to fail the pull")
+	}
+	if !strings.Contains(err.Error(), "denied") {
+		t.Errorf("err = %v, want it to carry the daemon's message", err)
+	}
+}
+
 func TestConnectContainerToNetwork(t *testing.T) {
 	f := &fakeSDK{}
 	swap(t, f)
@@ -420,15 +419,30 @@ func TestContainerStatusByNameRunning(t *testing.T) {
 	swap(t, &fakeSDK{inspect: map[string]inspectResponse{
 		"x": {State: &inspectState{Running: true}},
 	}})
-	if got := ContainerStatusByName("x"); got != "running" {
-		t.Errorf("got %q", got)
+	got, err := ContainerStatusByName("x")
+	if err != nil || got != "running" {
+		t.Errorf("got %q, %v", got, err)
 	}
 }
 
-func TestContainerStatusByNameMissing(t *testing.T) {
-	swap(t, &fakeSDK{})
-	if got := ContainerStatusByName("x"); got != "stopped" {
-		t.Errorf("got %q", got)
+// A container the daemon reports as 404 is genuinely gone: "stopped", not an
+// error, so callers do not needlessly fall back to the subprocess probe.
+func TestContainerStatusByNameNotFoundIsStopped(t *testing.T) {
+	swap(t, &fakeSDK{inspectErr: map[string]error{
+		"x": &notFoundError{op: "GET /containers/x/json"},
+	}})
+	got, err := ContainerStatusByName("x")
+	if err != nil || got != "stopped" {
+		t.Errorf("got %q, %v; want stopped, nil", got, err)
+	}
+}
+
+// A transient inspect failure must surface as an error — reporting "stopped"
+// here made a daemon restart show healthy sites as stopped.
+func TestContainerStatusByNameTransientErrSurfaces(t *testing.T) {
+	swap(t, &fakeSDK{inspectErr: map[string]error{"x": errors.New("socket hiccup")}})
+	if _, err := ContainerStatusByName("x"); err == nil {
+		t.Error("want an error, not a silent stopped")
 	}
 }
 
@@ -456,6 +470,49 @@ func TestContainerStatusByComposeDirPartial(t *testing.T) {
 	}})
 	if got := ContainerStatusByComposeDir("/srv/x"); got != "partial (1/2)" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// Crashed containers routinely end their output without a trailing newline;
+// Flush must emit that final partial line rather than dropping it.
+func TestPrefixWriterFlushesUnterminatedTail(t *testing.T) {
+	var out bytes.Buffer
+	p := newPrefixWriter(&out, "web")
+	if _, err := p.Write([]byte("first line\nsecond li")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Write([]byte("ne")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	want := "[web] first line\n[web] second line"
+	if got := out.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if err := p.Flush(); err != nil {
+		t.Fatalf("second flush: %v", err)
+	}
+	if got := out.String(); got != want {
+		t.Errorf("flush with empty buffer emitted %q", got)
+	}
+}
+
+// A colon that introduces a slash is a registry's port, not a tag separator;
+// splitting there pulled "fromImage=localhost&tag=5000/myapp".
+func TestExtractImageTagRegistryPort(t *testing.T) {
+	cases := map[string]string{
+		"traefik:v3.7":           "v3.7",
+		"nginx":                  "latest",
+		"localhost:5000/myapp":   "latest",
+		"reg.example:5000/img:2": "2",
+		"":                       "latest",
+	}
+	for image, want := range cases {
+		if got := extractImageTag(image); got != want {
+			t.Errorf("extractImageTag(%q) = %q, want %q", image, got, want)
+		}
 	}
 }
 

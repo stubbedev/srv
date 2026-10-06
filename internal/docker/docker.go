@@ -2,6 +2,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -341,9 +342,14 @@ func defaultComposePrefixedExec(dir, prefix string, args ...string) error {
 	}
 	cmd := exec.CommandContext(context.Background(), ops.EngineBinary(), ops.ComposeArgs(args...)...)
 	cmd.Dir = dir
-	cmd.Stdout = newPrefixWriter(os.Stdout, prefix)
-	cmd.Stderr = newPrefixWriter(os.Stderr, prefix)
-	return cmd.Run()
+	stdout := newPrefixWriter(os.Stdout, prefix)
+	stderr := newPrefixWriter(os.Stderr, prefix)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	_ = stdout.Flush()
+	_ = stderr.Flush()
+	return err
 }
 
 // SwapComposePrefixedExec replaces the ComposePrefixed implementation.
@@ -380,7 +386,7 @@ func (p *prefixWriter) Write(b []byte) (int, error) {
 	n := len(b)
 	p.buf = append(p.buf, b...)
 	for {
-		idx := indexByte(p.buf, '\n')
+		idx := bytes.IndexByte(p.buf, '\n')
 		if idx < 0 {
 			return n, nil
 		}
@@ -393,13 +399,18 @@ func (p *prefixWriter) Write(b []byte) (int, error) {
 	}
 }
 
-func indexByte(b []byte, c byte) int {
-	for i, x := range b {
-		if x == c {
-			return i
-		}
+// Flush emits a buffered partial line without its newline. Crashed containers
+// routinely end their output mid-line; without a flush at process exit that
+// final line would be dropped from the multiplexed log stream.
+func (p *prefixWriter) Flush() error {
+	if len(p.buf) == 0 {
+		return nil
 	}
-	return -1
+	line := append([]byte{}, p.prefix...)
+	line = append(line, p.buf...)
+	p.buf = p.buf[:0]
+	_, err := p.w.Write(line)
+	return err
 }
 
 // ComposeStop runs docker compose stop in the specified directory.
@@ -595,26 +606,31 @@ func aggregateStatus(running, total int) string {
 }
 
 // ContainerStatusByName returns the status of a single named container using
-// the Docker SDK (no subprocess). Returns "running", "stopped", or "partial (n/m)".
-// Falls back to ContainerStatus if the SDK call fails.
-func ContainerStatusByName(containerName string) string {
+// the Docker API (no subprocess). A container that is genuinely gone is
+// "stopped"; any other failure (daemon restarting, socket hiccup) returns an
+// error so callers can fall back to the subprocess probe instead of
+// misreporting a running site as stopped.
+func ContainerStatusByName(containerName string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), StatusTimeout)
 	defer cancel()
 
 	cli, err := newClient()
 	if err != nil {
-		return constants.StatusStopped
+		return "", fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer func() { _ = cli.Close() }()
 
 	info, err := cli.ContainerInspect(ctx, containerName)
 	if err != nil {
-		return constants.StatusStopped
+		if IsNotFound(err) {
+			return constants.StatusStopped, nil
+		}
+		return "", fmt.Errorf("inspect container %s: %w", containerName, err)
 	}
 	if info.State != nil && info.State.Running {
-		return constants.StatusRunning
+		return constants.StatusRunning, nil
 	}
-	return constants.StatusStopped
+	return constants.StatusStopped, nil
 }
 
 // ContainerStatusByComposeDir returns the aggregate status of all containers
@@ -695,12 +711,19 @@ func Pull(imageName string, onProgress func(update string)) error {
 			Status   string `json:"status"`
 			ID       string `json:"id"`
 			Progress string `json:"progress"`
+			// The pull endpoint answers 200 and streams failures as error events
+			// (auth denial, missing manifest, network drop mid-transfer); EOF is
+			// not proof the image arrived.
+			Error string `json:"error"`
 		}
 		if err := decoder.Decode(&ev); err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return fmt.Errorf("reading pull progress for %s: %w", imageName, err)
+		}
+		if ev.Error != "" {
+			return fmt.Errorf("pull %s: %s", imageName, ev.Error)
 		}
 		if onProgress == nil || ev.ID == "" || ev.Status == "" {
 			continue
@@ -849,9 +872,10 @@ func RemoveContainer(name string) error {
 }
 
 // extractImageTag returns the tag portion of "image:tag" or "latest" when
-// untagged. Empty input yields "latest" to mirror Docker's default tag.
+// untagged. Empty input yields "latest" to mirror Docker's default tag. A
+// colon followed by a slash is a registry's port, not a tag separator.
 func extractImageTag(image string) string {
-	if _, tag, ok := strings.CutLast(image, ":"); ok {
+	if _, tag, ok := strings.CutLast(image, ":"); ok && !strings.Contains(tag, "/") {
 		return tag
 	}
 	return "latest"

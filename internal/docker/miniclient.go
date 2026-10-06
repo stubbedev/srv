@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/stubbedev/srv/internal/ops"
 )
@@ -105,6 +106,25 @@ type miniClient struct {
 	host string
 }
 
+// transports caches one http.Transport per daemon endpoint so every client
+// shares its keep-alive connection pool. A fresh transport per call would
+// open (and abandon) a socket for each API round trip.
+var (
+	transportsMu sync.Mutex
+	transports   = map[string]*http.Transport{}
+)
+
+func sharedTransport(endpoint string, build func() *http.Transport) *http.Transport {
+	transportsMu.Lock()
+	defer transportsMu.Unlock()
+	if t, ok := transports[endpoint]; ok {
+		return t
+	}
+	t := build()
+	transports[endpoint] = t
+	return t
+}
+
 // newMiniClient dials the daemon the engine resolver selected. Resolving the
 // engine exports DOCKER_HOST, which is what the endpoint below reads — so
 // this call is what points the client at Podman rather than Docker.
@@ -115,26 +135,29 @@ func newMiniClient() (*miniClient, error) {
 		host = "unix:///var/run/docker.sock"
 	}
 
-	transport := &http.Transport{}
 	authority := "d"
 	switch {
 	case strings.HasPrefix(host, "unix://"):
 		socket := strings.TrimPrefix(host, "unix://")
-		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socket)
-		}
+		transport := sharedTransport(host, func() *http.Transport {
+			return &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socket)
+			}}
+		})
+		return &miniClient{client: &http.Client{Transport: transport}, host: authority}, nil
 	case strings.HasPrefix(host, "tcp://"):
 		u, err := url.Parse(host)
 		if err != nil {
 			return nil, fmt.Errorf("invalid DOCKER_HOST %q: %w", host, err)
 		}
-		authority = u.Host
-		transport.Proxy = http.ProxyFromEnvironment
+		transport := sharedTransport(host, func() *http.Transport {
+			return &http.Transport{Proxy: http.ProxyFromEnvironment}
+		})
+		return &miniClient{client: &http.Client{Transport: transport}, host: u.Host}, nil
 	default:
 		return nil, fmt.Errorf("unsupported DOCKER_HOST %q (only unix:// and tcp:// endpoints are supported)", host)
 	}
-	return &miniClient{client: &http.Client{Transport: transport}, host: authority}, nil
 }
 
 // encodeFilters marshals the Docker filter query format: {"name":["x"]}.
@@ -230,13 +253,14 @@ func (m *miniClient) ImagePull(ctx context.Context, ref string) (io.ReadCloser, 
 }
 
 // splitImageRef splits "name:tag" at the last colon, tolerating a digest
-// reference (name@sha256:...) where the colon belongs to the digest.
+// reference (name@sha256:...) where the colon belongs to the digest. A colon
+// followed by a slash belongs to a registry host:port, not a tag separator.
 func splitImageRef(ref string) (name, tag string) {
 	if name, rest, ok := strings.Cut(ref, "@"); ok {
 		_ = rest
 		return name, ""
 	}
-	if name, tag, ok := strings.CutLast(ref, ":"); ok {
+	if name, tag, ok := strings.CutLast(ref, ":"); ok && !strings.Contains(tag, "/") {
 		return name, tag
 	}
 	return ref, ""
@@ -286,8 +310,9 @@ func (m *miniClient) Events(ctx context.Context, filters map[string][]string) (<
 	return eventCh, errCh
 }
 
-// Close releases the client's resources. The underlying transport holds the
-// socket connections, which die with the process; nothing to close early.
+// Close releases the client's resources. The transport is shared
+// process-wide; its connections die with the process, so there is nothing
+// per-client to release.
 func (m *miniClient) Close() error { return nil }
 
 // do performs one API call. A 409 is returned as *conflictError; other
@@ -332,6 +357,10 @@ func (m *miniClient) do(ctx context.Context, method, path string, query url.Valu
 			return fmt.Errorf("decode %s %s: %w", method, path, err)
 		}
 	}
+	// Drain the remainder so net/http returns the connection to the shared
+	// transport's idle pool instead of discarding it. Bounded: API responses
+	// are small single-JSON documents.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return nil
 }
 
