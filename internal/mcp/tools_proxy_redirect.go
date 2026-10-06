@@ -31,12 +31,19 @@ func requireCAForLocalCert() error {
 	return fmt.Errorf("%s", caNotInstalledMsg)
 }
 
+// addProxySchema and addRedirectSchema are reflected once per process (see
+// addSiteSchema).
+var (
+	addProxySchema    = toolInputSchema[addProxyIn]()
+	addRedirectSchema = toolInputSchema[addRedirectIn]()
+)
+
 func registerProxyWriteTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "add_proxy",
 		Description: "Create a proxy routing a domain to a localhost port or a Docker container (container=\"name:port\"). Issues a local TLS cert and registers local DNS. Set exactly one of `port` or `container`. The CLI-only --fallback sidecar is not exposed. Requires the mkcert CA to be installed (run `srv install` once in a terminal if it is not).",
 		Annotations: writeAnno("Add proxy", false, true, true),
-		InputSchema: toolInputSchema[addProxyIn](),
+		InputSchema: addProxySchema,
 	}, addProxyTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -51,7 +58,7 @@ func registerRedirectWriteTools(srv *mcpsdk.Server) {
 		Name:        "add_redirect",
 		Description: "Create a redirect. HTTP mode (default): 301/302 from `domain` to `to` (an absolute http(s) URL), with a local cert. DNS-only mode (dns_only=true): a dnsmasq A-record alias from `domain` to a bare hostname `to` (no TLS, no Traefik). HTTP mode requires the mkcert CA (run `srv install` once in a terminal if missing).",
 		Annotations: writeAnno("Add redirect", false, true, true),
-		InputSchema: toolInputSchema[addRedirectIn](),
+		InputSchema: addRedirectSchema,
 	}, addRedirectTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -101,10 +108,11 @@ type removeProxyIn struct {
 	Ack    bool   `json:"ack,omitempty"     jsonschema:"skip the confirmation prompt"`
 }
 type removeProxyOut struct {
-	OK       bool     `json:"ok"`
-	DryRun   bool     `json:"dry_run,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	OK       bool           `json:"ok"`
+	DryRun   bool           `json:"dry_run,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Preview  *dryRunPreview `json:"preview,omitempty"`
 }
 
 func removeProxyTool(ctx context.Context, req *mcpsdk.CallToolRequest, in removeProxyIn) (*mcpsdk.CallToolResult, removeProxyOut, error) {
@@ -116,7 +124,11 @@ func removeProxyTool(ctx context.Context, req *mcpsdk.CallToolRequest, in remove
 		return nil, removeProxyOut{}, err
 	}
 	if in.DryRun {
-		return nil, removeProxyOut{OK: true, DryRun: true}, nil
+		preview, perr := proxyRemovalPreview(in.Name)
+		if perr != nil {
+			return nil, removeProxyOut{Error: perr.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		return nil, removeProxyOut{OK: true, DryRun: true, Preview: preview}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Remove proxy %q? This deletes its Traefik config, cert, and DNS registration.", in.Name)); !ok {
 		return nil, removeProxyOut{Error: reason}, nil
@@ -175,10 +187,11 @@ type removeRedirectIn struct {
 	Ack    bool   `json:"ack,omitempty"     jsonschema:"skip the confirmation prompt"`
 }
 type removeRedirectOut struct {
-	OK       bool     `json:"ok"`
-	DryRun   bool     `json:"dry_run,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	OK       bool           `json:"ok"`
+	DryRun   bool           `json:"dry_run,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Preview  *dryRunPreview `json:"preview,omitempty"`
 }
 
 func removeRedirectTool(ctx context.Context, req *mcpsdk.CallToolRequest, in removeRedirectIn) (*mcpsdk.CallToolResult, removeRedirectOut, error) {
@@ -190,7 +203,11 @@ func removeRedirectTool(ctx context.Context, req *mcpsdk.CallToolRequest, in rem
 		return nil, removeRedirectOut{}, err
 	}
 	if in.DryRun {
-		return nil, removeRedirectOut{OK: true, DryRun: true}, nil
+		preview, perr := redirectRemovalPreview(in.Name)
+		if perr != nil {
+			return nil, removeRedirectOut{Error: perr.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		return nil, removeRedirectOut{OK: true, DryRun: true, Preview: preview}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Remove redirect %q?", in.Name)); !ok {
 		return nil, removeRedirectOut{Error: reason}, nil

@@ -100,9 +100,11 @@ func ServeHTTP(ctx context.Context, opts HTTPOptions) error {
 	select {
 	case <-ctx.Done():
 		// Cobra cancels ctx on SIGINT/SIGTERM; drain in-flight requests briefly.
+		// An open SSE stream keeps a connection alive past the drain window —
+		// DeadlineExceeded there is a normal stop, not a failure exit.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("mcp http shutdown: %w", err)
 		}
 		logger.Info("srv mcp stopped")

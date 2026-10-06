@@ -359,9 +359,15 @@ func init() {
 func runLogs(cmd *cobra.Command, args []string) error {
 	// Daemon-served logs live in the daemon's log file, not docker: stream
 	// them before the engine preflight so this works with the engine stopped.
+	// --since is honored here too (filtered by the event timestamp) instead
+	// of being silently dropped, and one lookup serves both branches.
 	if !logsFlags.all {
 		if s, err := site.GetByName(args[0]); err == nil && s != nil && s.DaemonServed {
-			return streamDaemonSiteLogs(s.Name, logsFlags.follow, parseTailFlag(logsFlags.tail))
+			since, err := parseSinceDuration(logsFlags.since)
+			if err != nil {
+				return err
+			}
+			return streamDaemonSiteLogs(s.Name, logsFlags.follow, parseTailFlag(logsFlags.tail), since)
 		}
 	}
 
@@ -373,16 +379,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return runLogsAll()
 	}
 
-	s, err := site.GetByName(args[0])
-	if err != nil {
-		return err
-	}
-
-	if s.IsBroken {
-		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
-	}
-
-	// Build args
 	composeArgs := []string{"logs"}
 	if logsFlags.follow {
 		composeArgs = append(composeArgs, "-f")
@@ -392,6 +388,15 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	if logsFlags.since != "" {
 		composeArgs = append(composeArgs, "--since", logsFlags.since)
+	}
+
+	s, err := site.GetByName(args[0])
+	if err != nil {
+		return err
+	}
+
+	if s.IsBroken {
+		return fmt.Errorf("site '%s' is broken (target directory missing)", s.Name)
 	}
 
 	return docker.Compose(s.ComposeDir, composeArgs...)
@@ -413,6 +418,10 @@ func parseTailFlag(tail string) int {
 // when --follow is off and every per-site tail completes.
 func runLogsAll() error {
 	sites, err := site.ListBasic()
+	if err != nil {
+		return err
+	}
+	since, err := parseSinceDuration(logsFlags.since)
 	if err != nil {
 		return err
 	}
@@ -453,9 +462,13 @@ func runLogsAll() error {
 				ui.Warn("[%s] %v", s.Name, err)
 				return
 			}
-			printDaemonSiteLogLines(lines, s.Name)
+			for _, raw := range lines {
+				if daemonLineAfter(raw, since) {
+					printDaemonSiteLogLine(raw, s.Name)
+				}
+			}
 			if logsFlags.follow {
-				if err := followDaemonSiteLog(daemon.LogPath(cfg), s.Name); err != nil {
+				if err := followDaemonSiteLog(daemon.LogPath(cfg), s.Name, since); err != nil {
 					ui.Warn("[%s] log stream ended: %v", s.Name, err)
 				}
 			}

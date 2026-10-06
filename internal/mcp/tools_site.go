@@ -10,6 +10,11 @@ import (
 )
 
 // registerSiteWriteTools binds the site lifecycle and metadata-mutator tools.
+// addSiteSchema is reflected once per process: the write tier registers on
+// every activation, and each HTTP session builds a fresh server — reflecting
+// the same struct graph every time was pure per-session CPU garbage.
+var addSiteSchema = toolInputSchema[addSiteIn]()
+
 func registerSiteWriteTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "start_site",
@@ -33,7 +38,7 @@ func registerSiteWriteTools(srv *mcpsdk.Server) {
 		Name:        "add_site",
 		Description: "Register a new site from a project directory and start it. Auto-detects type (docker-compose.yml → compose, Dockerfile → dockerfile, else static); override with `type`. `domain` is required. Set `local` for mkcert TLS (otherwise Let's Encrypt). For a multi-service compose project pass `service`. Local sites need the mkcert CA (run `srv install` once in a terminal if missing). Set start=false to register without starting.",
 		Annotations: writeAnno("Add site", false, false, true),
-		InputSchema: toolInputSchema[addSiteIn](),
+		InputSchema: addSiteSchema,
 	}, addSiteTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -80,9 +85,10 @@ type lifecycleIn struct {
 	Build bool   `json:"build,omitempty" jsonschema:"rebuild images before starting (start/restart only)"`
 }
 type okOut struct {
-	OK       bool     `json:"ok"`
-	Warnings []string `json:"warnings,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	OK       bool           `json:"ok"`
+	Warnings []string       `json:"warnings,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Preview  *dryRunPreview `json:"preview,omitempty"`
 }
 
 func startSiteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in lifecycleIn) (*mcpsdk.CallToolResult, okOut, error) {
@@ -174,7 +180,11 @@ func removeSiteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in removeS
 		return nil, okOut{Error: "name is required"}, nil
 	}
 	if in.DryRun {
-		return nil, okOut{OK: true}, nil
+		preview, err := siteRemovalPreview(in.Name)
+		if err != nil {
+			return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		return nil, okOut{OK: true, Preview: preview}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Remove site %q? This stops its containers and deletes its config, cert, DNS, and metadata.", in.Name)); !ok {
 		return nil, okOut{Error: reason}, nil
@@ -211,7 +221,25 @@ func removeAliasTool(ctx context.Context, req *mcpsdk.CallToolRequest, in aliasI
 		return nil, okOut{Error: "name and alias are required"}, nil
 	}
 	if in.DryRun {
-		return nil, okOut{OK: true}, nil
+		meta, err := siteMeta(in.Name)
+		if err != nil {
+			return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		found := false
+		for _, d := range meta.Domains {
+			if d == in.Alias {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, okOut{Error: fmt.Sprintf("alias %q is not registered for %s", in.Alias, in.Name)}, nil
+		}
+		eff := []string{"alias " + in.Alias + " from site " + in.Name}
+		if meta.IsLocal {
+			eff = append(eff, "DNS registration for "+in.Alias, "certificate SAN coverage for "+in.Alias)
+		}
+		return nil, okOut{OK: true, Preview: &dryRunPreview{Target: in.Alias, Kind: "alias", WouldRemove: eff}}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Remove alias %q from site %q?", in.Alias, in.Name)); !ok {
 		return nil, okOut{Error: reason}, nil
@@ -276,7 +304,18 @@ func removeVolumeTool(ctx context.Context, req *mcpsdk.CallToolRequest, in remov
 		return nil, okOut{Error: "name and target are required"}, nil
 	}
 	if in.DryRun {
-		return nil, okOut{OK: true}, nil
+		meta, err := siteMeta(in.Name)
+		if err != nil {
+			return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		for _, v := range meta.Volumes {
+			if v.Target == in.Target {
+				return nil, okOut{OK: true, Preview: &dryRunPreview{Target: in.Target, Kind: "volume", WouldRemove: []string{
+					"volume mount " + in.Target + " (" + v.Source + ")",
+				}}}, nil
+			}
+		}
+		return nil, okOut{Error: fmt.Sprintf("no volume with target %q attached to %s", in.Target, in.Name)}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Detach volume %q from site %q?", in.Target, in.Name)); !ok {
 		return nil, okOut{Error: reason}, nil

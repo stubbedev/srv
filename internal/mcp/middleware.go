@@ -53,11 +53,16 @@ func SetToolTimeout(d time.Duration) {
 //   - resolves the caller's workspace root BEFORE taking writeMu, so a
 //     roots/list round-trip to a slow client never blocks another client's
 //     mutation, and stashes it on the context for path-bearing tools;
+//   - elicits destructive confirmations BEFORE the lock: an unanswered prompt
+//     while holding writeMu stalled every other client's write-tier call;
 //   - bounds the call with toolTimeout so a hung mutation can't wedge the
-//     shared lock forever;
+//     shared lock forever; the abandoned call keeps the lock until its own
+//     subprocess deadlines unwind it, so later writers queue behind rather
+//     than race a mutation still in flight;
 //   - recovers panics into errors so one client's bad input cannot crash the
 //     daemon and drop every other client;
-//   - serializes write-tier tools through writeMu.
+//   - serializes write-tier tools through writeMu;
+//   - scrubs PEM keys and inline secrets from every text result.
 //
 // The workspace cache lives in this closure, so it is scoped to the session and
 // garbage-collected with the server — no global map to reap.
@@ -82,27 +87,65 @@ func newToolMiddleware() mcpsdk.Middleware {
 			sess, _ := req.GetSession().(*mcpsdk.ServerSession)
 			ctx = context.WithValue(ctx, wsRootKey{}, ws.resolve(ctx, header, sess))
 
+			// The confirmation round-trip happens before the lock is taken:
+			// an unanswered prompt while holding writeMu stalled every other
+			// client's write-tier call for up to toolTimeout.
+			if isWriteTool(name) {
+				var ok bool
+				var reason string
+				ctx, ok, reason = preConfirm(ctx, name, req)
+				if !ok {
+					return nil, fmt.Errorf("tool %q declined: %s", name, reason)
+				}
+			}
+
 			if toolTimeout > 0 {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithTimeout(ctx, toolTimeout)
 				defer cancel()
 			}
 
-			// Deferred recover catches a panic from next() regardless of the
-			// other defers' order; writeMu's deferred Unlock still runs first, so
-			// the lock is released even on panic.
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("tool %q panicked: %v", name, r)
-					result = nil
+			type callResult struct {
+				result mcpsdk.Result
+				err    error
+			}
+			done := make(chan callResult, 1)
+			go func() {
+				var r mcpsdk.Result
+				var e error
+				// Deferred LIFO: the lock releases first, then the panic (if any)
+				// is converted and delivered — a panicking handler cannot take
+				// the daemon down or leak the lock.
+				defer func() {
+					if rec := recover(); rec != nil {
+						r, e = nil, fmt.Errorf("tool %q panicked: %v", name, rec)
+					}
+					done <- callResult{r, e}
+				}()
+				if isWriteTool(name) {
+					writeMu.Lock()
+					defer writeMu.Unlock()
 				}
+				r, e = next(ctx, method, req)
 			}()
 
-			if isWriteTool(name) {
-				writeMu.Lock()
-				defer writeMu.Unlock()
+			if toolTimeout > 0 {
+				select {
+				case res := <-done:
+					result, err = res.result, res.err
+				case <-ctx.Done():
+					// The call answers now, but the abandoned goroutine keeps
+					// writeMu until its own subprocess deadlines unwind it; later
+					// writers queue behind rather than race a mutation still in
+					// flight.
+					err = fmt.Errorf("tool %q timed out after %v: %w", name, toolTimeout, context.DeadlineExceeded)
+				}
+			} else {
+				res := <-done
+				result, err = res.result, res.err
 			}
-			return next(ctx, method, req)
+			redactResultText(result)
+			return result, err
 		}
 	}
 }

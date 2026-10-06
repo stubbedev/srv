@@ -10,13 +10,16 @@ import (
 	"github.com/stubbedev/srv/internal/site"
 )
 
+// addRouteSchema is reflected once per process (see addSiteSchema).
+var addRouteSchema = toolInputSchema[addRouteIn]()
+
 // registerRouteNetworkTools binds the extra-route and docker-network tools.
 func registerRouteNetworkTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "add_route",
 		Description: "Attach an extra Traefik route (path-prefix or regex) to a site or proxy `target`. Set one of path/path_regex and one upstream (port, container as name:port, or url). rewrite requires path_regex. id is derived from the path when omitted. Run restart afterward for label-based sites.",
 		Annotations: writeAnno("Add route", false, true, true),
-		InputSchema: toolInputSchema[addRouteIn](),
+		InputSchema: addRouteSchema,
 	}, addRouteTool)
 
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
@@ -47,12 +50,13 @@ type addRouteIn struct {
 	Target string `json:"target" jsonschema:"description=site or proxy name to attach the route to"`
 }
 type routeOut struct {
-	OK     bool   `json:"ok"`
-	Target string `json:"target,omitempty"`
-	Kind   string `json:"kind,omitempty"` // "site" or "proxy"
-	ID     string `json:"id,omitempty"`
-	DryRun bool   `json:"dry_run,omitempty"`
-	Error  string `json:"error,omitempty"`
+	OK      bool           `json:"ok"`
+	Target  string         `json:"target,omitempty"`
+	Kind    string         `json:"kind,omitempty"` // "site" or "proxy"
+	ID      string         `json:"id,omitempty"`
+	DryRun  bool           `json:"dry_run,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Preview *dryRunPreview `json:"preview,omitempty"`
 }
 
 func addRouteTool(_ context.Context, _ *mcpsdk.CallToolRequest, in addRouteIn) (*mcpsdk.CallToolResult, routeOut, error) {
@@ -82,7 +86,11 @@ func removeRouteTool(ctx context.Context, req *mcpsdk.CallToolRequest, in remove
 		return nil, routeOut{Error: "target and id are required"}, nil
 	}
 	if in.DryRun {
-		return nil, routeOut{OK: true, Target: in.Target, ID: in.ID, DryRun: true}, nil
+		preview, err := routeRemovalPreview(in.Target, in.ID)
+		if err != nil {
+			return nil, routeOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		return nil, routeOut{OK: true, Target: in.Target, Kind: preview.Kind, ID: in.ID, DryRun: true, Preview: preview}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Remove route %q from %q?", in.ID, in.Target)); !ok {
 		return nil, routeOut{Error: reason}, nil
@@ -104,6 +112,39 @@ func applyRoute(target string, onSite, onProxy func() error) (kind string, err e
 		return "proxy", onProxy()
 	}
 	return "", fmt.Errorf("no site or proxy named %q", target)
+}
+
+// routeRemovalPreview resolves a route removal against the target's metadata
+// so a dry_run cannot validate an id that is not attached.
+func routeRemovalPreview(target, id string) (*dryRunPreview, error) {
+	if site.Exists(target) {
+		meta, err := siteMeta(target)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range meta.Routes {
+			if r.ID == id {
+				return &dryRunPreview{Target: target, Kind: "site", WouldRemove: []string{"route " + id + " (" + r.Path + r.PathRegex + ")"}}, nil
+			}
+		}
+		return nil, fmt.Errorf("route %q not found on site %s", id, target)
+	}
+	if proxy.Exists(target) {
+		meta, err := proxy.Read(target)
+		if err != nil {
+			return nil, err
+		}
+		if meta == nil {
+			return nil, fmt.Errorf("proxy %q not found", target)
+		}
+		for _, r := range meta.Routes {
+			if r.ID == id {
+				return &dryRunPreview{Target: target, Kind: "proxy", WouldRemove: []string{"route " + id + " (" + r.Path + r.PathRegex + ")"}}, nil
+			}
+		}
+		return nil, fmt.Errorf("route %q not found on proxy %s", id, target)
+	}
+	return nil, fmt.Errorf("no site or proxy named %q", target)
 }
 
 // ─── attach_network / detach_network ─────────────────────────────────
@@ -136,7 +177,18 @@ func detachNetworkTool(ctx context.Context, req *mcpsdk.CallToolRequest, in deta
 		return nil, okOut{Error: "name and network are required"}, nil
 	}
 	if in.DryRun {
-		return nil, okOut{OK: true}, nil
+		meta, err := siteMeta(in.Name)
+		if err != nil {
+			return nil, okOut{Error: err.Error()}, nil //nolint:nilerr // surfaced in payload
+		}
+		for _, n := range meta.ExtraNetworks {
+			if n == in.Network {
+				return nil, okOut{OK: true, Preview: &dryRunPreview{Target: in.Network, Kind: "network", WouldRemove: []string{
+					"network " + in.Network + " from site " + in.Name + " (restarted without it)",
+				}}}, nil
+			}
+		}
+		return nil, okOut{Error: fmt.Sprintf("network %q not attached to %s", in.Network, in.Name)}, nil
 	}
 	if ok, reason := confirmDestructive(ctx, req, in.DryRun, in.Ack, fmt.Sprintf("Detach network %q from site %q?", in.Network, in.Name)); !ok {
 		return nil, okOut{Error: reason}, nil

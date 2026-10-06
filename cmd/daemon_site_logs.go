@@ -27,9 +27,10 @@ func siteLogToken(siteName string) string {
 }
 
 // streamDaemonSiteLogs prints a daemon-served site's access lines from the
-// daemon log, then follows for new ones when follow is set. Missing log file
-// is a friendly no-op, not an error.
-func streamDaemonSiteLogs(siteName string, follow bool, tail int) error {
+// daemon log, then follows for new ones when follow is set. since, when
+// non-zero, drops events older than the cutoff (the --since flag was silently
+// ignored on this path). Missing log file is a friendly no-op, not an error.
+func streamDaemonSiteLogs(siteName string, follow bool, tail int, since time.Time) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -47,11 +48,15 @@ func streamDaemonSiteLogs(siteName string, follow bool, tail int) error {
 	if err != nil {
 		return err
 	}
-	printDaemonSiteLogLines(lines, "")
+	for _, raw := range lines {
+		if daemonLineAfter(raw, since) {
+			printDaemonSiteLogLine(raw, "")
+		}
+	}
 	if !follow {
 		return nil
 	}
-	return followDaemonSiteLog(logPath, siteName)
+	return followDaemonSiteLog(logPath, siteName, since)
 }
 
 // daemonSiteLogLines returns the log's request lines for one site, across
@@ -66,20 +71,38 @@ func daemonSiteLogLines(path, siteName string, tail int) ([]string, error) {
 	return lines, nil
 }
 
-// printDaemonSiteLogLines renders request lines; a non-empty prefix gets the
-// `[site]` treatment used by `srv logs --all`.
-func printDaemonSiteLogLines(lines []string, prefix string) {
-	for _, raw := range lines {
-		formatted, ok := formatDaemonAccessLine(raw)
-		if !ok {
-			continue
-		}
-		if prefix != "" {
-			fmt.Printf("[%s] %s\n", prefix, formatted)
-		} else {
-			fmt.Println(formatted)
-		}
+// printDaemonSiteLogLine renders one request line; a non-empty prefix gets
+// the `[site]` treatment used by `srv logs --all`.
+func printDaemonSiteLogLine(raw, prefix string) {
+	formatted, ok := formatDaemonAccessLine(raw)
+	if !ok {
+		return
 	}
+	if prefix != "" {
+		fmt.Printf("[%s] %s\n", prefix, formatted)
+	} else {
+		fmt.Println(formatted)
+	}
+}
+
+// daemonLineAfter reports whether an access event is newer than cutoff. A
+// zero cutoff keeps everything; an unparseable or missing timestamp keeps the
+// line (the renderer skips garbage anyway).
+func daemonLineAfter(raw string, cutoff time.Time) bool {
+	if cutoff.IsZero() {
+		return true
+	}
+	var ev struct {
+		Time string `json:"time"`
+	}
+	if json.Unmarshal([]byte(raw), &ev) != nil || ev.Time == "" {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, ev.Time)
+	if err != nil {
+		return true
+	}
+	return !t.Before(cutoff)
 }
 
 // formatDaemonAccessLine turns one raw JSON access event into
@@ -118,14 +141,32 @@ func daemonLogBytes(b int64) string {
 
 // followDaemonSiteLog streams one site's new request lines from the daemon
 // log, across rotations, until the process is interrupted.
-func followDaemonSiteLog(path, siteName string) error {
+func followDaemonSiteLog(path, siteName string, since time.Time) error {
 	token := siteLogToken(siteName)
 	return logfile.Follow(context.Background(), path, func(line string) {
 		if !strings.Contains(line, token) {
+			return
+		}
+		if !daemonLineAfter(line, since) {
 			return
 		}
 		if formatted, ok := formatDaemonAccessLine(line); ok {
 			fmt.Println(formatted)
 		}
 	})
+}
+
+// parseSinceDuration resolves the --since flag's duration form (10m, 1h) to
+// a cutoff. An empty flag yields a zero cutoff (keep everything); anything
+// the daemon path cannot parse is left to the compose path, which passes the
+// raw string to docker.
+func parseSinceDuration(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--since %q: %w", s, err)
+	}
+	return time.Now().Add(-d), nil
 }

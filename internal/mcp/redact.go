@@ -1,6 +1,10 @@
 package mcp
 
-import "regexp"
+import (
+	"regexp"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
 
 // redactedPlaceholder replaces any value scrubbed from MCP tool output.
 const redactedPlaceholder = "[REDACTED]"
@@ -13,8 +17,10 @@ var sensitiveKeyPattern = regexp.MustCompile(`(?i)(password|passwd|secret|token|
 var pemBlockPattern = regexp.MustCompile(`(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----`)
 
 // inlineSecretPattern matches inline `key=value` / `key: value` secrets in a
-// free-text string (e.g. an env line carrying a password).
-var inlineSecretPattern = regexp.MustCompile(`(?i)(password|passwd|secret|token|http_pass)([=:]\s*)\S+`)
+// free-text string (e.g. an env line carrying a password or API key). The
+// optional bearer marker is consumed too, or only the scheme word would be
+// redacted and the credential itself would survive.
+var inlineSecretPattern = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|apikey|auth|authorization|http_pass)([=:]\s*)(bearer\s+)?\S+`)
 
 // redactValue recursively scrubs secrets from a JSON-decoded value before it is
 // returned to the model. Maps are walked key-by-key (a sensitive key has its
@@ -52,7 +58,7 @@ func redactString(s string) string {
 		s = pemBlockPattern.ReplaceAllString(s, redactedPlaceholder)
 	}
 	if inlineSecretPattern.MatchString(s) {
-		s = inlineSecretPattern.ReplaceAllString(s, "${1}${2}"+redactedPlaceholder)
+		s = inlineSecretPattern.ReplaceAllString(s, "$1$2$3"+redactedPlaceholder)
 	}
 	return s
 }
@@ -66,6 +72,22 @@ func redactMap(m map[string]any) map[string]any {
 	}
 	out, _ := redactValue(m).(map[string]any)
 	return out
+}
+
+// redactResultText scrubs PEM keys and inline secrets from every text block
+// of a tool result. Structured outputs are redacted per field by their tools;
+// free-text error and warning strings (err.Error() payloads that wrap
+// subprocess output) previously reached the model unfiltered.
+func redactResultText(result mcpsdk.Result) {
+	ctr, ok := result.(*mcpsdk.CallToolResult)
+	if !ok || ctr == nil {
+		return
+	}
+	for _, c := range ctr.Content {
+		if tc, ok := c.(*mcpsdk.TextContent); ok && tc != nil {
+			tc.Text = redactString(tc.Text)
+		}
+	}
 }
 
 // redactedJSONMap marshals v to a map and scrubs secrets in one step — the safe

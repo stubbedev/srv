@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeDaemonLog builds a daemon log file with a mix of access events and
@@ -93,5 +94,43 @@ func TestParseTailFlag(t *testing.T) {
 		if got := parseTailFlag(tc.in); got != tc.want {
 			t.Errorf("parseTailFlag(%q) = %d, want %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestParseSinceDuration(t *testing.T) {
+	cutoff, err := parseSinceDuration("")
+	if err != nil || !cutoff.IsZero() {
+		t.Errorf("empty --since: cutoff=%v err=%v, want zero cutoff", cutoff, err)
+	}
+	cutoff, err = parseSinceDuration("10m")
+	if err != nil || cutoff.IsZero() {
+		t.Errorf("10m --since: cutoff=%v err=%v", cutoff, err)
+	}
+	if d := time.Since(cutoff); d < 9*time.Minute || d > 11*time.Minute {
+		t.Errorf("10m cutoff landed %v in the past", d)
+	}
+	if _, err := parseSinceDuration("yesterday"); err == nil {
+		t.Error("unparseable --since must error, not be silently ignored")
+	}
+}
+
+// daemonLineAfter filters by the event timestamp; unparseable lines stay so
+// the renderer (not the filter) decides their fate.
+func TestDaemonLineAfter(t *testing.T) {
+	old := `{"time":"2020-01-01T00:00:00Z","site":"a","method":"GET","path":"/","status":200}`
+	fresh := `{"time":"` + time.Now().UTC().Format(time.RFC3339) + `","site":"a","method":"GET","path":"/","status":200}`
+	cutoff := time.Now().Add(-time.Hour)
+
+	if !daemonLineAfter(old, time.Time{}) {
+		t.Error("zero cutoff must keep everything")
+	}
+	if daemonLineAfter(old, cutoff) {
+		t.Error("2020 event survived a one-hour cutoff")
+	}
+	if !daemonLineAfter(fresh, cutoff) {
+		t.Error("current event dropped by a one-hour cutoff")
+	}
+	if !daemonLineAfter("not json", cutoff) {
+		t.Error("unparseable line dropped by the filter")
 	}
 }
