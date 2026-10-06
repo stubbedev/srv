@@ -18,6 +18,7 @@ import (
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/platform"
+	"github.com/stubbedev/srv/internal/shell"
 )
 
 // notRunningErr renders the "runtime is not running" message, naming the
@@ -342,7 +343,7 @@ func defaultComposePrefixedExec(dir, prefix string, args ...string) error {
 	}
 	cmd := exec.CommandContext(context.Background(), ops.EngineBinary(), ops.ComposeArgs(args...)...)
 	cmd.Dir = dir
-	stdout := newPrefixWriter(os.Stdout, prefix)
+	stdout := newPrefixWriter(shell.AttachedStdout(), prefix)
 	stderr := newPrefixWriter(os.Stderr, prefix)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -435,7 +436,7 @@ func defaultDockerExec(interactive bool, args ...string) error {
 	if interactive {
 		cmd.Stdin = os.Stdin
 	}
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = shell.AttachedStdout()
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
@@ -495,7 +496,7 @@ func defaultComposeExec(dir string, quiet bool, args ...string) error {
 	}
 	cmd := exec.CommandContext(context.Background(), ops.EngineBinary(), ops.ComposeArgs(args...)...)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = shell.AttachedStdout()
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

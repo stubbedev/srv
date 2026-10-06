@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -80,6 +81,10 @@ func Serve(ctx context.Context) error {
 	// install, systemd-resolved drop-in, firewall) fail fast with an actionable
 	// error instead of blocking. Operators run those once from a terminal.
 	shell.SetNonInteractive(true)
+	// os.Stdout IS the JSON-RPC stream here. Children that attach their
+	// stdout (docker compose up/build, exec) must write elsewhere or their
+	// output interleaves into the protocol framing and breaks the client.
+	shell.SetAttachedOutput(os.Stderr)
 	if err := newServer().Run(ctx, &mcpsdk.StdioTransport{}); err != nil {
 		return fmt.Errorf("mcp server: %w", err)
 	}

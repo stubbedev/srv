@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -232,6 +233,21 @@ func TestOSRunnerRunWithContext(t *testing.T) {
 	ctx := context.Background()
 	if err := r.RunWithContext(ctx, "true"); err != nil {
 		t.Errorf("err: %v", err)
+	}
+}
+
+// The MCP stdio server redirects attached child stdout to stderr because
+// os.Stdout is the JSON-RPC stream there; a child's stdout must follow that
+// redirect instead of hardcoding os.Stdout (docker compose build logs go to
+// stdout and would corrupt the framing).
+func TestOSRunnerRunWithContextHonorsAttachedOutput(t *testing.T) {
+	var buf bytes.Buffer
+	t.Cleanup(SwapAttachedOutput(&buf))
+	if err := (OSRunner{}).RunWithContext(context.Background(), "echo", "child-out"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "child-out") {
+		t.Errorf("attached output = %q, want the child's stdout captured there", buf.String())
 	}
 }
 

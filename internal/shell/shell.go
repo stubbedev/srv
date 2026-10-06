@@ -8,6 +8,7 @@ package shell
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -56,6 +57,27 @@ var Default Runner = OSRunner{}
 // with no TTY — a sudo prompt there would hang the protocol stream. The CLI
 // leaves it false so interactive sudo works as usual.
 var nonInteractive bool
+
+// attachedStdout is where attached-output subprocesses write their stdout.
+// It is os.Stdout everywhere except the MCP stdio server, where os.Stdout IS
+// the JSON-RPC stream: a child writing to it (docker compose build logs go to
+// stdout, not stderr) would corrupt the protocol framing, so that surface
+// redirects children to stderr at startup.
+var attachedStdout io.Writer = os.Stdout
+
+// SetAttachedOutput redirects subprocess stdout for surfaces where os.Stdout
+// carries a protocol stream. Called once at startup, before serving.
+func SetAttachedOutput(w io.Writer) { attachedStdout = w }
+
+// AttachedStdout returns the writer attached-output subprocesses should use.
+func AttachedStdout() io.Writer { return attachedStdout }
+
+// SwapAttachedOutput is SetAttachedOutput with a restore func, for tests.
+func SwapAttachedOutput(w io.Writer) func() {
+	prev := attachedStdout
+	attachedStdout = w
+	return func() { attachedStdout = prev }
+}
 
 // SetNonInteractive toggles non-interactive sudo. Call SetNonInteractive(true)
 // from any surface that cannot service a password prompt (the MCP server).
@@ -160,7 +182,7 @@ func (r OSRunner) Run(name string, args ...string) error {
 
 func (OSRunner) RunWithContext(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = AttachedStdout()
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
