@@ -50,6 +50,9 @@ type Writer struct {
 	f       *os.File
 	buf     *bufio.Writer
 	size    int64
+	// closed latches Close: a nil f alone no longer means closed, because a
+	// failed rotation also nils it and must stay retryable.
+	closed bool
 
 	stop chan struct{}
 	done chan struct{}
@@ -67,11 +70,18 @@ func Open(path string, perm os.FileMode) (*Writer, error) {
 
 // Write buffers p, which must hold whole lines. A p that does not fit the
 // buffer's free space flushes the buffer first, so p is never split.
+// A rotation whose reopen failed leaves f nil but the writer open: the next
+// Write retries the open instead of failing with ErrClosed forever.
 func (w *Writer) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.f == nil {
+	if w.closed {
 		return 0, os.ErrClosed
+	}
+	if w.f == nil {
+		if err := w.open(); err != nil {
+			return 0, err
+		}
 	}
 	if len(p) > w.buf.Available() && w.buf.Buffered() > 0 {
 		if err := w.buf.Flush(); err != nil {
@@ -91,26 +101,32 @@ func (w *Writer) Write(p []byte) (int, error) {
 func (w *Writer) Flush() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.f == nil {
+	if w.closed || w.f == nil {
 		return nil
 	}
 	return w.buf.Flush()
 }
 
 // Close flushes and closes the file. Later Writes fail with os.ErrClosed.
+// The flush loop is always stopped, even when a failed rotation left no open
+// file — the early return used to leak the goroutine and its ticker.
 func (w *Writer) Close() error {
 	w.mu.Lock()
-	if w.f == nil {
+	if w.closed {
 		w.mu.Unlock()
 		return nil
 	}
-	close(w.stop)
-	err := w.buf.Flush()
-	if cerr := w.f.Close(); err == nil {
-		err = cerr
+	w.closed = true
+	var err error
+	if w.f != nil {
+		err = w.buf.Flush()
+		if cerr := w.f.Close(); err == nil {
+			err = cerr
+		}
+		w.f = nil
 	}
-	w.f = nil
 	w.mu.Unlock()
+	close(w.stop)
 	<-w.done
 	return err
 }

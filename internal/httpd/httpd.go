@@ -115,6 +115,13 @@ func (s *Server) Reload() error {
 	if err != nil {
 		return err
 	}
+	return s.ReloadFrom(sites)
+}
+
+// ReloadFrom is Reload over an already-fetched site scan, so a daemon
+// metadata change can feed one scan to every derived table instead of one
+// per consumer.
+func (s *Server) ReloadFrom(sites []site.Site) error {
 	exact := make(map[string]Target)
 	wildcards := make(map[string]Target)
 	for _, st := range sites {

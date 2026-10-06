@@ -23,6 +23,48 @@ func openTest(t *testing.T, maxSize int64) (*Writer, string) {
 	return w, path
 }
 
+// A rotation whose reopen fails (directory gone, EMFILE, EIO) must not kill
+// the writer permanently: the next Write retries the open, and Close always
+// stops the flush loop instead of leaking it on the f == nil early return.
+func TestRotationFailureDoesNotKillWriter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.log")
+	w, err := Open(path, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.maxSize = 16
+	t.Cleanup(func() { _ = w.Close() })
+
+	if _, err := w.Write([]byte("first line\n")); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("this line is long enough to rotate\n")); err == nil {
+		t.Fatal("expected the failed rotation reopen to surface an error")
+	}
+
+	// The writer must recover once the directory exists again.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("second line\n")); err != nil {
+		t.Fatalf("write after failed rotation: %v — writer permanently dead", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close after failed rotation: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "second line") {
+		t.Errorf("log = %q, want the recovered line on disk", data)
+	}
+}
+
 func readAll(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

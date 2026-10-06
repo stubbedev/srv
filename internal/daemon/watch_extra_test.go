@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/stubbedev/srv/internal/config"
+	"github.com/stubbedev/srv/internal/httpd"
+	"github.com/stubbedev/srv/internal/site"
 )
 
 func TestAddExistingSites(t *testing.T) {
@@ -176,4 +180,75 @@ func TestHandleWatchEventChmodIgnored(t *testing.T) {
 	state := &watchState{timers: map[string]*time.Timer{}}
 	// Chmod-only event on metadata.yml → ignored.
 	d.handleWatchEvent(w, state, fsnotify.Event{Name: "/srv/x/metadata.yml", Op: fsnotify.Chmod})
+}
+
+// A Create event for a new site directory must refresh the static server's
+// host table too: previously only the container mapping was rebuilt, so a
+// daemon-served site added by the CLI (whose metadata lands before the watch
+// on its directory exists) stayed unresponsive until an unrelated reload.
+func TestHandleWatchEventNewSiteDirRefreshesStaticHostTable(t *testing.T) {
+	d, err := newDaemonForTest(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.cancel()
+	if err := os.MkdirAll(d.cfg.SitesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "index.html"), []byte("news site"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := site.WriteSiteMetadata("news", site.SiteMetadata{
+		Type:         site.SiteTypeStatic,
+		Domains:      []string{"news.test"},
+		ProjectPath:  project,
+		DaemonServed: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httpd.New("127.0.0.1:0")
+	t.Cleanup(srv.Shutdown)
+	d.static.Store(srv)
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Skip("fsnotify unavailable")
+	}
+	defer w.Close()
+	_ = w.Add(d.cfg.SitesDir)
+	state := &watchState{timers: map[string]*time.Timer{}}
+	newDir := filepath.Join(d.cfg.SitesDir, "news")
+	d.handleWatchEvent(w, state, fsnotify.Event{Name: newDir, Op: fsnotify.Create})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://news.test/", nil)
+	req.Host = "news.test"
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "news site" {
+		t.Errorf("after Create event: code=%d body=%q — static host table was not refreshed", rec.Code, rec.Body.String())
+	}
+}
+
+// stopAllTimers is the shutdown half of the debounce: an armed timer must
+// not fire a site reload (and a compose up) once the daemon's context is
+// cancelled.
+func TestStopAllTimersCancelsPendingReloads(t *testing.T) {
+	state := &watchState{timers: map[string]*time.Timer{}}
+	fired := make(chan struct{}, 2)
+	state.scheduleReload("a", 30*time.Millisecond, func() { fired <- struct{}{} })
+	state.scheduleReload("b", 30*time.Millisecond, func() { fired <- struct{}{} })
+	state.stopAllTimers()
+	time.Sleep(80 * time.Millisecond)
+	select {
+	case <-fired:
+		t.Fatal("debounce timer fired after stopAllTimers")
+	default:
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.timers) != 0 {
+		t.Errorf("timers = %d entries, want 0", len(state.timers))
+	}
 }

@@ -268,7 +268,21 @@ func (d *Daemon) startEmbeddedDNS() {
 					d.log("DNS zone watcher stopped: %v", err)
 				}
 			}()
+			// Serve blocks until Shutdown; Shutdown is also what unblocks Watch
+			// (it cancels the server's context) and reaps both sockets. Without
+			// this watcher goroutine a daemon stop left Serve, the sockets and
+			// the zone watcher running past Run's return.
+			stopWatch := make(chan struct{})
+			go func() {
+				select {
+				case <-d.ctx.Done():
+					server.Shutdown()
+				case <-stopWatch:
+				}
+			}()
 			_ = server.Serve()
+			close(stopWatch)
+			server.Shutdown() // idempotent; unwinds Watch so watchDone closes
 			<-watchDone
 
 			if d.ctx.Err() != nil {
@@ -335,10 +349,39 @@ func (d *Daemon) startStaticServer() {
 // refreshStaticSites re-reads the daemon-served host table after site
 // metadata changed. Cheap: one directory scan + the site's metadata.ymls.
 func (d *Daemon) refreshStaticSites() {
-	if srv := d.static.Load(); srv != nil {
-		if err := srv.Reload(); err != nil {
-			d.log("Static server reload: %v", err)
-		}
+	d.refreshStaticSitesFrom(nil)
+}
+
+// refreshStaticSitesFrom applies a fresh site scan to the daemon-served host
+// table; a nil scan re-reads the sites directory itself.
+func (d *Daemon) refreshStaticSitesFrom(sites []site.Site) {
+	srv := d.static.Load()
+	if srv == nil {
+		return
+	}
+	var err error
+	if sites == nil {
+		err = srv.Reload()
+	} else {
+		err = srv.ReloadFrom(sites)
+	}
+	if err != nil {
+		d.log("Static server reload: %v", err)
+	}
+}
+
+// refreshAfterMetadataChange feeds one fresh site scan to every derived
+// table (the static host table and the container mapping), so a mutation
+// costs one directory walk instead of one per consumer.
+func (d *Daemon) refreshAfterMetadataChange() {
+	sites, err := listSites()
+	if err != nil {
+		d.log("Site scan: %v", err)
+		return
+	}
+	d.refreshStaticSitesFrom(sites)
+	if err := d.refreshContainerMappingFrom(sites); err != nil {
+		d.log("Container mapping refresh: %v", err)
 	}
 }
 
@@ -364,7 +407,12 @@ func (d *Daemon) refreshContainerMapping() error {
 	if err != nil {
 		return err
 	}
+	return d.refreshContainerMappingFrom(sites)
+}
 
+// refreshContainerMappingFrom applies an already-fetched site scan; see
+// refreshAfterMetadataChange.
+func (d *Daemon) refreshContainerMappingFrom(sites []site.Site) error {
 	next := make(map[string]string)
 	for _, s := range sites {
 		if s.ServiceName != "" && s.Type == site.SiteTypeCompose {

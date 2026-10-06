@@ -89,6 +89,9 @@ func (d *Daemon) watchLoop(w *fsnotify.Watcher, state *watchState) {
 	for {
 		select {
 		case <-d.ctx.Done():
+			// Cancel armed debounce timers: their callbacks would run a site
+			// reload (and a compose up) after shutdown has unwound the daemon.
+			state.stopAllTimers()
 			return
 		case err, ok := <-w.Errors:
 			if !ok {
@@ -115,8 +118,14 @@ func (d *Daemon) handleWatchEvent(w *fsnotify.Watcher, state *watchState, event 
 				state.mu.Unlock()
 			}
 			// A metadata.yml written before the watch above existed produced
-			// no event; read the new site now so its containers are known.
-			_ = d.refreshContainerMapping()
+			// no event; apply the new site to every derived table now so its
+			// containers are known AND its daemon-served static host entry is
+			// live — previously only the container mapping was refreshed and a
+			// daemon-served site stayed unresponsive until an unrelated reload.
+			if err := d.refreshContainerMapping(); err != nil {
+				d.log("New site scan: %v", err)
+			}
+			d.refreshStaticSites()
 		}
 		return
 	}
@@ -128,8 +137,7 @@ func (d *Daemon) handleWatchEvent(w *fsnotify.Watcher, state *watchState, event 
 	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 && isDirectChild(d.cfg.SitesDir, event.Name) {
 		_ = w.Remove(event.Name)
 		state.forgetSite(filepath.Base(event.Name))
-		d.refreshStaticSites()
-		_ = d.refreshContainerMapping()
+		d.refreshAfterMetadataChange()
 		return
 	}
 
@@ -183,10 +191,27 @@ func (s *watchState) forgetSite(siteName string) {
 	s.reloadMu.Delete(siteName)
 }
 
+// stopAllTimers cancels every pending debounce timer. Called on daemon
+// shutdown so an armed timer cannot fire a site reload (and a compose up)
+// after Run has returned.
+func (s *watchState) stopAllTimers() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, t := range s.timers {
+		t.Stop()
+		delete(s.timers, name)
+	}
+}
+
 // reloadSite acquires the per-site mutex and dispatches site.Reload.
 // Failures are logged but do not crash the daemon — the previously running
 // site stays up.
 func (d *Daemon) reloadSite(state *watchState, siteName string) {
+	// A timer armed before shutdown must not run a full reload (and a
+	// compose up) once Run has returned and the log file is closed.
+	if d.ctx.Err() != nil {
+		return
+	}
 	muAny, _ := state.reloadMu.LoadOrStore(siteName, &sync.Mutex{})
 	mu, ok := muAny.(*sync.Mutex)
 	if !ok {
@@ -196,14 +221,11 @@ func (d *Daemon) reloadSite(state *watchState, siteName string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Refresh the static server's host table no matter how Reload fares: a
-	// CLI reload can short-circuit on an unchanged metadata hash while the
-	// table is still missing a just-added site, and a deleted site must stop
-	// being served even though its Reload now errors.
-	defer d.refreshStaticSites()
-	// The site's service name may have changed; keep the event loop's
-	// container mapping in step with every metadata change.
-	defer func() { _ = d.refreshContainerMapping() }()
+	// Refresh the derived tables no matter how Reload fares: a CLI reload
+	// can short-circuit on an unchanged metadata hash while the table is
+	// still missing a just-added site, and a deleted site must stop being
+	// served even though its Reload now errors.
+	defer d.refreshAfterMetadataChange()
 
 	res, err := site.Reload(siteName)
 	if err != nil {
