@@ -190,6 +190,11 @@ type Server struct {
 	closeOnce sync.Once
 	done      chan struct{}
 
+	// updMu serializes SetZones against Reload so an interleave cannot
+	// publish a snapshot built from one stale layer; queries keep their
+	// lock-free atomic load of the combined snapshot.
+	updMu sync.Mutex
+
 	// newFileWatcher builds the watcher Watch runs on; pollEvery bounds its
 	// stat-poll safety net. Both default to production values and are
 	// tightened by tests, which assert the bound the code owns instead of
@@ -237,14 +242,17 @@ func New(bindAddr string, port int, confPath, hostsPath string) (*Server, error)
 	}
 	mux := miekg.NewServeMux()
 	mux.HandleFunc(".", s.handleQuery)
-	s.conn = &miekg.Server{PacketConn: pc, Handler: mux}
+	// UDPSize is both the inbound read buffer and the size advertised in
+	// srv's EDNS0 replies. The 512 default cannot carry today's routine
+	// 1232-4096 byte EDNS payloads, so larger queries failed to parse.
+	s.conn = &miekg.Server{PacketConn: pc, Handler: mux, UDPSize: serverUDPSize}
 	ln, err := listenCfg.Listen(context.Background(), "tcp", udpAddr.String())
 	if err != nil {
 		_ = pc.Close()
 		cancel()
 		return nil, fmt.Errorf("bind DNS tcp %s: %w", udpAddr, err)
 	}
-	s.tcp = &miekg.Server{Listener: ln, Handler: mux}
+	s.tcp = &miekg.Server{Listener: ln, Handler: mux, UDPSize: serverUDPSize}
 	if err := s.Reload(); err != nil {
 		_ = pc.Close()
 		_ = ln.Close()
@@ -376,6 +384,12 @@ func (s *Server) Watch() error {
 // it, so hand-written zone entries keep answering and a primary that no
 // longer lists a name falls back to whatever the files still say.
 func (s *Server) SetZones(z *ZoneSnapshot) {
+	// Serialize with Reload: both rebuild the serving snapshot from one
+	// primary and one fallback layer, and an unlocked interleave (Reload
+	// pairing the old primary, SetZones the old fallback) would publish a
+	// snapshot that silently reverts one layer until the next event.
+	s.updMu.Lock()
+	defer s.updMu.Unlock()
 	s.primary.Store(z)
 	s.zones.Store(combine(z, s.fallback.Load()))
 }
@@ -388,6 +402,8 @@ func (s *Server) Reload() error {
 	if err != nil {
 		return err
 	}
+	s.updMu.Lock()
+	defer s.updMu.Unlock()
 	s.fallback.Store(z)
 	s.zones.Store(combine(s.primary.Load(), z))
 	return nil
@@ -696,8 +712,10 @@ func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
 	// The health-check name is answered before everything else, including
 	// forwarding, so a response to it is proof srv's server answered.
 	if name == CheckName && q.Qtype == miekg.TypeA {
-		rp.answerA(name, loopbackA)
-		_ = w.WriteMsg(&rp.msg)
+		// The answer's owner name echoes the question's case (RFC 1035
+		// 4.1.9); lookups key on the lowercased name.
+		rp.answerA(q.Name, loopbackA)
+		writeReply(w, r, &rp.msg)
 		return
 	}
 
@@ -712,9 +730,9 @@ func (s *Server) handleQuery(w miekg.ResponseWriter, r *miekg.Msg) {
 		// an authoritative empty answer, not NXDOMAIN, which would push
 		// resolvers to try upstream — what dnsmasq served.
 		if q.Qtype == miekg.TypeA {
-			rp.answerA(name, ip)
+			rp.answerA(q.Name, ip)
 		}
-		_ = w.WriteMsg(&rp.msg)
+		writeReply(w, r, &rp.msg)
 		return
 	}
 
@@ -736,6 +754,48 @@ func lookupA(z *ZoneSnapshot, name string) (net.IP, bool) {
 // safe for concurrent use and saves an allocation per query.
 var upstreamClient = &miekg.Client{Timeout: upstreamTimeout, Net: "udp"}
 
+// upstreamTCP retries a truncated forwarder answer over TCP, the only
+// transport that can carry it (see forwardUpstream).
+var upstreamTCP = &miekg.Client{Timeout: upstreamTimeout, Net: "tcp"}
+
+// serverUDPSize is srv's own EDNS0 buffer: the inbound UDP read size and
+// the value advertised in replies.
+const serverUDPSize = 4096
+
+// upstreamAnswer is the hedged race's winner: the reply and the upstream
+// that produced it, so a truncated answer can be retried over TCP against
+// the same resolver.
+type upstreamAnswer struct {
+	resp *miekg.Msg
+	addr string
+}
+
+// writeReply sends m to the client. The request's OPT record is echoed with
+// srv's own buffer so EDNS0 size negotiation keeps working through srv, and
+// over UDP the message is truncated to the buffer the client advertised
+// (512 without EDNS0) with the TC bit — miekg's WriteMsg never truncates on
+// its own, and an oversized datagram is simply dropped by the client.
+func writeReply(w miekg.ResponseWriter, r *miekg.Msg, m *miekg.Msg) {
+	size := miekg.MinMsgSize
+	if o := r.IsEdns0(); o != nil {
+		if s := int(o.UDPSize()); s > size {
+			size = s
+		}
+		// Replace any OPT the upstream sent with srv's own.
+		for i, rr := range m.Extra {
+			if _, ok := rr.(*miekg.OPT); ok {
+				m.Extra = append(m.Extra[:i:i], m.Extra[i+1:]...)
+				break
+			}
+		}
+		m.SetEdns0(serverUDPSize, o.Do())
+	}
+	if w.LocalAddr().Network() == "udp" {
+		m.Truncate(size)
+	}
+	_ = w.WriteMsg(m)
+}
+
 // hedgeDelay is how long forwardUpstream waits on one upstream before it
 // also asks the next. A healthy resolver answers well inside it, so the
 // common case sends one packet instead of one per configured upstream.
@@ -744,8 +804,20 @@ const hedgeDelay = 200 * time.Millisecond
 // forwardUpstream relays the original question upstream (see exchangeUpstream)
 // and writes the winning answer, or SERVFAIL when no upstream answered.
 func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *ZoneSnapshot) {
-	if resp := exchangeUpstream(r, z.upstream); resp != nil {
-		_ = w.WriteMsg(resp)
+	ans := exchangeUpstream(r, z.upstream)
+	if ans.resp != nil {
+		resp := ans.resp
+		// A truncated forwarder answer must be re-asked over TCP. Passing
+		// it through unchanged meant the client's own TCP retry was
+		// forwarded upstream over UDP again, got TC again, and large
+		// answers (DNSSEC chains, long TXT records) could never be resolved
+		// through srv.
+		if resp.Truncated {
+			if overTCP, _, err := upstreamTCP.Exchange(r.Copy(), ans.addr); err == nil {
+				resp = overTCP
+			}
+		}
+		writeReply(w, r, resp)
 		return
 	}
 	// No upstream answered. For a name srv owns this is unreachable (lookupA
@@ -753,33 +825,34 @@ func forwardUpstream(w miekg.ResponseWriter, r *miekg.Msg, reply *miekg.Msg, z *
 	// forged empty answer for a name we know nothing about.
 	reply.Rcode = miekg.RcodeServerFailure
 	reply.Answer = nil
-	_ = w.WriteMsg(reply)
+	writeReply(w, r, reply)
 }
 
 // exchangeUpstream asks the upstreams as a hedged race: the first upstream is
 // asked at once, the next one joins when the previous has failed or stayed
 // silent for hedgeDelay, and the first answer wins. A healthy first upstream
 // therefore costs one query, and a dead one costs at most hedgeDelay before
-// the next is tried — never a full upstreamTimeout. Returns nil when none
-// answered.
+// the next is tried — never a full upstreamTimeout. The zero value (nil
+// resp) means none answered.
 //
-// Each worker sends exactly one message (its answer, or nil on failure) into
-// a channel buffered for all of them, so the losers of the race finish and
-// exit after the winner is returned: no worker may ever block on the send,
-// or every forwarded query would leak a goroutine per slow upstream.
-func exchangeUpstream(r *miekg.Msg, upstreams []upstream) *miekg.Msg {
-	replies := make(chan *miekg.Msg, len(upstreams))
+// Each worker sends exactly one message (its answer, or the zero value on
+// failure) into a channel buffered for all of them, so the losers of the
+// race finish and exit after the winner is returned: no worker may ever
+// block on the send, or every forwarded query would leak a goroutine per
+// slow upstream.
+func exchangeUpstream(r *miekg.Msg, upstreams []upstream) upstreamAnswer {
+	replies := make(chan upstreamAnswer, len(upstreams))
 	next, inflight := 0, 0
 	launch := func() {
 		up := upstreams[next]
 		next++
 		inflight++
 		go func() {
-			var resp *miekg.Msg
-			defer func() { replies <- resp }()
+			ans := upstreamAnswer{}
+			defer func() { replies <- ans }()
 			answer, _, err := upstreamClient.Exchange(r.Copy(), up.addr)
 			if err == nil {
-				resp = answer
+				ans = upstreamAnswer{resp: answer, addr: up.addr}
 			}
 		}()
 	}
@@ -792,7 +865,7 @@ func exchangeUpstream(r *miekg.Msg, upstreams []upstream) *miekg.Msg {
 		select {
 		case resp := <-replies:
 			inflight--
-			if resp != nil {
+			if resp.resp != nil {
 				return resp
 			}
 			// That upstream failed outright: move on now rather than
@@ -808,7 +881,7 @@ func exchangeUpstream(r *miekg.Msg, upstreams []upstream) *miekg.Msg {
 			}
 		}
 	}
-	return nil
+	return upstreamAnswer{}
 }
 
 // Owns reports whether the server answers name itself from this snapshot
@@ -829,16 +902,16 @@ func (z *ZoneSnapshot) ResolveA(name string) (net.IP, error) {
 	var q miekg.Msg
 	q.SetQuestion(dnsName(name), miekg.TypeA)
 	q.RecursionDesired = true
-	resp := exchangeUpstream(&q, upstreams)
-	if resp == nil {
+	ans := exchangeUpstream(&q, upstreams)
+	if ans.resp == nil {
 		return nil, fmt.Errorf("no upstream DNS server answered for %s", name)
 	}
-	for _, rr := range resp.Answer {
+	for _, rr := range ans.resp.Answer {
 		if a, ok := rr.(*miekg.A); ok {
 			return a.A, nil
 		}
 	}
-	return nil, fmt.Errorf("no A record for %s upstream (%s)", name, miekg.RcodeToString[resp.Rcode])
+	return nil, fmt.Errorf("no A record for %s upstream (%s)", name, miekg.RcodeToString[ans.resp.Rcode])
 }
 
 // IsBindPermissionErr reports whether err is the classic "cannot bind port
