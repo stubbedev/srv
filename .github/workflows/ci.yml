@@ -224,17 +224,17 @@ jobs:
           purge-primary-key: never
           gc-max-store-size-linux: 5G
 
-      # Inline `just sync-flake`. Rewrites flake.nix's vendorHash to match the
+      # Inline `just sync-flake`. Rewrites nix/package.nix's vendorHash to match the
       # current go.sum (and refreshes the `# go-sum:` cache line). On master
       # pushes the result is auto-committed (next step); on PRs we fail if it
       # would change anything, so reviewers see the drift instead of CI
       # silently masking it.
-      - name: sync flake.nix vendorHash
+      - name: sync nix/package.nix vendorHash
         run: |
           set -euo pipefail
           GO_SUM_HASH=$(sha256sum go.sum | awk '{print $1}')
           SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-          sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$SENTINEL"'";|' flake.nix
+          sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$SENTINEL"'";|' nix/package.nix
           set +e
           OUT=$(nix build .#srv --no-link 2>&1)
           BUILD_STATUS=$?
@@ -250,34 +250,34 @@ jobs:
             echo "::error::sync-flake: nix build did not print 'got: sha256-…'"
             exit 1
           fi
-          sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$NEW_HASH"'";|' flake.nix
-          if grep -q '^[[:space:]]*# go-sum:' flake.nix; then
-            sed -i -E 's|^(\s*# go-sum:).*|\1 '"$GO_SUM_HASH"'|' flake.nix
+          sed -i -E 's|^(\s*vendorHash = )"sha256-[^"]*";|\1"'"$NEW_HASH"'";|' nix/package.nix
+          if grep -q '^[[:space:]]*# go-sum:' nix/package.nix; then
+            sed -i -E 's|^(\s*# go-sum:).*|\1 '"$GO_SUM_HASH"'|' nix/package.nix
           else
-            sed -i -E 's|^(\s*vendorHash = )|            # go-sum: '"$GO_SUM_HASH"'\n\1|' flake.nix
+            sed -i -E 's|^(\s*)(vendorHash = )|\1# go-sum: '"$GO_SUM_HASH"'\n\1\2|' nix/package.nix
           fi
           echo "sync-flake: vendorHash=$NEW_HASH go-sum=$GO_SUM_HASH"
 
-      - name: assert flake.nix in sync (PR)
+      - name: assert nix/package.nix in sync (PR)
         if: github.event_name == 'pull_request'
         run: |
-          if [ -n "$(git status --porcelain flake.nix)" ]; then
-            echo "::error::flake.nix vendorHash is out of sync with go.sum. Run 'just sync-flake' locally and commit the result."
-            git --no-pager diff flake.nix
+          if [ -n "$(git status --porcelain nix/package.nix)" ]; then
+            echo "::error::nix/package.nix vendorHash is out of sync with go.sum. Run 'just sync-flake' locally and commit the result."
+            git --no-pager diff nix/package.nix
             exit 1
           fi
 
-      - name: auto-commit flake.nix bump (master)
+      - name: auto-commit nix/package.nix bump (master)
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
-          if [ -z "$(git status --porcelain flake.nix)" ]; then
-            echo "flake.nix already in sync; nothing to commit."
+          if [ -z "$(git status --porcelain nix/package.nix)" ]; then
+            echo "nix/package.nix already in sync; nothing to commit."
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add flake.nix
-          git commit -m 'chore: auto-bump flake.nix vendorHash [skip ci]'
+          git add nix/package.nix
+          git commit -m 'chore: auto-bump nix/package.nix vendorHash [skip ci]'
           git push origin HEAD:master
 
       - run: nix flake check --print-build-logs
