@@ -29,7 +29,7 @@
           };
 
           # go-sum: 36672b4f5c71c2ca16552201e97491d0bb7ac2b6d55332f44569d78890c37efc
-          vendorHash = "sha256-NgP9kD+qnDqhHgQGLSRCrpLWKNdJuQlrEHX3VJvGN0s=";
+          vendorHash = "sha256-I8cARWxu/0eM22haMwKZPFBYYOa3q/gW7jRmeqv0iHg=";
 
           ldflags = [
             "-s"
