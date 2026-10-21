@@ -26,8 +26,6 @@ jobs:
           - goos: linux
             goarch: "386"
           - goos: darwin
-            goarch: amd64
-          - goos: darwin
             goarch: arm64
     steps:
       - uses: actions/checkout@v7
@@ -164,7 +162,6 @@ jobs:
           {
             echo "VERSION=${VERSION}"
             echo "SHA_DARWIN_ARM64=$(extract darwin-arm64)"
-            echo "SHA_DARWIN_AMD64=$(extract darwin-amd64)"
             echo "SHA_LINUX_ARM64=$(extract linux-arm64)"
             echo "SHA_LINUX_AMD64=$(extract linux-amd64)"
           } >> "$GITHUB_ENV"
@@ -193,10 +190,6 @@ jobs:
               on_arm do
                 url "https://github.com/stubbedev/srv/releases/download/v#{version}/srv-#{version}-darwin-arm64.tar.gz"
                 sha256 "${SHA_DARWIN_ARM64}"
-              end
-              on_intel do
-                url "https://github.com/stubbedev/srv/releases/download/v#{version}/srv-#{version}-darwin-amd64.tar.gz"
-                sha256 "${SHA_DARWIN_AMD64}"
               end
             end
 

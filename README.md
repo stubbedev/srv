@@ -55,8 +55,8 @@ Download the tarball for your platform from
 [releases](https://github.com/stubbedev/srv/releases/latest), extract, and
 place `srv` on your `PATH`.
 
-**Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (amd64,
-arm64). The brew formula covers darwin/linux amd64+arm64; armv7 and 386 are
+**Supported platforms:** Linux (amd64, arm64, armv7, 386), macOS (arm64).
+The brew formula covers linux amd64+arm64 and darwin arm64; armv7 and 386 are
 install-script or manual-download only.
 
 **Runtime requirements:**

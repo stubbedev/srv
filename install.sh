@@ -78,6 +78,11 @@ detect_platform() {
   esac
 
   PLATFORM="${OS}-${ARCH}"
+
+  case "$PLATFORM" in
+  linux-amd64 | linux-arm64 | linux-armv7 | linux-386 | darwin-arm64) ;;
+  *) error "No srv release for ${PLATFORM}. Build from source." ;;
+  esac
 }
 
 # Get latest release version. Sets VERSION (with leading v, e.g. v1.2.3) and
