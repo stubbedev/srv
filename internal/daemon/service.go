@@ -183,28 +183,34 @@ func Install() error {
 }
 
 // Uninstall removes srv's own unit. A daemon that only brew services runs is
-// not srv's to remove, so that case returns ErrSupervisedByBrew; with both
-// installed, removing srv's unit resolves the conflict.
+// not srv's to remove, so that case returns ErrSupervisedByBrew. With both
+// installed, removing srv's unit resolves the conflict; the brew services
+// daemon lost the race for the single-instance lock while srv's ran, so it is
+// restarted to leave a running daemon behind.
 func Uninstall() error {
 	srvUnit, err := unitFor(SupervisorSrv)
 	if err != nil {
 		return err
 	}
-	if !srvUnit.installed() {
-		brewUnit, err := unitFor(SupervisorBrew)
-		if err != nil {
-			return err
-		}
-		if brewUnit.installed() {
-			return fmt.Errorf("%w (%s); remove it with 'brew services stop srv'", ErrSupervisedByBrew, brewUnit.path)
-		}
+	brewUnit, err := unitFor(SupervisorBrew)
+	if err != nil {
+		return err
 	}
-	switch {
-	case platform.IsLinux():
-		return uninstallSystemd()
-	default:
-		return uninstallLaunchd()
+	if !srvUnit.installed() && brewUnit.installed() {
+		return fmt.Errorf("%w (%s); remove it with 'brew services stop srv'", ErrSupervisedByBrew, brewUnit.path)
 	}
+	if platform.IsLinux() {
+		err = uninstallSystemd()
+	} else {
+		err = uninstallLaunchd()
+	}
+	if err != nil || !brewUnit.installed() {
+		return err
+	}
+	if err := Restart(); err != nil {
+		return fmt.Errorf("removed srv's unit, but restarting the brew services daemon failed: %w", err)
+	}
+	return nil
 }
 
 // Restart restarts the daemon through whichever unit runs it.

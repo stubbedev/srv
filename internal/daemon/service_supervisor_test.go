@@ -127,7 +127,9 @@ func TestUninstallResolvesADoubleInstall(t *testing.T) {
 	tempHome(t)
 	installUnit(t, SupervisorSrv)
 	installUnit(t, SupervisorBrew)
-	swapShell(t, shelltest.New(nil))
+	fake := shelltest.New(nil)
+	swapShell(t, fake)
+	brew := unitPath(t, SupervisorBrew)
 
 	if err := Uninstall(); err != nil {
 		t.Fatal(err)
@@ -135,6 +137,14 @@ func TestUninstallResolvesADoubleInstall(t *testing.T) {
 	got, err := ActiveSupervisor()
 	if err != nil || got != SupervisorBrew {
 		t.Errorf("after Uninstall: ActiveSupervisor() = %v, %v; want brew services, nil", got, err)
+	}
+	calls := fake.Snapshot()
+	if len(calls) == 0 {
+		t.Fatal("Uninstall() made no service-manager calls")
+	}
+	last := calls[len(calls)-1]
+	if !slices.Contains(last.Args, brew) && !slices.Contains(last.Args, filepath.Base(brew)) {
+		t.Errorf("last call %s %v does not restart the brew services daemon", last.Name, last.Args)
 	}
 }
 
