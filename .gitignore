@@ -23,6 +23,9 @@ deploy
 # MkDocs output (`just docs-build`)
 /site/
 
+# e2e/run.sh state: temp dirs shared with the host engine, Go caches
+/.e2e/
+
 # Nix build output — the ./result symlink `nix build` creates; a bare pattern
 # because `result/` would not match it (a symlink is not a directory).
 result

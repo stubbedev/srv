@@ -1,8 +1,10 @@
 name: e2e
 
-# End-to-end tests boot a real Traefik via compose and route real HTTP through
-# it. They need a container engine + mkcert + free ports 80/443/88/8080, so they
-# run in their own workflow (not the main `test` job) on a clean ubuntu-latest
+# End-to-end tests boot a real Traefik, route real HTTP through it, and install
+# daemon service units in a throwaway systemd container. e2e/run.sh runs the
+# test process itself inside the Dockerfile.dev image, never on the runner;
+# it drives the runner's engine through its socket and needs free ports
+# 80/443/88/8080, so the suite has its own workflow on a clean ubuntu-latest
 # runner. Gated behind the `e2e` build tag, one leg per engine.
 
 on:
@@ -30,47 +32,29 @@ jobs:
       fail-fast: false
       matrix:
         engine: [docker, podman]
-    env:
-      SRV_CONTAINER_ENGINE: ${{ matrix.engine }}
-      # The podman leg targets the *rootful* socket, which is the deliverable;
-      # rootless needs a sysctl for the privileged ports Traefik binds and is
-      # tracked separately. Naming the endpoint outright is srv's documented
-      # escape hatch and removes any ambiguity about which podman is meant —
-      # the runner also carries a rootless socket path.
-      DOCKER_HOST: ${{ matrix.engine == 'podman' && 'unix:///run/podman/podman.sock' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref || github.ref_name }}
 
-      - uses: actions/setup-go@v6
+      # e2e/run.sh keeps the Go module and build caches under .e2e/.
+      - uses: actions/cache@v6
         with:
-          go-version-file: go.mod
-          cache: true
-
-      # mkcert as a prebuilt binary. `srv proxy add` shells out to it to
-      # issue a local cert; cert generation auto-creates the local CA on
-      # first use, so no `mkcert -install` (system trust) is needed — the
-      # e2e HTTP client skips TLS verification.
-      - name: Install mkcert
-        run: |
-          set -euo pipefail
-          curl -fsSL -o mkcert \
-            "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
-          chmod +x mkcert
-          sudo mv mkcert /usr/local/bin/mkcert
-          mkcert -version
+          path: |
+            .e2e/gomod
+            .e2e/gocache
+          key: e2e-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: e2e-go-${{ runner.os }}-
 
       # Rootful podman with its Docker-compatible API socket enabled, which is
-      # what the deliverable targets. Compose v2 is what writes the
-      # com.docker.compose.* labels srv filters on, so it is installed as
-      # podman's compose provider rather than podman-compose.
-      - name: Install podman + Compose v2
+      # what the deliverable targets. The podman client and Compose v2 run
+      # inside the test image; the runner only serves the socket.
+      - name: Install podman
         if: matrix.engine == 'podman'
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y podman docker-compose-v2
+          sudo apt-get install -y podman
           sudo systemctl enable --now podman.socket
           # The suite runs as the runner user against the rootful socket. Both
           # the directory and the socket need opening: /run/podman is 0700
@@ -84,7 +68,6 @@ jobs:
           # Fail here rather than inside a test if the socket is not actually
           # serving: this is the whole premise of the leg.
           podman --remote --url unix:///run/podman/podman.sock info >/dev/null
-          podman compose version
 
       - name: Run e2e tests
-        run: go test -tags=e2e -v ./e2e/... -timeout 30m
+        run: e2e/run.sh ${{ matrix.engine }}

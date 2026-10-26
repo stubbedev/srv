@@ -20,7 +20,9 @@ services:
       # host login that owns it, so writes stay consistent both ways.
       - ${HOME}/go/pkg/mod:/go/pkg/mod
       - srv-gocache:/gocache
-      # Drive the host engine for the e2e suites (passwordless on the host).
+      # Drive the host engine from inside the container. The e2e suite does
+      # not run here: e2e/run.sh starts it with host networking and path
+      # parity, which this service lacks.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       GOCACHE: /gocache

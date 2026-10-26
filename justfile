@@ -220,16 +220,18 @@ check: lint test schemas sync-docs sync-flake
 test:
     just go-run go test -timeout 60s ./...
 
-# Run end-to-end tests (build-tagged `e2e`). Boots a real Traefik via compose
-# and routes real HTTP through it. Needs a container engine + free
-# ports 80/443/88/8080; tests self-skip when those aren't available.
-# Runs on the host by design: the suite's compose files bind-mount host
-# SRV_ROOT paths, which a container-run would resolve against itself.
+# Run end-to-end tests (build-tagged `e2e`) inside the dev image, never on the
+# host: they boot a real Traefik, route real HTTP through it, and install
+# daemon service units in a throwaway systemd container. e2e/run.sh keeps the
+# repository at the same path in the container and on the host, so the bind
+# mounts srv hands the engine resolve to the same files. Needs a Linux host
+# with a container engine and free ports 80/443/88/8080; the routing tests
+# self-skip when those ports are taken. Extra args go to `go test`.
 #
 # ENGINE picks which engine the suite drives — the same SRV_CONTAINER_ENGINE
 # override srv itself reads, so `just test-e2e podman` proves parity end to end.
-test-e2e ENGINE="docker":
-    SRV_CONTAINER_ENGINE={{ENGINE}} go test -tags=e2e -v ./e2e/... -timeout 30m
+test-e2e ENGINE="docker" *ARGS:
+    e2e/run.sh {{ENGINE}} {{ARGS}}
 
 # Run tests with coverage
 test-cover:

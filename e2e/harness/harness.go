@@ -106,7 +106,10 @@ func BuildSrv(t *testing.T) string {
 			return
 		}
 		bin := dir + "/srv"
+		// Static, like the release builds, so the binary also runs in the
+		// containers suites copy it into.
 		cmd := exec.Command("go", "build", "-o", bin, "github.com/stubbedev/srv")
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			buildErr = fmt.Errorf("go build: %w", err)
