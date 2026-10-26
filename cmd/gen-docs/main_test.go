@@ -143,7 +143,7 @@ func docTree() *cobra.Command {
 func TestWriteHeader(t *testing.T) {
 	var b strings.Builder
 	writeHeader(&b)
-	for _, want := range []string{"# srv CLI reference", "back to README", "gen-docs"} {
+	for _, want := range []string{"# CLI reference", "`srv` command tree", "gen-docs", "just sync-docs"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("writeHeader() missing %q", want)
 		}
@@ -331,15 +331,7 @@ func TestVisibleChildrenFiltersHelpAndCompletion(t *testing.T) {
 // produce every section the index promises.
 func TestFullDocumentAgainstTheRealCommandTree(t *testing.T) {
 	root := srvcmd.RootCmd
-	if root.Use == "" {
-		root.Use = "srv"
-	}
-	var b strings.Builder
-	writeHeader(&b)
-	writeGlobalFlags(&b, root)
-	writeIndex(&b, root)
-	writeCommand(&b, root, nil)
-	out := b.String()
+	out := renderCLI(root)
 
 	for _, c := range visibleChildren(root) {
 		if !strings.Contains(out, "## `srv "+c.Name()+"`") {

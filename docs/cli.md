@@ -1,9 +1,7 @@
-# srv CLI reference
-
-[← back to README](../README.md)
+# CLI reference
 
 > Auto-generated from the `srv` command tree by `go run ./cmd/gen-docs`.
-> Run `just sync-docs` after touching any subcommand to refresh.
+> Run `just sync-docs` after changing it to refresh.
 
 ## Global flags
 

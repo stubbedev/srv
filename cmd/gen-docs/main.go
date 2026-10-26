@@ -1,14 +1,16 @@
-// Command gen-docs walks the srv cobra command tree declared by
-// cmd.RootCmd and emits a single Markdown CLI reference to docs/cli.md.
-// CI re-runs this and fails when the output drifts so the docs cannot
-// fall behind the binary.
+// Command gen-docs regenerates the reference pages of the docs site from
+// source: docs/cli.md from the cobra command tree, docs/mcp-tools.md from the
+// live MCP server, and docs/config-reference.md from the jsonschema-tagged
+// config structs. CI re-runs this and fails when the output drifts so the
+// docs cannot fall behind the binary.
 //
-// Run via `just sync-docs` or `go run ./cmd/gen-docs`.
+// Run via `just sync-docs` or `go run ./cmd/gen-docs [dir]`.
 package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -18,38 +20,80 @@ import (
 	srvcmd "github.com/stubbedev/srv/cmd"
 )
 
-const defaultOut = "docs/cli.md"
+const defaultDir = "docs"
 
 func main() {
-	out := defaultOut
+	dir := defaultDir
 	if len(os.Args) > 1 {
-		out = os.Args[1]
+		dir = os.Args[1]
 	}
 
-	root := srvcmd.RootCmd
+	tools, err := renderMCPTools()
+	if err != nil {
+		fail(fmt.Errorf("mcp tools: %w", err))
+	}
+	pages := []struct{ name, body string }{
+		{"cli.md", renderCLI(srvcmd.RootCmd)},
+		{"mcp-tools.md", tools},
+		{"config-reference.md", renderConfigReference()},
+	}
+	for _, p := range pages {
+		path := filepath.Join(dir, p.name)
+		if err := writeAtomic(path, p.body); err != nil {
+			fail(err)
+		}
+		fmt.Println("wrote", path)
+	}
+}
+
+// writeAtomic replaces path with body via a temp file in the same directory,
+// so an interrupted run never leaves a half-written page behind.
+func writeAtomic(path, body string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("create temp file for %s: %w", path, err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.WriteString(body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmp.Name(), err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("rename %s to %s: %w", tmp.Name(), path, err)
+	}
+	return nil
+}
+
+func renderCLI(root *cobra.Command) string {
 	if root.Use == "" {
 		// RootCmd has no Use set; fall back to the binary name.
 		root.Use = "srv"
 	}
-
 	var b strings.Builder
 	writeHeader(&b)
 	writeGlobalFlags(&b, root)
 	writeIndex(&b, root)
 	writeCommand(&b, root, nil)
-
-	if err := os.WriteFile(out, []byte(b.String()), 0o644); err != nil {
-		fmt.Fprintln(os.Stderr, "gen-docs:", err)
-		os.Exit(1)
-	}
-	fmt.Println("wrote", out)
+	return b.String()
 }
 
 func writeHeader(b *strings.Builder) {
-	b.WriteString("# srv CLI reference\n\n")
-	b.WriteString("[← back to README](../README.md)\n\n")
-	b.WriteString("> Auto-generated from the `srv` command tree by `go run ./cmd/gen-docs`.\n")
-	b.WriteString("> Run `just sync-docs` after touching any subcommand to refresh.\n\n")
+	b.WriteString("# CLI reference\n\n")
+	writeGeneratedNote(b, "the `srv` command tree")
+}
+
+// writeGeneratedNote marks a page as generated, naming its source, so nobody
+// hand-edits a file the next sync overwrites.
+func writeGeneratedNote(b *strings.Builder, source string) {
+	fmt.Fprintf(b, "> Auto-generated from %s by `go run ./cmd/gen-docs`.\n", source)
+	b.WriteString("> Run `just sync-docs` after changing it to refresh.\n\n")
 }
 
 func writeIndex(b *strings.Builder, root *cobra.Command) {
@@ -229,4 +273,15 @@ func slugify(s string) string {
 
 func escapePipes(s string) string {
 	return strings.ReplaceAll(s, "|", `\|`)
+}
+
+// oneLine collapses whitespace and escapes table-breaking pipes so a value
+// fits in one Markdown table cell.
+func oneLine(s string) string {
+	return escapePipes(strings.Join(strings.Fields(s), " "))
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "gen-docs:", err)
+	os.Exit(1)
 }

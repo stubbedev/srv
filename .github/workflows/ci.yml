@@ -73,11 +73,8 @@ jobs:
       - name: Regenerate schemas
         run: go run ./cmd/gen-schema
 
-      - name: Regenerate CLI docs
+      - name: Regenerate docs reference pages
         run: go run ./cmd/gen-docs
-
-      - name: Regenerate README
-        run: go run ./cmd/gen-readme
 
       - name: Commit and push fixes
         id: commit
@@ -149,23 +146,13 @@ jobs:
             exit 1
           fi
 
-      - name: Verify CLI docs are up to date
+      - name: Verify docs reference pages are up to date
         if: matrix.os == 'ubuntu-latest'
         run: |
           go run ./cmd/gen-docs
-          if [ -n "$(git status --porcelain docs/cli.md)" ]; then
-            echo "docs/cli.md is out of date. Run 'just sync-docs' and commit."
-            git --no-pager diff docs/cli.md
-            exit 1
-          fi
-
-      - name: Verify README is up to date
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          go run ./cmd/gen-readme
-          if [ -n "$(git status --porcelain README.md)" ]; then
-            echo "README.md is out of date. Run 'just sync-readme' and commit."
-            git --no-pager diff README.md
+          if [ -n "$(git status --porcelain docs/cli.md docs/mcp-tools.md docs/config-reference.md)" ]; then
+            echo "docs/ reference pages are out of date. Run 'just sync-docs' and commit."
+            git --no-pager diff docs/
             exit 1
           fi
 

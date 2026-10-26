@@ -1,0 +1,58 @@
+name: pages
+
+# Publishes the docs site (MkDocs Material) to GitHub Pages. The
+# reference pages are regenerated from the source tree before every
+# build (`just docs-build` runs sync-docs first), so the site tracks
+# master even when the docs auto-commit in ci.yml has not landed yet.
+# Strict mode fails the build on a broken link or anchor; pull requests
+# run the build as a check without deploying.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v22
+        with:
+          extra-conf: |
+            extra-substituters = https://nix.stubbe.dev/c/default/default
+            extra-trusted-public-keys = default:6uWvXutL9cXjV3lii+Ur5ff+ArQoG4kMBKNXWrIxhHg=
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-docs-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/go.sum') }}
+          restore-prefixes-first-match: nix-docs-${{ runner.os }}-
+      - run: nix develop .#docs --command just docs-build
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

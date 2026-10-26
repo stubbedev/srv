@@ -136,27 +136,28 @@ schemas:
         echo "schemas: already in sync"
     fi
 
-# Regenerate docs/cli.md from the cobra command tree
+# Regenerate the generated reference pages of the docs site: docs/cli.md
+# (cobra command tree), docs/mcp-tools.md (live MCP server) and
+# docs/config-reference.md (config structs)
 sync-docs:
     #!/usr/bin/env bash
     set -euo pipefail
     just go-run go run ./cmd/gen-docs
-    if [ -n "$(git status --porcelain docs/cli.md)" ]; then
-        echo "sync-docs: regenerated docs/cli.md"
+    if [ -n "$(git status --porcelain docs/cli.md docs/mcp-tools.md docs/config-reference.md)" ]; then
+        echo "sync-docs: regenerated docs/"
     else
         echo "sync-docs: already in sync"
     fi
 
-# Regenerate the marker-delimited README sections (CLI, MCP, config) from source
-sync-readme:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just go-run go run ./cmd/gen-readme
-    if [ -n "$(git status --porcelain README.md)" ]; then
-        echo "sync-readme: regenerated README.md"
-    else
-        echo "sync-readme: already in sync"
-    fi
+# Render the docs site (MkDocs Material, strict: broken links and anchors
+# fail) into site/ from freshly regenerated reference pages. The pages
+# workflow runs exactly this.
+docs-build: sync-docs
+    mkdocs build --strict
+
+# Live-reloading preview of the docs site on http://127.0.0.1:8000
+docs-serve: sync-docs
+    mkdocs serve
 
 # Keep nix/package.nix's `vendorHash` aligned with the current go.sum.
 #
@@ -211,7 +212,7 @@ sync-flake force="":
 
 # Run all checks — useful for CI parity and pre-push. Mirrors treeman:
 # lint (fmt+vet+run), tests, and the generated-artifact sync recipes.
-check: lint test schemas sync-docs sync-readme sync-flake
+check: lint test schemas sync-docs sync-flake
 
 # Run tests.
 # -timeout 60s caps every package so a hung test is visible in seconds
@@ -270,6 +271,7 @@ mod:
 clean:
     rm -f {{BINARY}}
     rm -f coverage.out coverage.html
+    rm -rf site/
 
 # Install binary to GOPATH/bin
 install: build
