@@ -276,7 +276,11 @@ jobs:
       # the cache.
       - name: Build package for cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        run: nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
+        # pipefail: without it tee's exit status hid a failed build, and the
+        # push step then failed on an empty path list instead.
+        run: |
+          set -euo pipefail
+          nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
 
       - name: setup xilo
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
