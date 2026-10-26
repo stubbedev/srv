@@ -300,9 +300,9 @@ _release-checks:
     # `just check` runs lint + tests + schema/docs regen + sync-flake, so any
     # generated-artifact or vendorHash drift is fixed before we tag.
     just check
-    if [ -n "$(git status --porcelain)" ]; then
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
         echo "Changes detected (formatting / generated artifacts / vendorHash). Staging and committing..."
-        git add -A
+        git add -u
         git commit -m "chore: sync generated artifacts for release"
         echo "Committed"
     fi
