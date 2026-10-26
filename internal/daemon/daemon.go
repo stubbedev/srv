@@ -472,27 +472,31 @@ var isDockerAvailable = func() bool {
 	return docker.EnsureRunning() == nil
 }
 
-// waitForDocker waits for Docker daemon to become available with exponential backoff.
-func (d *Daemon) waitForDocker() error {
+// waitForDocker waits for the container engine with exponential backoff. It
+// returns true once the engine is reachable and false when the daemon is
+// stopping, which is a clean shutdown rather than an error: a daemon stopped
+// while the engine is down must exit 0, or the service manager records the
+// unit as failed.
+func (d *Daemon) waitForDocker() bool {
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
 
 	for {
 		select {
 		case <-d.ctx.Done():
-			return d.ctx.Err()
+			return false
 		default:
 		}
 
 		if isDockerAvailable() {
-			return nil
+			return true
 		}
 
 		d.log("Docker daemon not running, retrying in %v...", backoff)
 
 		select {
 		case <-d.ctx.Done():
-			return d.ctx.Err()
+			return false
 		case <-time.After(backoff):
 		}
 
@@ -512,9 +516,8 @@ func (d *Daemon) watchEvents() error {
 		default:
 		}
 
-		// Wait for Docker to be available
-		if err := d.waitForDocker(); err != nil {
-			return err
+		if !d.waitForDocker() {
+			return nil
 		}
 
 		d.log("Docker is available, starting event watcher")

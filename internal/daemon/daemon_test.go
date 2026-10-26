@@ -232,8 +232,27 @@ func TestWaitForDockerCancellation(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		d.cancel()
 	}()
-	if err := d.waitForDocker(); err == nil {
-		t.Error("expected ctx error after cancel")
+	if d.waitForDocker() {
+		t.Error("waitForDocker() = true after cancel, want false")
+	}
+}
+
+// Stopping the daemon while the engine is down is a clean shutdown: an
+// error here made `srv daemon stop` leave the unit in systemd's failed state.
+func TestWatchEventsStopsCleanlyWhileWaitingForDocker(t *testing.T) {
+	d, err := newDaemonForTest(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := isDockerAvailable
+	isDockerAvailable = func() bool { return false }
+	t.Cleanup(func() { isDockerAvailable = prev })
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		d.cancel()
+	}()
+	if err := d.watchEvents(); err != nil {
+		t.Errorf("watchEvents() = %v after a stop while waiting for docker, want nil", err)
 	}
 }
 
@@ -245,8 +264,8 @@ func TestWaitForDockerAvailable(t *testing.T) {
 	prev := isDockerAvailable
 	isDockerAvailable = func() bool { return true }
 	t.Cleanup(func() { isDockerAvailable = prev })
-	if err := d.waitForDocker(); err != nil {
-		t.Errorf("unexpected err: %v", err)
+	if !d.waitForDocker() {
+		t.Error("waitForDocker() = false with docker available, want true")
 	}
 }
 
