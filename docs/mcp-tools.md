@@ -12,7 +12,7 @@ advertised until `srv_activate` unlocks a tier; see
 | core | `srv_activate` | Unlock a tier of srv tools. |
 | core | `version` | Return the srv version, commit, and build date. |
 | read | `daemon_log` | Return the tail of the daemon log (default 50 lines, override with `lines`). |
-| read | `daemon_status` | Report whether the srv watch daemon is installed and running, plus its raw service-manager status (systemd/launchd). |
+| read | `daemon_status` | Report whether the srv watch daemon is installed and running, which unit supervises it (srv or brew services), and its raw service-manager status (systemd/launchd); `problem` names a double install. |
 | read | `get_proxy` | Return full metadata for one proxy: domains, aliases, wildcard flag, is_local flag, attached routes. |
 | read | `get_site` | Return full metadata for one site: domains, aliases, routes, mounts, internal-http flag, network attachments, container status, type, project dir. |
 | read | `list_proxies` | List every srv-managed proxy by name. |

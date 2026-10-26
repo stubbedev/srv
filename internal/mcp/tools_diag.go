@@ -18,7 +18,7 @@ import (
 func registerDiagTools(srv *mcpsdk.Server) {
 	mcpsdk.AddTool(srv, &mcpsdk.Tool{
 		Name:        "daemon_status",
-		Description: "Report whether the srv watch daemon is installed and running, plus its raw service-manager status (systemd/launchd). Call when sites are not hot-reloading or auto-connecting to the network.",
+		Description: "Report whether the srv watch daemon is installed and running, which unit supervises it (srv or brew services), and its raw service-manager status (systemd/launchd); `problem` names a double install. Call when sites are not hot-reloading or auto-connecting to the network.",
 		Annotations: readOnlyAnno("Daemon status", true),
 	}, daemonStatusTool)
 
@@ -38,10 +38,12 @@ func registerDiagTools(srv *mcpsdk.Server) {
 type (
 	daemonStatusIn  struct{}
 	daemonStatusOut struct {
-		Installed bool   `json:"installed"`
-		Running   bool   `json:"running"`
-		Status    string `json:"status"`
-		LogPath   string `json:"log_path,omitempty"`
+		Installed  bool   `json:"installed"`
+		Running    bool   `json:"running"`
+		Status     string `json:"status"`
+		Supervisor string `json:"supervisor"`
+		Problem    string `json:"problem,omitempty"`
+		LogPath    string `json:"log_path,omitempty"`
 	}
 )
 
@@ -49,6 +51,11 @@ func daemonStatusTool(_ context.Context, _ *mcpsdk.CallToolRequest, _ daemonStat
 	out := daemonStatusOut{
 		Installed: daemon.IsInstalled(),
 		Running:   daemon.IsRunning(),
+	}
+	if sup, err := daemon.ActiveSupervisor(); err == nil {
+		out.Supervisor = sup.String()
+	} else {
+		out.Problem = err.Error()
 	}
 	if status, err := daemon.ServiceStatus(); err == nil {
 		out.Status = status

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -21,74 +22,213 @@ const (
 	SystemdUserDir = ".config/systemd/user"
 	// SystemdServiceName is the name of the systemd service.
 	SystemdServiceName = "srv-daemon.service"
+	// LaunchdLabel is the label of the launchd agent.
+	LaunchdLabel = "dev.stubbe.srv-daemon"
 	// LaunchdPlistName is the name of the launchd plist.
-	LaunchdPlistName = "dev.stubbe.srv-daemon.plist"
+	LaunchdPlistName = LaunchdLabel + ".plist"
 	// LaunchAgentsDir is the user LaunchAgents directory.
 	LaunchAgentsDir = "Library/LaunchAgents"
+	// BrewSystemdServiceName is the systemd unit `brew services start srv`
+	// writes on Linux.
+	BrewSystemdServiceName = "homebrew.srv.service"
+	// BrewLaunchdLabel is the launchd label `brew services start srv` writes
+	// on macOS.
+	BrewLaunchdLabel = "homebrew.mxcl.srv"
 )
 
-// IsInstalled checks if the daemon service is installed.
-func IsInstalled() bool {
-	switch {
-	case platform.IsLinux():
-		return isSystemdInstalled()
-	case platform.IsDarwin():
-		return isLaunchdInstalled()
+// Supervisor is the service-manager unit that runs the daemon. srv writes its
+// own unit (`srv install`, `srv daemon install`); the Homebrew formula
+// declares another (`brew services start srv`). Both run the same daemon, so
+// exactly one may be installed: two would race over the single-instance lock.
+type Supervisor int
+
+const (
+	// SupervisorNone means no unit is installed.
+	SupervisorNone Supervisor = iota
+	// SupervisorSrv is the unit srv installs itself.
+	SupervisorSrv
+	// SupervisorBrew is the unit `brew services start srv` installs.
+	SupervisorBrew
+)
+
+func (s Supervisor) String() string {
+	switch s {
+	case SupervisorSrv:
+		return "srv"
+	case SupervisorBrew:
+		return "brew services"
 	default:
-		return false
+		return "none"
 	}
 }
 
-// Install installs the daemon as a system service.
+// ErrSupervisedByBrew reports that `brew services` owns the daemon, so srv
+// must not install or remove a unit of its own in its place.
+var ErrSupervisedByBrew = errors.New("the srv daemon runs under 'brew services'")
+
+// DoubleSupervisedError reports that both srv's unit and the brew services
+// unit are installed. Each starts the daemon, and the loser crash-loops
+// against the single-instance lock.
+type DoubleSupervisedError struct {
+	SrvUnit  string
+	BrewUnit string
+}
+
+func (e *DoubleSupervisedError) Error() string {
+	return fmt.Sprintf("the srv daemon is installed twice, by srv (%s) and by brew services (%s), "+
+		"and the two race over the same daemon: remove one with 'srv daemon uninstall' or 'brew services stop srv'",
+		e.SrvUnit, e.BrewUnit)
+}
+
+// unit identifies one service-manager unit: its file, and the name systemd
+// or the label launchd knows it by.
+type unit struct {
+	path string
+	name string
+}
+
+func (u unit) installed() bool {
+	_, err := os.Stat(u.path)
+	return err == nil
+}
+
+// unitFor returns the unit of supervisor s on this platform.
+func unitFor(s Supervisor) (unit, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return unit{}, fmt.Errorf("determine home directory: %w", err)
+	}
+	brew := s == SupervisorBrew
+	switch {
+	case platform.IsLinux():
+		name := SystemdServiceName
+		if brew {
+			name = BrewSystemdServiceName
+		}
+		return unit{path: filepath.Join(home, SystemdUserDir, name), name: name}, nil
+	case platform.IsDarwin():
+		label := LaunchdLabel
+		if brew {
+			label = BrewLaunchdLabel
+		}
+		return unit{path: filepath.Join(home, LaunchAgentsDir, label+".plist"), name: label}, nil
+	default:
+		return unit{}, platform.UnsupportedError("service management")
+	}
+}
+
+// ActiveSupervisor reports which unit runs the daemon. It returns a
+// *DoubleSupervisedError when both are installed.
+func ActiveSupervisor() (Supervisor, error) {
+	if !platform.IsLinux() && !platform.IsDarwin() {
+		return SupervisorNone, nil
+	}
+	srvUnit, err := unitFor(SupervisorSrv)
+	if err != nil {
+		return SupervisorNone, err
+	}
+	brewUnit, err := unitFor(SupervisorBrew)
+	if err != nil {
+		return SupervisorNone, err
+	}
+	switch srv, brew := srvUnit.installed(), brewUnit.installed(); {
+	case srv && brew:
+		return SupervisorNone, &DoubleSupervisedError{SrvUnit: srvUnit.path, BrewUnit: brewUnit.path}
+	case srv:
+		return SupervisorSrv, nil
+	case brew:
+		return SupervisorBrew, nil
+	default:
+		return SupervisorNone, nil
+	}
+}
+
+// activeUnit returns the unit that runs the daemon, failing when none is
+// installed or when two are.
+func activeUnit() (unit, error) {
+	sup, err := ActiveSupervisor()
+	if err != nil {
+		return unit{}, err
+	}
+	if sup == SupervisorNone {
+		return unit{}, errors.New("daemon service is not installed")
+	}
+	return unitFor(sup)
+}
+
+// IsInstalled reports whether any unit runs the daemon, srv's own or the
+// brew services one.
+func IsInstalled() bool {
+	sup, err := ActiveSupervisor()
+	return err != nil || sup != SupervisorNone
+}
+
+// Install installs srv's own unit and starts the daemon. It refuses when
+// brew services already supervises the daemon, since a second unit would
+// race it.
 func Install() error {
+	brewUnit, err := unitFor(SupervisorBrew)
+	if err != nil {
+		return err
+	}
+	if brewUnit.installed() {
+		return fmt.Errorf("%w (%s); not installing a second unit that would race it", ErrSupervisedByBrew, brewUnit.path)
+	}
 	switch {
 	case platform.IsLinux():
 		return installSystemd()
-	case platform.IsDarwin():
+	default:
 		return installLaunchd()
-	default:
-		return platform.UnsupportedError("daemon installation")
 	}
 }
 
-// Uninstall removes the daemon system service.
+// Uninstall removes srv's own unit. A daemon that only brew services runs is
+// not srv's to remove, so that case returns ErrSupervisedByBrew; with both
+// installed, removing srv's unit resolves the conflict.
 func Uninstall() error {
-	switch {
-	case platform.IsLinux():
-		return uninstallSystemd()
-	case platform.IsDarwin():
-		return uninstallLaunchd()
-	default:
-		return platform.UnsupportedError("daemon uninstall")
+	srvUnit, err := unitFor(SupervisorSrv)
+	if err != nil {
+		return err
 	}
-}
-
-// Restart restarts the daemon service.
-func Restart() error {
-	switch {
-	case platform.IsLinux():
-		return restartSystemd()
-	case platform.IsDarwin():
-		return restartLaunchd()
-	default:
-		return platform.UnsupportedError("daemon restart")
-	}
-}
-
-// stopService stops the daemon service without uninstalling it.
-func stopService() error {
-	switch {
-	case platform.IsLinux():
-		return shell.Run("systemctl", "--user", "stop", SystemdServiceName)
-	case platform.IsDarwin():
-		plistPath, err := launchdPlistPath()
+	if !srvUnit.installed() {
+		brewUnit, err := unitFor(SupervisorBrew)
 		if err != nil {
 			return err
 		}
-		return shell.Run("launchctl", "unload", plistPath)
-	default:
-		return platform.UnsupportedError("daemon stop")
+		if brewUnit.installed() {
+			return fmt.Errorf("%w (%s); remove it with 'brew services stop srv'", ErrSupervisedByBrew, brewUnit.path)
+		}
 	}
+	switch {
+	case platform.IsLinux():
+		return uninstallSystemd()
+	default:
+		return uninstallLaunchd()
+	}
+}
+
+// Restart restarts the daemon through whichever unit runs it.
+func Restart() error {
+	u, err := activeUnit()
+	if err != nil {
+		return err
+	}
+	if platform.IsLinux() {
+		return restartSystemd(u)
+	}
+	return restartLaunchd(u)
+}
+
+// stopService stops the daemon without uninstalling its unit.
+func stopService() error {
+	u, err := activeUnit()
+	if err != nil {
+		return err
+	}
+	if platform.IsLinux() {
+		return shell.Run("systemctl", "--user", "stop", u.name)
+	}
+	return shell.Run("launchctl", "unload", u.path)
 }
 
 // =============================================================================
@@ -135,15 +275,6 @@ func systemdServicePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, SystemdUserDir, SystemdServiceName), nil
-}
-
-func isSystemdInstalled() bool {
-	path, err := systemdServicePath()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(path)
-	return err == nil
 }
 
 func installSystemd() error {
@@ -228,16 +359,16 @@ func uninstallSystemd() error {
 	return nil
 }
 
-func restartSystemd() error {
-	if err := shell.Run("systemctl", "--user", "restart", SystemdServiceName); err != nil {
-		return fmt.Errorf("failed to restart service: %w", err)
+func restartSystemd(u unit) error {
+	if err := shell.Run("systemctl", "--user", "restart", u.name); err != nil {
+		return fmt.Errorf("failed to restart service %s: %w", u.name, err)
 	}
 	return nil
 }
 
-// GetSystemdStatus returns the status of the systemd service.
-func GetSystemdStatus() (string, error) {
-	output, err := shell.RunQuiet("systemctl", "--user", "is-active", SystemdServiceName)
+// systemdStatus returns the state systemd reports for unit u.
+func systemdStatus(u unit) (string, error) {
+	output, err := shell.RunQuiet("systemctl", "--user", "is-active", u.name)
 	if err != nil {
 		return "inactive", nil //nolint:nilerr // exit code from systemctl signals state, not a failure to query
 	}
@@ -289,7 +420,7 @@ func renderLaunchdPlist(executable, logPath string) string {
 	}
 	w("    </dict>\n")
 	w("    <key>KeepAlive</key>\n    <dict>\n        <key>SuccessfulExit</key>\n        <false/>\n    </dict>\n")
-	key("Label", "dev.stubbe.srv-daemon")
+	key("Label", LaunchdLabel)
 	w("    <key>ProgramArguments</key>\n    <array>\n")
 	for _, arg := range []string{executable, "daemon", "start", "--foreground"} {
 		w("        <string>%s</string>\n", plistEscape(arg))
@@ -320,15 +451,6 @@ func launchdPlistPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, LaunchAgentsDir, LaunchdPlistName), nil
-}
-
-func isLaunchdInstalled() bool {
-	path, err := launchdPlistPath()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(path)
-	return err == nil
 }
 
 func installLaunchd() error {
@@ -400,23 +522,18 @@ func uninstallLaunchd() error {
 	return nil
 }
 
-func restartLaunchd() error {
-	plistPath, err := launchdPlistPath()
-	if err != nil {
-		return err
-	}
-
+func restartLaunchd(u unit) error {
 	// Unload and reload
-	_ = shell.Run("launchctl", "unload", plistPath)
-	if err := shell.Run("launchctl", "load", plistPath); err != nil {
-		return fmt.Errorf("failed to restart service: %w", err)
+	_ = shell.Run("launchctl", "unload", u.path)
+	if err := shell.Run("launchctl", "load", u.path); err != nil {
+		return fmt.Errorf("failed to restart service %s: %w", u.name, err)
 	}
 	return nil
 }
 
-// GetLaunchdStatus returns the status of the launchd service.
-func GetLaunchdStatus() (string, error) {
-	output, err := shell.RunQuiet("launchctl", "list", "dev.stubbe.srv-daemon")
+// launchdStatus returns the state launchd reports for unit u.
+func launchdStatus(u unit) (string, error) {
+	output, err := shell.RunQuiet("launchctl", "list", u.name)
 	if err != nil {
 		return "not loaded", nil //nolint:nilerr // launchctl errors when the service isn't loaded
 	}
@@ -428,28 +545,35 @@ func GetLaunchdStatus() (string, error) {
 	return "loaded", nil
 }
 
-// ServicePath returns the path to the service file for the current OS.
-// Returns an error on unsupported platforms or when the home directory
-// cannot be resolved — callers should not blindly pass an empty string to os.Stat.
+// ServicePath returns the file of the unit that runs the daemon. It fails
+// when no unit is installed, when two are, or on an unsupported platform, so
+// callers never stat an empty path.
 func ServicePath() (string, error) {
-	switch {
-	case platform.IsLinux():
-		return systemdServicePath()
-	case platform.IsDarwin():
-		return launchdPlistPath()
-	default:
-		return "", platform.UnsupportedError("service management")
+	u, err := activeUnit()
+	if err != nil {
+		return "", err
 	}
+	return u.path, nil
 }
 
-// ServiceStatus returns the status of the daemon service.
+// ServiceStatus returns the state the service manager reports for the unit
+// that runs the daemon: "not installed" without one, an error with two.
 func ServiceStatus() (string, error) {
+	sup, err := ActiveSupervisor()
 	switch {
-	case platform.IsLinux():
-		return GetSystemdStatus()
-	case platform.IsDarwin():
-		return GetLaunchdStatus()
-	default:
+	case err != nil:
+		return "", err
+	case !platform.IsLinux() && !platform.IsDarwin():
 		return "unsupported", nil
+	case sup == SupervisorNone:
+		return "not installed", nil
 	}
+	u, err := unitFor(sup)
+	if err != nil {
+		return "", err
+	}
+	if platform.IsLinux() {
+		return systemdStatus(u)
+	}
+	return launchdStatus(u)
 }

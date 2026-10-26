@@ -109,8 +109,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if len(sites) > 0 {
 		totalSteps++
 	}
-	// Add step for daemon installation
-	needDaemon := !daemon.IsInstalled()
+	// Add step for daemon installation. A daemon that `brew services` already
+	// supervises is left to brew: a second unit would race it.
+	supervisor, supervisorErr := daemon.ActiveSupervisor()
+	needDaemon := supervisorErr == nil && supervisor == daemon.SupervisorNone
 	if needDaemon {
 		totalSteps++
 	}
@@ -223,6 +225,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 5: Install daemon service
+	switch {
+	case supervisorErr != nil:
+		ui.Warn("%v", supervisorErr)
+	case supervisor == daemon.SupervisorBrew:
+		ui.Dim("The daemon runs under 'brew services'; leaving it to brew")
+	}
 	if needDaemon {
 		steps.Next("Installing daemon service")
 		if err := daemon.Install(); err != nil {

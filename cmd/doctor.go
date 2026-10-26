@@ -15,6 +15,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/daemon"
 	"github.com/stubbedev/srv/internal/docker"
 	"github.com/stubbedev/srv/internal/engine"
 	"github.com/stubbedev/srv/internal/firewall"
@@ -71,6 +72,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	issues += engineIssues
 	issues += checkFirewall()
 	issues += checkPorts(engineUp)
+	issues += checkDaemonService()
 
 	// Every check below asks the runtime's API something. Against an
 	// unreachable endpoint each one waits out its own timeout and then reports
@@ -368,6 +370,26 @@ func checkTraefik() int {
 	ui.IndentedDim(1, "Run 'srv install' to start")
 	ui.Blank()
 	return 1
+}
+
+// checkDaemonService reports which service-manager unit runs the daemon, and
+// flags the double install (srv's unit next to brew services') whose two
+// daemons race over the single-instance lock.
+func checkDaemonService() int {
+	ui.Bold("Daemon service")
+	defer ui.Blank()
+	sup, err := daemon.ActiveSupervisor()
+	switch {
+	case err != nil:
+		ui.IndentedWarn(1, "%v", err)
+		return 1
+	case sup == daemon.SupervisorNone:
+		ui.IndentedDim(1, "Not installed — 'srv daemon install' (or 'srv install') starts the daemon at login")
+		return 0
+	default:
+		ui.IndentedSuccess(1, "Installed via %s", sup)
+		return 0
+	}
 }
 
 // checkDNS verifies DNS server status and configuration.

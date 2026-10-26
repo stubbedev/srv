@@ -104,6 +104,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 			ui.Warn("Failed to remove daemon service: %v", err)
 		} else {
 			ui.Success("Daemon service removed")
+			if sup, err := daemon.ActiveSupervisor(); err == nil && sup == daemon.SupervisorBrew {
+				ui.Warn("The daemon still runs under 'brew services'; stop it with 'brew services stop srv'")
+			}
 		}
 	} else if daemon.IsRunning() {
 		// Daemon running but not as service, stop it

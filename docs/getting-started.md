@@ -24,9 +24,10 @@ standalone tool), and DNS is an embedded resolver in the daemon on
     brew install stubbedev/tap/srv
     ```
 
-    The formula covers linux amd64/arm64 and darwin arm64. Don't also
-    run `brew services start srv`: `srv install` sets up its own daemon
-    service, and two supervisor units race over the same job.
+    The formula covers linux amd64/arm64 and darwin arm64. `srv install`
+    sets up the daemon as a login service; to have Homebrew supervise it
+    instead, run `brew services start srv` first and srv leaves the
+    daemon to brew.
 
 === "Install script"
 

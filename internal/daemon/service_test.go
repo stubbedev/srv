@@ -45,43 +45,12 @@ func TestLaunchdPlistPath(t *testing.T) {
 	}
 }
 
-func TestIsSystemdInstalledMissing(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if isSystemdInstalled() {
-		t.Error("expected false")
-	}
-}
-
-func TestIsSystemdInstalledPresent(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	servicePath, _ := systemdServicePath()
-	if err := os.MkdirAll(filepath.Dir(servicePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(servicePath, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !isSystemdInstalled() {
-		t.Error("expected true")
-	}
-}
-
-func TestIsLaunchdInstalledMissing(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if isLaunchdInstalled() {
-		t.Error("expected false")
-	}
-}
-
 func TestServicePathLinux(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("Linux-only path")
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := tempHome(t)
+	installUnit(t, SupervisorSrv)
 	got, err := ServicePath()
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +65,8 @@ func TestServiceStatusLinuxActive(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("Linux-only path")
 	}
+	tempHome(t)
+	installUnit(t, SupervisorSrv)
 	swapShell(t, shelltest.New(map[string]shelltest.Response{
 		"systemctl": {Out: []byte("active\n")},
 	}))
@@ -112,6 +83,8 @@ func TestServiceStatusLinuxInactive(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("Linux-only path")
 	}
+	tempHome(t)
+	installUnit(t, SupervisorSrv)
 	swapShell(t, shelltest.New(map[string]shelltest.Response{
 		"systemctl": {Err: errors.New("exit code 3")},
 	}))
@@ -128,6 +101,8 @@ func TestRestartLinux(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("Linux-only")
 	}
+	tempHome(t)
+	installUnit(t, SupervisorSrv)
 	swapShell(t, shelltest.New(nil))
 	if err := Restart(); err != nil {
 		t.Errorf("err: %v", err)
@@ -138,6 +113,8 @@ func TestRestartLinuxErr(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("Linux-only")
 	}
+	tempHome(t)
+	installUnit(t, SupervisorSrv)
 	swapShell(t, shelltest.New(map[string]shelltest.Response{
 		"systemctl": {Err: errors.New("fail")},
 	}))
@@ -259,6 +236,8 @@ func TestStopServiceLinux(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("linux only")
 	}
+	tempHome(t)
+	installUnit(t, SupervisorSrv)
 	swapShell(t, shelltest.New(nil))
 	if err := stopService(); err != nil {
 		t.Errorf("err: %v", err)
@@ -269,8 +248,8 @@ func TestServicePathLinuxResolves(t *testing.T) {
 	if !platform.IsLinux() {
 		t.Skip("linux only")
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	tempHome(t)
+	installUnit(t, SupervisorSrv)
 	_, err := ServicePath()
 	if err != nil {
 		t.Errorf("err: %v", err)
@@ -322,10 +301,8 @@ func TestUninstallLaunchd(t *testing.T) {
 }
 
 func TestRestartLaunchd(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
 	swapShell(t, shelltest.New(nil))
-	if err := restartLaunchd(); err != nil {
+	if err := restartLaunchd(unit{path: "/x/dev.stubbe.srv-daemon.plist", name: LaunchdLabel}); err != nil {
 		t.Errorf("err: %v", err)
 	}
 }
@@ -334,7 +311,7 @@ func TestGetLaunchdStatusNotLoaded(t *testing.T) {
 	swapShell(t, shelltest.New(map[string]shelltest.Response{
 		"launchctl": {Err: errors.New("not loaded")},
 	}))
-	status, err := GetLaunchdStatus()
+	status, err := launchdStatus(unit{name: LaunchdLabel})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +324,7 @@ func TestGetLaunchdStatusRunning(t *testing.T) {
 	swapShell(t, shelltest.New(map[string]shelltest.Response{
 		"launchctl": {Out: []byte(`{"PID" = 1234;}`)},
 	}))
-	status, err := GetLaunchdStatus()
+	status, err := launchdStatus(unit{name: LaunchdLabel})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +337,7 @@ func TestGetLaunchdStatusLoaded(t *testing.T) {
 	swapShell(t, shelltest.New(map[string]shelltest.Response{
 		"launchctl": {Out: []byte(`{"Label" = "x";}`)},
 	}))
-	status, err := GetLaunchdStatus()
+	status, err := launchdStatus(unit{name: LaunchdLabel})
 	if err != nil {
 		t.Fatal(err)
 	}

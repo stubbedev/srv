@@ -173,18 +173,21 @@ func runDaemonStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Check if installed as service
-	if daemon.IsInstalled() {
+	sup, supErr := daemon.ActiveSupervisor()
+	switch {
+	case supErr != nil:
+		ui.Warn("%v", supErr)
+	case sup == daemon.SupervisorNone:
+		ui.Print("Service:  not installed")
+	default:
 		status, err := daemon.ServiceStatus()
 		if err != nil {
 			status = "unknown"
 		}
-		ui.Print("Service:  installed (%s)", status)
+		ui.Print("Service:  installed via %s (%s)", sup, status)
 		if path, err := daemon.ServicePath(); err == nil {
 			ui.Print("Location: %s", path)
 		}
-	} else {
-		ui.Print("Service:  not installed")
 	}
 
 	ui.Blank()
@@ -290,9 +293,18 @@ func init() {
 }
 
 func runDaemonInstall(cmd *cobra.Command, args []string) error {
-	if daemon.IsInstalled() {
+	sup, err := daemon.ActiveSupervisor()
+	if err != nil {
+		return err
+	}
+	switch sup {
+	case daemon.SupervisorSrv:
 		ui.Warn("Daemon service is already installed")
 		ui.Dim("Use 'srv daemon uninstall' to remove it first")
+		return nil
+	case daemon.SupervisorBrew:
+		ui.Warn("The daemon already runs under 'brew services'")
+		ui.Dim("Keep it there, or run 'brew services stop srv' first to let srv install its own service")
 		return nil
 	}
 
