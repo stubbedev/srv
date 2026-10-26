@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/stubbedev/srv/internal/config"
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/engine"
+	"github.com/stubbedev/srv/internal/mkcert"
 	"github.com/stubbedev/srv/internal/ops"
 	"github.com/stubbedev/srv/internal/traefik"
 )
@@ -140,6 +142,7 @@ func NewRoot(t *testing.T) string {
 func TraefikUp(t *testing.T, root string) {
 	t.Helper()
 
+	ensureLocalCA(t)
 	if err := traefik.EnsureConfig(""); err != nil {
 		t.Fatalf("traefik.EnsureConfig: %v", err)
 	}
@@ -171,6 +174,18 @@ func TraefikUp(t *testing.T, root string) {
 		}
 		_ = exec.CommandContext(context.WithoutCancel(t.Context()), eng.Binary, "network", "rm", cfg.NetworkName).Run()
 	})
+}
+
+// ensureLocalCA creates the local CA under $CAROOT, the state `srv install`
+// leaves behind, by issuing a throwaway certificate. It does not enrol the CA
+// in any trust store; without it, the first `srv proxy add` of a run would
+// try to sudo-install the CA into the system trust store.
+func ensureLocalCA(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := mkcert.IssueCert(filepath.Join(dir, "ca-probe.pem"), filepath.Join(dir, "ca-probe-key.pem"), []string{"ca-probe.test"}); err != nil {
+		t.Fatalf("create the local CA: %v", err)
+	}
 }
 
 // RunSrv invokes the built srv binary with SRV_ROOT pinned to root and the
