@@ -84,7 +84,7 @@ type SiteMetadata struct {
 	Wildcard           bool          `jsonschema:"description=Match apex + one-level subdomains (*.example.com)."                                                 yaml:"wildcard,omitempty"`
 	NetworkName        string        `jsonschema:"description=Docker network the site joins."                                                                     yaml:"network_name"`
 	ExtraNetworks      []string      `jsonschema:"description=Extra external Docker networks the site joins (for reaching user-managed containers like mysql01)." yaml:"extra_networks,omitempty"`
-	Volumes            []VolumeMount `jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile, TEMP dirs)."          yaml:"volumes,omitempty"`
+	Volumes            []VolumeMount `jsonschema:"description=Extra host bind-mounts attached to the site's container (e.g. ~/.nix-profile\\, TEMP dirs)."        yaml:"volumes,omitempty"`
 	Listeners          []string      `jsonschema:"description=Extra Traefik entrypoints (e.g. 'internal' for plain HTTP on :88)."                                 yaml:"listeners,omitempty"`
 	Routes             []Route       `jsonschema:"description=Extra Traefik routers (path-prefix / regex-rewrite splits)."                                        yaml:"routes,omitempty"`
 	// Static site options
