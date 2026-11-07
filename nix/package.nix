@@ -28,8 +28,8 @@
             );
           };
 
-          # go-sum: a971dda0df1422ed5d7e661e0eaf4f5b9a76472303b6aa5f7486ee9a4d8dfe29
-          vendorHash = "sha256-mCOLS+2PsPt5KVfSg1lMwmzkyeptISMqpaLR3vDM4iQ=";
+          # go-sum: 3c191d7d19b6f27af64e59a91342894c31dd2a0fcbb9dba930934df8e64dfd0e
+          vendorHash = "sha256-RtvqGCLvp7cuf2sBl6jSHhko3vzpyCd8K/663tPiD3w=";
 
           ldflags = [
             "-s"
