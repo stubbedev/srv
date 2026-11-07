@@ -34,8 +34,6 @@ jobs:
         engine: [docker, podman]
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       # e2e/run.sh keeps the Go module and build caches under .e2e/.
       - uses: actions/cache@v6
