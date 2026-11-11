@@ -38,16 +38,16 @@ func TestCheckMkcertNoCAROOT(t *testing.T) {
 	}
 }
 
-func TestIsCAInstalledTracksRootCAFile(t *testing.T) {
+func TestCAExistsTracksRootCAFile(t *testing.T) {
 	caroot := t.TempDir()
 	t.Setenv("CAROOT", caroot)
-	if IsCAInstalled() {
+	if CAExists() {
 		t.Error("empty CAROOT should not count as installed")
 	}
 	if err := os.WriteFile(filepath.Join(caroot, "rootCA.pem"), []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !IsCAInstalled() {
+	if !CAExists() {
 		t.Error("existing rootCA.pem should count as installed")
 	}
 }

@@ -286,6 +286,7 @@ func (stubEngine) Install() (InstallResult, error) {
 	return InstallResult{}, errors.New("not implemented")
 }
 func (stubEngine) Uninstall() error                         { return errors.New("not implemented") }
+func (stubEngine) SystemTrusted() (bool, error)             { return false, errors.New("not implemented") }
 func (stubEngine) IssueCert(string, string, []string) error { return errors.New("not implemented") }
 
 func TestStoreEnabled(t *testing.T) {
@@ -335,4 +336,39 @@ func readCert(t *testing.T, path string) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return cert
+}
+
+func TestLoadExistingCADoesNotCreateOne(t *testing.T) {
+	carootSandbox(t)
+	if _, err := loadExistingCA(); !errors.Is(err, ErrNoCA) {
+		t.Fatalf("loadExistingCA() error = %v, want ErrNoCA", err)
+	}
+	if pathExists(filepath.Join(CAROOT(), rootName)) {
+		t.Error("loadExistingCA created a CA")
+	}
+}
+
+func TestSystemTrustedWithoutCA(t *testing.T) {
+	carootSandbox(t)
+	trusted, err := SystemTrusted()
+	if !errors.Is(err, ErrNoCA) {
+		t.Fatalf("SystemTrusted() error = %v, want ErrNoCA", err)
+	}
+	if trusted {
+		t.Error("SystemTrusted() = true without a CA")
+	}
+}
+
+func TestSystemTrustedFreshCAIsUntrusted(t *testing.T) {
+	carootSandbox(t)
+	if _, err := loadCA(); err != nil {
+		t.Fatal(err)
+	}
+	trusted, err := SystemTrusted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted {
+		t.Error("a CA generated in a sandbox cannot verify against the system trust pool")
+	}
 }

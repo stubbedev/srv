@@ -56,6 +56,7 @@ type stubMkcertEngine struct {
 	installRes mkcert.InstallResult
 	installErr error
 	issueErr   error
+	untrusted  bool
 }
 
 func (s *stubMkcertEngine) Available() bool { return true }
@@ -72,6 +73,8 @@ func (s *stubMkcertEngine) Install() (mkcert.InstallResult, error) {
 }
 
 func (s *stubMkcertEngine) Uninstall() error { return nil }
+
+func (s *stubMkcertEngine) SystemTrusted() (bool, error) { return !s.untrusted, nil }
 
 func (s *stubMkcertEngine) IssueCert(certPath, keyPath string, domains []string) error {
 	if s.issueErr != nil {

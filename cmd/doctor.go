@@ -517,8 +517,9 @@ func checkCertificates() int {
 
 	ui.IndentedSuccess(1, "local TLS engine ready (mkcert vendored)")
 
-	if traefik.IsCAInstalled() {
+	if traefik.CAExists() {
 		ui.IndentedSuccess(1, "local CA created (%s)", mkcert.CAROOT())
+		issues += checkCATrust()
 	} else {
 		ui.IndentedWarn(1, "local CA not created yet")
 		ui.IndentedDim(1, "CA will be created and trusted on first 'srv install' or 'srv add --local'")
@@ -529,6 +530,23 @@ func checkCertificates() int {
 
 	ui.Blank()
 	return issues
+}
+
+func checkCATrust() int {
+	trusted, err := mkcert.SystemTrusted()
+	switch {
+	case err != nil:
+		ui.IndentedWarn(1, "could not check the local CA against the system trust store")
+		ui.IndentedDim(1, "%v", err)
+		return 1
+	case !trusted:
+		ui.IndentedWarn(1, "local CA is not trusted by the system trust store")
+		ui.IndentedDim(1, "Run 'srv install' to enroll it")
+		return 1
+	default:
+		ui.IndentedSuccess(1, "local CA trusted by the system trust store")
+		return 0
+	}
 }
 
 // checkCertificateExpiry checks for expired or expiring certificates.

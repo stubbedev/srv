@@ -277,3 +277,30 @@ func TestCheckUserConfigReportsInvalidValues(t *testing.T) {
 		t.Errorf("checkUserConfig() = %d for an invalid config, want 1", issues)
 	}
 }
+
+func TestCheckCATrustTrusted(t *testing.T) {
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{}))
+	if issues := checkCATrust(); issues != 0 {
+		t.Errorf("trusted CA: got %d issues, want 0", issues)
+	}
+}
+
+func TestCheckCATrustUntrusted(t *testing.T) {
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{untrusted: true}))
+	if issues := checkCATrust(); issues != 1 {
+		t.Errorf("untrusted CA: got %d issues, want 1", issues)
+	}
+}
+
+func TestCheckCertificatesCountsAnExistingUntrustedCA(t *testing.T) {
+	setupSrvRoot(t)
+	caroot := t.TempDir()
+	t.Setenv("CAROOT", caroot)
+	if err := os.WriteFile(filepath.Join(caroot, constants.RootCAFile), []byte("existing CA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mkcert.SwapEngine(&stubMkcertEngine{untrusted: true}))
+	if issues := checkCertificates(); issues != 1 {
+		t.Errorf("CA exists but is untrusted: got %d issues, want 1", issues)
+	}
+}

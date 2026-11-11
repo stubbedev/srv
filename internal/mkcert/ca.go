@@ -63,52 +63,83 @@ func (ca *localCA) path(name string) string {
 	return filepath.Join(ca.caroot, name)
 }
 
+// ErrNoCA is returned when an operation needs the local CA and none has been
+// created yet.
+var ErrNoCA = errors.New("no local CA has been created yet")
+
 // loadCA loads the local CA from CAROOT, creating it when absent. A CA
 // without a key is valid in install-only (keyless) mode, mirroring upstream.
 func loadCA() (*localCA, error) {
-	ca := &localCA{caroot: CAROOT()}
-	if ca.caroot == "" {
-		return nil, errors.New("failed to find the default CA location, set one as the CAROOT env var")
+	ca, err := newLocalCA()
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(ca.caroot, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create the CA directory: %w", err)
 	}
-
 	if !pathExists(ca.path(rootName)) {
 		if err := ca.newCA(); err != nil {
 			return nil, err
 		}
 		ca.created = true
 	}
+	if err := ca.read(); err != nil {
+		return nil, err
+	}
+	return ca, nil
+}
 
+func loadExistingCA() (*localCA, error) {
+	ca, err := newLocalCA()
+	if err != nil {
+		return nil, err
+	}
+	if !pathExists(ca.path(rootName)) {
+		return nil, ErrNoCA
+	}
+	if err := ca.read(); err != nil {
+		return nil, err
+	}
+	return ca, nil
+}
+
+func newLocalCA() (*localCA, error) {
+	ca := &localCA{caroot: CAROOT()}
+	if ca.caroot == "" {
+		return nil, errors.New("failed to find the default CA location, set one as the CAROOT env var")
+	}
+	return ca, nil
+}
+
+func (ca *localCA) read() error {
 	certPEM, err := os.ReadFile(ca.path(rootName))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read the CA certificate: %w", err)
+		return fmt.Errorf("failed to read the CA certificate: %w", err)
 	}
 	certDER, _ := pem.Decode(certPEM)
 	if certDER == nil || certDER.Type != "CERTIFICATE" {
-		return nil, errors.New("failed to read the CA certificate: unexpected content")
+		return errors.New("failed to read the CA certificate: unexpected content")
 	}
 	if ca.caCert, err = x509.ParseCertificate(certDER.Bytes); err != nil {
-		return nil, fmt.Errorf("failed to parse the CA certificate: %w", err)
+		return fmt.Errorf("failed to parse the CA certificate: %w", err)
 	}
 
 	if !pathExists(ca.path(rootKeyName)) {
-		return ca, nil // keyless mode, where only -install works
+		return nil // keyless mode, where only -install works
 	}
 
 	keyPEM, err := os.ReadFile(ca.path(rootKeyName))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read the CA key: %w", err)
+		return fmt.Errorf("failed to read the CA key: %w", err)
 	}
 	keyDER, _ := pem.Decode(keyPEM)
 	if keyDER == nil || keyDER.Type != "PRIVATE KEY" {
-		return nil, errors.New("failed to read the CA key: unexpected content")
+		return errors.New("failed to read the CA key: unexpected content")
 	}
 	if ca.caKey, err = x509.ParsePKCS8PrivateKey(keyDER.Bytes); err != nil {
-		return nil, fmt.Errorf("failed to parse the CA key: %w", err)
+		return fmt.Errorf("failed to parse the CA key: %w", err)
 	}
-	return ca, nil
+	return nil
 }
 
 // newCA generates and stores a fresh local CA. The key is RSA-3072 and the

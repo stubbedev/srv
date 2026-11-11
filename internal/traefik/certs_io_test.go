@@ -162,18 +162,18 @@ func TestRemoveLocalCertsKeyRemoveErrors(t *testing.T) {
 	}
 }
 
-func TestIsCAInstalledNoCAROOTFile(t *testing.T) {
+func TestCAExistsNoCAROOTFile(t *testing.T) {
 	t.Setenv("CAROOT", t.TempDir())
-	if IsCAInstalled() {
+	if CAExists() {
 		t.Error("CA file missing → expected false")
 	}
 }
 
-func TestIsCAInstalledEmptyCAROOT(t *testing.T) {
+func TestCAExistsEmptyCAROOT(t *testing.T) {
 	t.Setenv("CAROOT", "")
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
-	if IsCAInstalled() {
+	if CAExists() {
 		t.Error("empty CAROOT → expected false")
 	}
 }

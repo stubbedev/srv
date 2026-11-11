@@ -31,6 +31,10 @@ type Engine interface {
 	// Uninstall removes the local CA from the trust stores (it does not
 	// delete the CA files).
 	Uninstall() error
+	// SystemTrusted reports whether the existing local CA verifies against
+	// the system trust pool. It never creates a CA: with none yet it returns
+	// ErrNoCA.
+	SystemTrusted() (bool, error)
 	// IssueCert issues a certificate for domains (hostnames, wildcards, IPs)
 	// at the given PEM paths.
 	IssueCert(certPath, keyPath string, domains []string) error
@@ -65,6 +69,10 @@ func Install() (InstallResult, error) { return engine.Install() }
 // deleting the CA files.
 func Uninstall() error { return engine.Uninstall() }
 
+// SystemTrusted reports whether the existing local CA verifies against the
+// system trust pool, returning ErrNoCA when no CA has been created yet.
+func SystemTrusted() (bool, error) { return engine.SystemTrusted() }
+
 // IssueCert issues a certificate for domains at the given PEM paths,
 // creating the local CA first if needed.
 func IssueCert(certPath, keyPath string, domains []string) error {
@@ -82,6 +90,14 @@ func (systemEngine) Install() (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	return ca.install()
+}
+
+func (systemEngine) SystemTrusted() (bool, error) {
+	ca, err := loadExistingCA()
+	if err != nil {
+		return false, err
+	}
+	return ca.checkPlatform(), nil
 }
 
 func (systemEngine) Uninstall() error {

@@ -211,10 +211,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		steps.Skip("Dashboard proxy skipped (local CA unavailable)")
 		ui.Dim("%v — needed to enable %s", err, traefik.DashboardLocalURL())
 	} else {
-		if !traefik.IsCAInstalled() {
-			if err := installCAWithRetry(); err != nil {
-				return err
-			}
+		if err := installCAWithRetry(); err != nil {
+			return err
 		}
 		if err := traefik.SetupDashboardProxy(); err != nil {
 			ui.Warn("Failed to set up dashboard proxy: %v", err)

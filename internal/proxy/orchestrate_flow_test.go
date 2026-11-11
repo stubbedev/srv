@@ -32,6 +32,8 @@ func (m *mkcertStub) Install() (mkcert.InstallResult, error) {
 
 func (m *mkcertStub) Uninstall() error { return nil }
 
+func (m *mkcertStub) SystemTrusted() (bool, error) { return true, nil }
+
 func (m *mkcertStub) IssueCert(certPath, keyPath string, domains []string) error {
 	if m.issueErr != nil {
 		return m.issueErr

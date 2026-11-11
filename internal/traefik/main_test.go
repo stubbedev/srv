@@ -88,6 +88,8 @@ func (s *stubMkcertEngine) Install() (mkcert.InstallResult, error) {
 
 func (s *stubMkcertEngine) Uninstall() error { return nil }
 
+func (s *stubMkcertEngine) SystemTrusted() (bool, error) { return true, nil }
+
 func (s *stubMkcertEngine) IssueCert(certPath, keyPath string, domains []string) error {
 	if s.issueErr != nil {
 		return s.issueErr

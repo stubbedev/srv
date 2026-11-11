@@ -37,8 +37,9 @@ func CheckMkcert() error {
 	return nil
 }
 
-// IsCAInstalled checks if the mkcert CA has been created locally.
-func IsCAInstalled() bool {
+// CAExists reports whether the local CA has been created (its certificate
+// file exists). It says nothing about trust; see mkcert.SystemTrusted.
+func CAExists() bool {
 	caRoot := mkcert.CAROOT()
 	if caRoot == "" {
 		return false
@@ -170,7 +171,7 @@ func EnsureResourceCert(siteName, domain string, wildcard bool) (renewed bool, e
 	if err := CheckMkcert(); err != nil {
 		return false, err
 	}
-	if !IsCAInstalled() {
+	if !CAExists() {
 		if _, err := InstallCA(); err != nil {
 			return false, fmt.Errorf("failed to install mkcert CA: %w", err)
 		}

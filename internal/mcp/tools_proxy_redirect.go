@@ -13,16 +13,16 @@ import (
 	"github.com/stubbedev/srv/internal/traefik"
 )
 
-// caNotInstalledErr is returned by add tools when the mkcert CA is missing and
+// caNotInstalledMsg is returned by add tools when the mkcert CA is missing and
 // sudo cannot run non-interactively — installing the CA needs a password the
 // MCP server cannot prompt for.
 const caNotInstalledMsg = "mkcert CA is not installed and installing it needs sudo, which this MCP server cannot prompt for. Run `srv install` (or `mkcert -install`) once in a terminal, then retry."
 
 // requireCAForLocalCert guards add tools that must issue a local cert: if the
-// CA is already installed, the cert can be issued without sudo; otherwise, only
+// CA already exists, the cert can be issued without sudo; otherwise, only
 // proceed when sudo is functional non-interactively.
 func requireCAForLocalCert() error {
-	if traefik.IsCAInstalled() {
+	if traefik.CAExists() {
 		return nil
 	}
 	if shell.SudoFunctional() {

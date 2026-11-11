@@ -423,7 +423,7 @@ func issueLocalCert(siteName string, domains []string, wildcard bool) (warnings 
 	if err := traefik.CheckMkcert(); err != nil {
 		return append(warnings, fmt.Sprintf("mkcert unavailable, local HTTPS will not work: %v", err))
 	}
-	if !traefik.IsCAInstalled() {
+	if !traefik.CAExists() {
 		if _, err := traefik.InstallCA(); err != nil {
 			return append(warnings, fmt.Sprintf("install mkcert CA: %v", err))
 		}

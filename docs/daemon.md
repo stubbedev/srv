@@ -61,7 +61,8 @@ srv doctor [--fix-perms]
 the firewall, port availability (80, 443, 8080), which unit supervises the
 daemon (and whether two do), the srv Docker network,
 the Traefik container, srv's DNS server and whether the system resolver
-routes to it, local certificate validity and expiry, every site's
+routes to it, whether the local CA is trusted by the system trust store,
+local certificate validity and expiry, every site's
 metadata, `.env` files of container sites that point at the host
 loopback, and the ownership of `~/.config/srv`. `--fix-perms` runs
 `sudo chown -R` to repair root-owned files.

@@ -8,6 +8,11 @@ for what it finds. See [Doctor](daemon.md#doctor) for the full list.
 Restart the browser after adding the first local site. The CA is
 installed system-wide, but browsers only pick it up on restart.
 
+When `curl`, Node or PHP reject it, the local CA is not in the system
+trust store, which `srv doctor` reports. `srv install` enrolls it,
+including a CA srv did not create itself, such as one copied in from
+another machine.
+
 ## The site is not reachable
 
 ```sh
