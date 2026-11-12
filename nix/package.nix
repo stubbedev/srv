@@ -2,6 +2,7 @@
 {
   perSystem =
     {
+      inputs',
       lib,
       pkgs,
       self',
@@ -12,9 +13,7 @@
     in
     {
       packages = {
-        # nixpkgs' default `go` still trails the toolchain in go.mod, so the
-        # builder is pinned to the same major the module declares.
-        srv = (pkgs.buildGoModule.override { go = pkgs.go_1_27; }) {
+        srv = (pkgs.buildGoModule.override { go = inputs'.devtools.packages.go; }) {
           pname = "srv";
           inherit version;
           src = lib.fileset.toSource {
