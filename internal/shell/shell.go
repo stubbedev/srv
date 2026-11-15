@@ -84,16 +84,24 @@ func SwapAttachedOutput(w io.Writer) func() {
 // from any surface that cannot service a password prompt (the MCP server).
 func SetNonInteractive(v bool) { nonInteractive = v }
 
-// IsNonInteractive reports whether sudo is in non-interactive mode.
-func IsNonInteractive() bool { return nonInteractive }
-
-// sudoArgs prepends -n to the sudo argument list when non-interactive mode is
-// on, so the call returns an error instead of prompting for a password.
-func sudoArgs(args []string) []string {
-	if nonInteractive {
-		return append([]string{"-n"}, args...)
+// SudoArgs returns the sudo argument list for args, led by -n in non-interactive mode.
+func SudoArgs(args ...string) []string {
+	if !nonInteractive {
+		return args
 	}
-	return args
+	out := make([]string, 0, len(args)+1)
+	out = append(out, "-n")
+	return append(out, args...)
+}
+
+// HasControllingTerminal reports whether this process can open its controlling terminal.
+func HasControllingTerminal() bool {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	_ = tty.Close()
+	return true
 }
 
 // SudoFunctional reports whether sudo can run without prompting right now
@@ -203,10 +211,10 @@ func (OSRunner) RunWithStdin(stdin string, name string, args ...string) error {
 	return cmd.Run()
 }
 
-func (r OSRunner) SudoRun(args ...string) error { return r.Run("sudo", sudoArgs(args)...) }
+func (r OSRunner) SudoRun(args ...string) error { return r.Run("sudo", SudoArgs(args...)...) }
 
 func (r OSRunner) SudoRunQuiet(args ...string) ([]byte, error) {
-	return r.RunQuiet("sudo", sudoArgs(args)...)
+	return r.RunQuiet("sudo", SudoArgs(args...)...)
 }
 
 func (r OSRunner) SudoWrite(path, content string) error {
@@ -219,7 +227,7 @@ func (r OSRunner) SudoWrite(path, content string) error {
 	// truncates in place, so an interrupted write (Ctrl-C mid-pipe, ENOSPC)
 	// left a partial drop-in that silently changed resolver behavior at the
 	// next daemon restart.
-	_, err = r.RunQuiet("sudo", sudoArgs([]string{"install", "-m", "0644", tmp, path})...)
+	_, err = r.RunQuiet("sudo", SudoArgs("install", "-m", "0644", tmp, path)...)
 	return err
 }
 

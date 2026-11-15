@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/stubbedev/srv/internal/shell"
 )
 
 // nssDBs are the well-known Chrome/Chromium NSS databases; firefoxPaths the
@@ -143,7 +145,7 @@ func execCertutil(cmd *exec.Cmd) ([]byte, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil && bytes.Contains(out, []byte("SEC_ERROR_READ_ONLY")) && runtime.GOOS != "windows" {
 		origArgs := cmd.Args[1:]
-		cmd = exec.CommandContext(context.Background(), "sudo", append([]string{"--", cmd.Path}, origArgs...)...)
+		cmd = exec.CommandContext(context.Background(), "sudo", shell.SudoArgs(append([]string{"--", cmd.Path}, origArgs...)...)...)
 		out, err = cmd.CombinedOutput()
 	}
 	return out, err

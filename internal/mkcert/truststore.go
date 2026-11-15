@@ -139,15 +139,7 @@ func storeEnabled(name string) bool {
 // Failing command output is embedded in the returned error.
 func privileged(stdin io.Reader, name string, args ...string) error {
 	if !runningAsRoot() && binaryExists("sudo") {
-		sudoArgs := []string{"--prompt=Sudo password:", "--"}
-		if shell.IsNonInteractive() {
-			sudoArgs = append(sudoArgs, "-n")
-		}
-		command := make([]string, 0, len(sudoArgs)+len(args)+1)
-		command = append(command, sudoArgs...)
-		command = append(command, name)
-		command = append(command, args...)
-		args, name = command, "sudo"
+		args, name = shell.SudoArgs(append([]string{"--prompt=Sudo password:", "--", name}, args...)...), "sudo"
 	}
 
 	cmd := exec.CommandContext(context.Background(), name, args...)

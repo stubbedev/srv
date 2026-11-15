@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/srv/cmd"
 	"github.com/stubbedev/srv/internal/constants"
+	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/ui"
 )
 
@@ -51,6 +52,10 @@ func run() int {
 			restoreCursor()
 			os.Exit(constants.ExitCodeError)
 		}()
+	}
+
+	if !shell.HasControllingTerminal() {
+		shell.SetNonInteractive(true)
 	}
 
 	// Pass version info to cmd package

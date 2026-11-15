@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -353,3 +354,19 @@ func (s stubRunner) Exists(string) bool                           { return s.exi
 func (s stubRunner) CheckPort(string) (bool, error)               { return false, s.err }
 func (s stubRunner) CheckPortOnAddr(string, string) (bool, error) { return false, s.err }
 func (s stubRunner) IdentifyPortProcess(string) string            { return "" }
+
+func TestSudoArgsLeadsWithNonInteractiveFlag(t *testing.T) {
+	t.Cleanup(func() { SetNonInteractive(false) })
+	args := []string{"--prompt=p", "--", "mkdir", "-p", "/x"}
+
+	SetNonInteractive(false)
+	if got := SudoArgs(args...); !slices.Equal(got, args) {
+		t.Errorf("interactive: got %q, want %q", got, args)
+	}
+
+	SetNonInteractive(true)
+	want := append([]string{"-n"}, args...)
+	if got := SudoArgs(args...); !slices.Equal(got, want) {
+		t.Errorf("non-interactive: got %q, want %q", got, want)
+	}
+}
