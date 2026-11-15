@@ -188,7 +188,7 @@ func (m *miniClient) NetworkList(ctx context.Context, nameFilter string) ([]netw
 // NetworkCreate creates a bridge network; a 409 ("already exists") surfaces
 // as *conflictError for callers to treat as success.
 func (m *miniClient) NetworkCreate(ctx context.Context, name, driver string) error {
-	return m.do(ctx, http.MethodPost, "/networks", nil, map[string]string{"Name": name, "Driver": driver}, nil)
+	return m.do(ctx, http.MethodPost, "/networks/create", nil, map[string]string{"Name": name, "Driver": driver}, nil)
 }
 
 // NetworkRemove deletes a network by name.

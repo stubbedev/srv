@@ -20,19 +20,36 @@ import (
 func startFakeDaemon(t *testing.T) {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/_ping", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /_ping", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /networks", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode([]networkSummary{{Name: "srv_traefik"}})
 	})
-	mux.HandleFunc("/containers/web/json", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /networks/create", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Name, Driver string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Name == "srv_traefik" {
+			http.Error(w, "network with name srv_traefik already exists", http.StatusConflict)
+			return
+		}
+		if req.Name != "fresh" || req.Driver != "bridge" {
+			http.Error(w, "unexpected network "+req.Name+"/"+req.Driver, http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"Id":"abc"}`))
+	})
+	mux.HandleFunc("GET /containers/web/json", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(inspectResponse{
 			State:  &inspectState{Running: true},
 			Config: &inspectConfig{Image: "nginx:1.25"},
 		})
 	})
-	mux.HandleFunc("/networks/newnet/connect", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /networks/newnet/connect", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "endpoint already exists", http.StatusConflict)
 	})
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -67,6 +84,13 @@ func TestMiniClientAgainstFakeDaemon(t *testing.T) {
 	}
 	if len(networks) != 1 || networks[0].Name != "srv_traefik" {
 		t.Errorf("networks = %v", networks)
+	}
+
+	if err := cli.NetworkCreate(context.Background(), "fresh", "bridge"); err != nil {
+		t.Fatalf("NetworkCreate: %v", err)
+	}
+	if err := cli.NetworkCreate(context.Background(), "srv_traefik", "bridge"); !IsConflict(err) {
+		t.Errorf("NetworkCreate on an existing network: expected conflict error, got %v", err)
 	}
 
 	info, err := cli.ContainerInspect(context.Background(), "web")
