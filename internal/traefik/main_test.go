@@ -40,6 +40,7 @@ func TestMain(m *testing.M) {
 	os.Setenv(constants.EnvSrvRoot, root)
 
 	restoreShell := shell.SwapDefault(shelltest.New(nil))
+	resolvedConfigPath = filepath.Join(root, "resolved.conf.d", "srv-local.conf")
 	os.Setenv("CAROOT", filepath.Join(root, "caroot"))
 	restoreEngine := mkcert.SwapEngine(&stubMkcertEngine{})
 

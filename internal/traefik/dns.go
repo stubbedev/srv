@@ -193,7 +193,7 @@ func renderResolvedConf(routingDomains []string) string {
 // already on disk — which is the common case, since domains under a standard
 // local TLD (e.g. foo.test) are already covered by the ~test routing entry.
 func updateSystemdResolvedConfig(domains []string) error {
-	configFile := constants.SystemdResolvedConfigPath
+	configFile := resolvedConfigPath
 	configDir := filepath.Dir(configFile)
 
 	// Build the Domains= value: standard local TLDs plus one entry per
@@ -225,6 +225,15 @@ func updateSystemdResolvedConfig(domains []string) error {
 		return err
 	}
 
+	if target, managed := managedExternally(configFile); managed {
+		if legacyChanged {
+			if err := restartResolved(); err != nil {
+				return err
+			}
+		}
+		return checkManagedResolvedRoutes(configFile, target, routingDomains)
+	}
+
 	// Nothing to do — and crucially, no system-wide DNS restart — when the
 	// routing config has not actually changed and no stale override was
 	// removed.
@@ -238,15 +247,61 @@ func updateSystemdResolvedConfig(domains []string) error {
 	if err := shell.SudoWrite(configFile, content); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+	return restartResolved()
+}
+
+func restartResolved() error {
 	if err := shell.SudoSystemctl("restart", "systemd-resolved"); err != nil {
 		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
 	}
 	return nil
 }
 
-// legacyResolvedConfigPath and legacyNetworkManagerConfigPath are vars so
-// tests can point the cleanup at scratch files; production uses the constants.
+func managedExternally(path string) (string, bool) {
+	target, err := os.Readlink(path)
+	return target, err == nil
+}
+
+func checkManagedResolvedRoutes(configFile, target string, routingDomains []string) error {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("read %s (managed outside srv, linked to %s): %w", configFile, target, err)
+	}
+	missing := missingResolvedRoutes(string(data), routingDomains)
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s is managed outside srv (linked to %s) and does not route %s; add them to the configuration that generates it",
+		configFile, target, strings.Join(missing, " "))
+}
+
+func missingResolvedRoutes(conf string, routingDomains []string) []string {
+	routed := map[string]struct{}{}
+	for line := range strings.Lines(conf) {
+		value, ok := strings.CutPrefix(strings.TrimSpace(line), "Domains=")
+		if !ok {
+			continue
+		}
+		if value == "" {
+			clear(routed)
+		}
+		for domain := range strings.FieldsSeq(value) {
+			routed[domain] = struct{}{}
+		}
+	}
+	var missing []string
+	for _, domain := range routingDomains {
+		if _, ok := routed[domain]; !ok {
+			missing = append(missing, domain)
+		}
+	}
+	return missing
+}
+
+// resolvedConfigPath, legacyResolvedConfigPath and legacyNetworkManagerConfigPath
+// are vars so tests can point them at scratch files; production uses the constants.
 var (
+	resolvedConfigPath             = constants.SystemdResolvedConfigPath
 	legacyResolvedConfigPath       = constants.LegacySystemdResolvedConfigPath
 	legacyNetworkManagerConfigPath = constants.LegacyNetworkManagerConfigPath
 )
@@ -428,13 +483,16 @@ func RemoveDNS() error {
 
 	switch resolver {
 	case ResolverSystemdResolved:
-		if _, err := os.Stat(constants.SystemdResolvedConfigPath); os.IsNotExist(err) {
+		if _, err := os.Stat(resolvedConfigPath); os.IsNotExist(err) {
 			return nil // Already removed
 		}
-		if err := shell.SudoRemove(constants.SystemdResolvedConfigPath); err != nil {
+		if _, managed := managedExternally(resolvedConfigPath); managed {
+			return nil
+		}
+		if err := shell.SudoRemove(resolvedConfigPath); err != nil {
 			return fmt.Errorf("failed to remove config file: %w", err)
 		}
-		return shell.SudoSystemctl("restart", "systemd-resolved")
+		return restartResolved()
 
 	case ResolverMacOS:
 		// Remove all resolver files that contain our nameserver line.
@@ -898,7 +956,7 @@ func updateDnsmasqConfigLocked() error {
 	// domain (not just .test/.local/.localhost TLDs) is routed through dnsmasq.
 	switch DetectResolver() {
 	case ResolverSystemdResolved:
-		if _, err := os.Stat(constants.SystemdResolvedConfigPath); err == nil {
+		if _, err := os.Stat(resolvedConfigPath); err == nil {
 			if err := updateSystemdResolvedConfig(domains); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to update systemd-resolved config: %v\n", err)
 			}

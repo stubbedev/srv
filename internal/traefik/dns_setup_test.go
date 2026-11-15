@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,15 +14,6 @@ import (
 	"github.com/stubbedev/srv/internal/shell"
 	"github.com/stubbedev/srv/internal/shell/shelltest"
 )
-
-// uniqueDomain returns a non-local-TLD domain that cannot match any pre-existing
-// /etc/systemd/resolved.conf.d/srv-local.conf content on a CI runner — that
-// would otherwise trigger the byte-identical early-return in
-// updateSystemdResolvedConfig and bypass the faked shell error.
-func uniqueDomain(t *testing.T) []string {
-	t.Helper()
-	return []string{fmt.Sprintf("srv-test-%d.dev", time.Now().UnixNano())}
-}
 
 func swapShell(t *testing.T, r shell.Runner) {
 	t.Helper()
@@ -98,7 +90,7 @@ func TestUpdateSystemdResolvedConfigMkdirErr(t *testing.T) {
 		"sudo:mkdir": {Err: errors.New("boom")},
 	})
 	swapShell(t, fake)
-	if err := updateSystemdResolvedConfig(uniqueDomain(t)); err == nil {
+	if err := updateSystemdResolvedConfig([]string{"foo.dev"}); err == nil {
 		t.Error("expected mkdir err to propagate")
 	}
 }
@@ -108,7 +100,7 @@ func TestUpdateSystemdResolvedConfigWriteErr(t *testing.T) {
 		"sudo:tee": {Err: errors.New("boom")},
 	})
 	swapShell(t, fake)
-	if err := updateSystemdResolvedConfig(uniqueDomain(t)); err == nil {
+	if err := updateSystemdResolvedConfig([]string{"foo.dev"}); err == nil {
 		t.Error("expected write err")
 	}
 }
@@ -118,7 +110,7 @@ func TestUpdateSystemdResolvedConfigSystemctlErr(t *testing.T) {
 		"sudo:systemctl": {Err: errors.New("nope")},
 	})
 	swapShell(t, fake)
-	if err := updateSystemdResolvedConfig(uniqueDomain(t)); err == nil {
+	if err := updateSystemdResolvedConfig([]string{"foo.dev"}); err == nil {
 		t.Error("expected systemctl err")
 	}
 }
@@ -152,6 +144,77 @@ func TestUpdateSystemdResolvedConfigRemovesLegacyShadow(t *testing.T) {
 	}
 	if !sawRemove || !sawRestart {
 		t.Errorf("legacy removal must trigger SudoRemove and a resolved restart: remove=%v restart=%v", sawRemove, sawRestart)
+	}
+}
+
+func linkManagedResolvedConfig(t *testing.T, content string) {
+	t.Helper()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "generated.conf")
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "srv-local.conf")
+	if err := os.Symlink(source, link); err != nil {
+		t.Fatal(err)
+	}
+	old := resolvedConfigPath
+	resolvedConfigPath = link
+	t.Cleanup(func() { resolvedConfigPath = old })
+}
+
+func assertNoSudo(t *testing.T, fake *shelltest.Fake) {
+	t.Helper()
+	for _, c := range fake.Snapshot() {
+		if c.Name == "sudo" {
+			t.Errorf("an externally managed drop-in must not be touched, got %s %v", c.Method, c.Args)
+		}
+	}
+}
+
+func TestUpdateSystemdResolvedConfigLeavesManagedDropInAlone(t *testing.T) {
+	linkManagedResolvedConfig(t, "[Resolve]\nDNS=127.0.0.1:15353\nDomains=~test ~localhost ~foo.dev ~grafana.local\n")
+	fake := shelltest.New(nil)
+	swapShell(t, fake)
+	if err := updateSystemdResolvedConfig([]string{"foo.dev", "app.test"}); err != nil {
+		t.Fatalf("a managed drop-in that already routes every domain is not an error: %v", err)
+	}
+	assertNoSudo(t, fake)
+}
+
+func TestUpdateSystemdResolvedConfigReportsManagedGaps(t *testing.T) {
+	linkManagedResolvedConfig(t, "[Resolve]\nDomains=~test ~localhost\n")
+	fake := shelltest.New(nil)
+	swapShell(t, fake)
+	err := updateSystemdResolvedConfig([]string{"foo.dev", "bar.local"})
+	if err == nil {
+		t.Fatal("a managed drop-in missing a route must be reported")
+	}
+	if !strings.Contains(err.Error(), "~foo.dev ~bar.local") {
+		t.Errorf("error should name the missing routes: %v", err)
+	}
+	assertNoSudo(t, fake)
+}
+
+func TestMissingResolvedRoutes(t *testing.T) {
+	cases := []struct {
+		name string
+		conf string
+		want []string
+	}{
+		{"all routed", "[Resolve]\nDomains=~test ~a.dev\n", nil},
+		{"one missing", "[Resolve]\nDomains=~test\n", []string{"~a.dev"}},
+		{"accumulates lines", "[Resolve]\nDomains=~test\n  Domains=~a.dev\n", nil},
+		{"empty assignment resets", "[Resolve]\nDomains=~test ~a.dev\nDomains=\nDomains=~test\n", []string{"~a.dev"}},
+		{"no Domains line", "[Resolve]\nDNS=127.0.0.1\n", []string{"~test", "~a.dev"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := missingResolvedRoutes(c.conf, []string{"~test", "~a.dev"})
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
