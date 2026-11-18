@@ -23,14 +23,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: stubbedev/xilo@v2
         with:
-          # Substitute from the self-hosted xilo cache. This must be set at
-          # install time: the `xilo use` step later in the job rewrites nix.conf
-          # only after the build has already run, so the cache was previously
-          # written to but never read from.
-          extra-conf: |
-            extra-substituters = https://xilos.dev/c/stubbedev/main
-            extra-trusted-public-keys = xilos.dev/stubbedev/main-1:397R6S49v/FSvP+mZ3HlKrVN1KXhgzHIEIHxA/UuG6Y=
+          url: https://xilos.dev
+          cache: stubbedev/main
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/Cargo.lock', '**/go.sum') }}

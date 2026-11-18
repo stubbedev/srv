@@ -79,14 +79,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: stubbedev/xilo@v2
         with:
-          # Substitute from the self-hosted xilo cache. This must be set at
-          # install time: the `xilo use` step later in the job rewrites nix.conf
-          # only after the build has already run, so the cache was previously
-          # written to but never read from.
-          extra-conf: |
-            extra-substituters = https://xilos.dev/c/stubbedev/main
-            extra-trusted-public-keys = xilos.dev/stubbedev/main-1:397R6S49v/FSvP+mZ3HlKrVN1KXhgzHIEIHxA/UuG6Y=
+          url: https://xilos.dev
+          cache: stubbedev/main
+          token: ${{ secrets.XILO_TOKEN }}
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/Cargo.lock', '**/go.sum') }}
@@ -98,24 +95,9 @@ jobs:
           gc-max-store-size-linux: 5G
 
       - name: Build package
-        # pipefail: without it tee's exit status hid a failed build, and the
-        # push step then failed on an empty path list instead.
         run: |
           set -euo pipefail
-          nix build .#srv -L --print-out-paths | tee /tmp/srv-outpaths
-
-      - name: setup xilo
-        uses: stubbedev/xilo@v1
-        with:
-          url: https://xilos.dev
-          cache: stubbedev/main
-          token: ${{ secrets.XILO_TOKEN }}
-
-      - name: Push to xilo
-        # A failed push is not swallowed: it would leave every consumer
-        # rebuilding from source, so the step fails the job.
-        run: |
-          xilo push stubbedev/main $(cat /tmp/srv-outpaths)
+          nix build .#srv -L
 
   release:
     name: publish github release

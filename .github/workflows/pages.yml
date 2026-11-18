@@ -28,10 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: stubbedev/xilo@v2
         with:
-          extra-conf: |
-            extra-substituters = https://xilos.dev/c/stubbedev/main
-            extra-trusted-public-keys = xilos.dev/stubbedev/main-1:397R6S49v/FSvP+mZ3HlKrVN1KXhgzHIEIHxA/UuG6Y=
+          url: https://xilos.dev
+          cache: stubbedev/main
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-docs-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/go.sum') }}
