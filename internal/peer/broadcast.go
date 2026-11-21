@@ -1,14 +1,23 @@
 package peer
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"slices"
 )
 
+var limitedBroadcast = netip.AddrFrom4([4]byte{255, 255, 255, 255})
+
+var listInterfaces = net.Interfaces
+
 func broadcastTargets(port uint16) ([]netip.AddrPort, error) {
 	addrs, err := interfaceBroadcasts()
+	if errors.Is(err, os.ErrPermission) {
+		addrs, err = []netip.Addr{limitedBroadcast}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -20,7 +29,7 @@ func broadcastTargets(port uint16) ([]netip.AddrPort, error) {
 }
 
 func interfaceBroadcasts() ([]netip.Addr, error) {
-	ifaces, err := net.Interfaces()
+	ifaces, err := listInterfaces()
 	if err != nil {
 		return nil, fmt.Errorf("list network interfaces: %w", err)
 	}

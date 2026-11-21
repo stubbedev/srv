@@ -4,9 +4,11 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -193,5 +195,25 @@ func TestAnnounceIsAnsweredByUnicast(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Errorf("Run after cancel = %v, want nil", err)
 		}
+	}
+}
+
+func TestBroadcastTargetsWithoutInterfaceAccess(t *testing.T) {
+	orig := listInterfaces
+	t.Cleanup(func() { listInterfaces = orig })
+	listInterfaces = func() ([]net.Interface, error) {
+		return nil, &net.OpError{Op: "route", Net: "ip+net", Err: os.NewSyscallError("netlinkrib", syscall.EACCES)}
+	}
+	got, err := broadcastTargets(15354)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != netip.MustParseAddrPort("255.255.255.255:15354") {
+		t.Errorf("broadcastTargets with interfaces hidden = %v, want the limited broadcast", got)
+	}
+
+	listInterfaces = func() ([]net.Interface, error) { return nil, os.NewSyscallError("netlinkrib", syscall.ENOBUFS) }
+	if _, err := broadcastTargets(15354); err == nil {
+		t.Error("broadcastTargets with an unrelated interface error = ok, want error")
 	}
 }

@@ -63,6 +63,11 @@ running Termux, runs discovery on its own:
 srv peer run
 ```
 
+Android hides the network interface list from apps, so there srv cannot
+compute each network's broadcast address and announces on the limited
+broadcast address 255.255.255.255, which leaves through the active
+network.
+
 If its resolver cannot be pointed at srv's DNS, connect through the peer
 table instead, for example as an ssh `ProxyCommand`:
 
