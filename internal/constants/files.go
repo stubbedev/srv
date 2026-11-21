@@ -46,6 +46,7 @@ const (
 	EnvTraefikFile = "env.traefik"
 	// LocalDomainsFile is the local domains registry file.
 	LocalDomainsFile = "local-domains.txt"
+	PeersFile        = "peers.json"
 	// RootCAFile is the mkcert root CA filename.
 	RootCAFile = "rootCA.pem"
 	// ACMEJSONFile is the ACME certificate storage file.

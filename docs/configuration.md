@@ -7,7 +7,7 @@ files and the [daemon](daemon.md) re-applies any change to them within
 
 | File | What it describes |
 |---|---|
-| `~/.config/srv/config.yml` | user settings: container engine, upstream DNS |
+| `~/.config/srv/config.yml` | user settings: container engine, upstream DNS, peer name |
 | `~/.config/srv/sites/<name>/metadata.yml` | one site: domains, type, routes, mounts, networks |
 | `~/.config/srv/proxies/proxy-<name>.yml` | one proxy |
 | `~/.config/srv/traefik/conf/redirect-<name>.yml` | one redirect |
@@ -35,11 +35,13 @@ is_local: true
 # ~/.config/srv/config.yml
 container_engine: podman            # see Container runtimes
 upstream_dns: [1.1.1.1, 9.9.9.9#53] # resolvers for everything srv doesn't own
+peer_name: laptop                   # see LAN peers
 ```
 
 `container_engine` is covered in
 [Container runtimes](container-runtimes.md). `upstream_dns` defaults to
-Google DNS (8.8.8.8 and 8.8.4.4).
+Google DNS (8.8.8.8 and 8.8.4.4). `peer_name` is covered in
+[LAN peers](peers.md).
 
 ## All paths
 
@@ -49,6 +51,7 @@ Google DNS (8.8.8.8 and 8.8.4.4).
 |---|---|
 | `~/.config/srv/config.yml` | user config |
 | `~/.config/srv/daemon.log` | daemon and access log |
+| `~/.config/srv/peers.json` | LAN peers heard in the last 90 seconds ([LAN peers](peers.md)) |
 | `~/.config/srv/traefik/` | Traefik compose file and static config |
 | `~/.config/srv/traefik/conf/` | dynamic Traefik routing configs |
 | `~/.config/srv/traefik/conf/site-<name>.yml` | site routing (compose and daemon-served sites) |

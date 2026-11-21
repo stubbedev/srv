@@ -20,6 +20,10 @@
       },
       "type": "array",
       "description": "Upstream DNS resolvers; each entry is an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4)."
+    },
+    "peer_name": {
+      "type": "string",
+      "description": "Name this machine announces to other srv instances on the LAN; it then resolves as \u003cname\u003e.home.arpa on every peer. Allowed characters are a-z and 0-9 and the hyphen. Omit it to keep peer discovery off."
     }
   },
   "additionalProperties": false,

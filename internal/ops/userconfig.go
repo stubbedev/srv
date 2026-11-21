@@ -122,6 +122,7 @@ func UserConfigJSON() (map[string]any, error) {
 	out := map[string]any{
 		"container_engine": userCfg.ContainerEngine,
 		"upstream_dns":     nonNil(userCfg.UpstreamDNS),
+		"peer_name":        string(userCfg.PeerName),
 	}
 	if err != nil {
 		// Surface the problem in-band: a client reading this resource is

@@ -114,6 +114,8 @@ func (d *Daemon) refreshDNSZones() {
 	if server == nil {
 		return
 	}
+	d.zonesMu.Lock()
+	defer d.zonesMu.Unlock()
 	z := dnsd.NewZoneSnapshot()
 
 	if err := traefik.PinLocalDomains(z); err != nil {
@@ -136,6 +138,12 @@ func (d *Daemon) refreshDNSZones() {
 
 	if err := traefik.SetConfiguredUpstreams(z); err != nil {
 		d.log("DNS zone refresh: user config: %v", err)
+	}
+
+	if peers := d.peers.Load(); peers != nil {
+		for _, p := range *peers {
+			z.PinExact(p.Name.FQDN(), p.Addr.String())
+		}
 	}
 
 	server.SetZones(z)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/fsutil"
+	"github.com/stubbedev/srv/internal/peer"
 )
 
 // Config holds the srv configuration.
@@ -25,8 +26,9 @@ type Config struct {
 
 // UserConfig holds user-configurable settings stored in config.yml.
 type UserConfig struct {
-	ContainerEngine string   `jsonschema:"description=Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2.,enum=auto,enum=docker,enum=podman,enum=colima,enum=orbstack,enum=rancher-desktop" yaml:"container_engine,omitempty"`
-	UpstreamDNS     []string `jsonschema:"description=Upstream DNS resolvers; each entry is an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4)."                                                                                              yaml:"upstream_dns,omitempty"`
+	ContainerEngine string    `jsonschema:"description=Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2.,enum=auto,enum=docker,enum=podman,enum=colima,enum=orbstack,enum=rancher-desktop" yaml:"container_engine,omitempty"`
+	UpstreamDNS     []string  `jsonschema:"description=Upstream DNS resolvers; each entry is an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4)."                                                                                              yaml:"upstream_dns,omitempty"`
+	PeerName        peer.Name `jsonschema:"description=Name this machine announces to other srv instances on the LAN; it then resolves as <name>.home.arpa on every peer. Allowed characters are a-z and 0-9 and the hyphen. Omit it to keep peer discovery off."                     yaml:"peer_name,omitempty"`
 }
 
 var (
@@ -145,6 +147,10 @@ func ResetCache() {
 }
 
 // ConfigPath returns the path to the config.yml file.
+func (c *Config) PeersPath() string {
+	return filepath.Join(c.Root, constants.PeersFile)
+}
+
 func (c *Config) ConfigPath() string {
 	return filepath.Join(c.Root, constants.UserConfigFile)
 }

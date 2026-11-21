@@ -17,6 +17,7 @@ import (
 	"github.com/stubbedev/srv/internal/constants"
 	"github.com/stubbedev/srv/internal/fsutil"
 	"github.com/stubbedev/srv/internal/ops"
+	"github.com/stubbedev/srv/internal/peer"
 	"github.com/stubbedev/srv/internal/platform"
 	"github.com/stubbedev/srv/internal/shell"
 )
@@ -35,6 +36,17 @@ var routingTLDs = []string{"test", "localhost"}
 // isUnderRoutingTLD reports whether bare equals or is a subdomain of a
 // TLD-wide-routed local TLD. `.local` names return false so they are routed
 // per-name rather than swallowing the whole mDNS TLD.
+func routingZones() ([]string, error) {
+	userCfg, err := ops.UserConfig()
+	if err != nil {
+		return nil, fmt.Errorf("decide DNS routing zones: %w", err)
+	}
+	if userCfg.PeerName == "" {
+		return routingTLDs, nil
+	}
+	return append(slices.Clip(routingTLDs), peer.Zone), nil
+}
+
 func isUnderRoutingTLD(bare string) bool {
 	for _, tld := range routingTLDs {
 		if bare == tld || strings.HasSuffix(bare, "."+tld) {
@@ -200,8 +212,12 @@ func updateSystemdResolvedConfig(domains []string) error {
 	// registered domain that is NOT already covered by a local TLD entry.
 	// The ~ prefix tells systemd-resolved to route matching queries to this
 	// DNS server rather than to the default.
-	routingDomains := make([]string, 0, len(routingTLDs)+len(domains))
-	for _, tld := range routingTLDs {
+	zones, err := routingZones()
+	if err != nil {
+		return err
+	}
+	routingDomains := make([]string, 0, len(zones)+len(domains))
+	for _, tld := range zones {
 		routingDomains = append(routingDomains, "~"+tld)
 	}
 	for _, d := range domains {
@@ -372,8 +388,12 @@ func updateMacOSResolverConfig(domains []string) error {
 	// files cover .test/.localhost; .local is NOT given a TLD-wide
 	// /etc/resolver/local file (that would hijack all Bonjour .local names) —
 	// each registered .local domain gets its own per-name resolver file below.
+	zones, err := routingZones()
+	if err != nil {
+		return err
+	}
 	wanted := make(map[string]struct{})
-	for _, tld := range routingTLDs {
+	for _, tld := range zones {
 		wanted[tld] = struct{}{}
 	}
 	for _, d := range domains {
@@ -440,7 +460,11 @@ func updateNetworkManagerConfig(domains []string) error {
 
 	var content strings.Builder
 	content.WriteString("# srv local DNS configuration\n")
-	for _, tld := range routingTLDs {
+	zones, err := routingZones()
+	if err != nil {
+		return err
+	}
+	for _, tld := range zones {
 		fmt.Fprintf(&content, "server=/%s/%s#%s\n", tld, constants.LocalhostIP, constants.PortDNSStr)
 	}
 	for _, d := range domains {

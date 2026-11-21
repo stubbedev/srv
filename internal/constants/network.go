@@ -41,6 +41,7 @@ const (
 	// ("srv add --daemon") route to it: Traefik terminates TLS and forwards to
 	// this loopback listener, which multiplexes the sites by Host header.
 	PortStatic = 15380
+	PortPeer   = 15354
 	// PortMin is the minimum valid port number.
 	PortMin = 1
 	// PortMax is the maximum valid port number.
@@ -55,6 +56,7 @@ const (
 	PortInternalStr  = "88"
 	PortDNSStr       = "15353"
 	PortStaticStr    = "15380"
+	PortPeerStr      = "15354"
 )
 
 // Port name constants for display purposes.
@@ -65,6 +67,7 @@ const (
 	PortNameDashboard = "Dashboard"
 	PortNameDNS       = "DNS"
 	PortNameStatic    = "Static HTTP"
+	PortNamePeer      = "Peer discovery"
 )
 
 // =============================================================================

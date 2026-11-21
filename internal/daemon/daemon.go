@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/stubbedev/srv/internal/httpd"
 	"github.com/stubbedev/srv/internal/logfile"
 	"github.com/stubbedev/srv/internal/ops"
+	"github.com/stubbedev/srv/internal/peer"
 	"github.com/stubbedev/srv/internal/proxy"
 	"github.com/stubbedev/srv/internal/site"
 	"github.com/stubbedev/srv/internal/traefik"
@@ -64,6 +66,9 @@ type Daemon struct {
 	// dns hosts the embedded DNS server so the structured zone source can
 	// push fresh snapshots as the server is (re)bound. Nil until bound.
 	dns atomic.Pointer[dnsd.Server]
+
+	peers   atomic.Pointer[[]peer.Entry]
+	zonesMu sync.Mutex
 	// watching is set once the metadata watcher runs and pushes mapping
 	// refreshes itself.
 	watching atomic.Bool
@@ -168,6 +173,8 @@ func (d *Daemon) Run() error {
 	// the stack; best-effort clean it up for installs upgraded from one, so
 	// the port it still holds frees up for this server.
 	d.startEmbeddedDNS()
+
+	d.startPeerDiscovery()
 
 	// Retired-hop cleanup: proxies created with --fallback before the native
 	// Traefik failover carry either a daemon-hosted listener port or an nginx

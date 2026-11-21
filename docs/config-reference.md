@@ -66,3 +66,4 @@ _Path: `~/.config/srv/config.yml`_
 |---|---|---|---|
 | `container_engine` | `string` | no | Container runtime srv drives. Omit it (or set auto) to detect one; name it to pin. Requires a Docker-compatible API endpoint and Compose v2. |
 | `upstream_dns` | `array<string>` | no | Upstream DNS resolvers; each entry is an IP address with an optional #port suffix. Defaults to Google DNS (8.8.8.8 and 8.8.4.4). |
+| `peer_name` | `string` | no | Name this machine announces to other srv instances on the LAN; it then resolves as <name>.home.arpa on every peer. Allowed characters are a-z and 0-9 and the hyphen. Omit it to keep peer discovery off. |

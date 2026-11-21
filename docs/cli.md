@@ -50,6 +50,10 @@ Available on every command:
   - [`srv network list`](#srv-network-list) — List extra Docker networks attached to a site
 - [`srv open`](#srv-open) — Open a site in the default browser
 - [`srv paths`](#srv-paths) — Show config paths
+- [`srv peer`](#srv-peer) — Find other srv machines on the LAN by name
+  - [`srv peer dial`](#srv-peer-dial) — Connect stdin/stdout to a peer's TCP port (an ssh ProxyCommand)
+  - [`srv peer list`](#srv-peer-list) — List the peers heard on the LAN
+  - [`srv peer run`](#srv-peer-run) — Announce and discover peers in the foreground, without the daemon
 - [`srv proxy`](#srv-proxy) — Manage proxy routes
   - [`srv proxy add`](#srv-proxy-add) — Add a proxy
   - [`srv proxy list`](#srv-proxy-list) — List all proxies
@@ -715,6 +719,77 @@ Usage:
 
 ```
 srv paths
+```
+
+## `srv peer`
+
+Find other srv machines on the LAN by name
+
+```
+Peer discovery lets srv machines on the same LAN reach each other by name.
+
+Set peer_name in config.yml and the daemon announces this machine over
+UDP broadcast on port 15354, answers every announce it
+hears, and serves each peer it has heard from as <name>.home.arpa through
+srv's DNS. Broadcast is used instead of mDNS multicast because Wi-Fi access
+points that snoop IGMP silently stop delivering multicast after a roam.
+```
+
+Usage:
+
+```
+srv peer
+```
+
+Subcommands:
+
+- `srv peer dial` — Connect stdin/stdout to a peer's TCP port (an ssh ProxyCommand)
+- `srv peer list` — List the peers heard on the LAN
+- `srv peer run` — Announce and discover peers in the foreground, without the daemon
+
+## `srv peer dial`
+
+Connect stdin/stdout to a peer's TCP port (an ssh ProxyCommand)
+
+```
+Connects stdin and stdout to a TCP port on a peer, resolved from the peer
+table instead of DNS. Use it as an ssh ProxyCommand on machines whose resolver
+cannot be pointed at srv's DNS:
+
+  ProxyCommand srv peer dial %h %p
+```
+
+Usage:
+
+```
+srv peer dial <name> <port>
+```
+
+## `srv peer list`
+
+List the peers heard on the LAN
+
+Usage:
+
+```
+srv peer list
+```
+
+## `srv peer run`
+
+Announce and discover peers in the foreground, without the daemon
+
+```
+Runs peer discovery as a foreground process, for machines that do not run
+the srv daemon (no container runtime, no service manager). It announces
+peer_name from config.yml and keeps the peer table that 'srv peer list' and
+'srv peer dial' read.
+```
+
+Usage:
+
+```
+srv peer run
 ```
 
 ## `srv proxy`
