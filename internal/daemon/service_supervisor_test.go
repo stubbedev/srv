@@ -146,6 +146,16 @@ func TestUninstallResolvesADoubleInstall(t *testing.T) {
 	if !slices.Contains(last.Args, brew) && !slices.Contains(last.Args, filepath.Base(brew)) {
 		t.Errorf("last call %s %v does not restart the brew services daemon", last.Name, last.Args)
 	}
+	if platform.IsLinux() {
+		if len(calls) < 2 {
+			t.Fatalf("Uninstall() ran %v, want reset-failed before the restart", calls)
+		}
+		prev := calls[len(calls)-2]
+		want := []string{"--user", "reset-failed", filepath.Base(brew)}
+		if prev.Name != "systemctl" || !slices.Equal(prev.Args, want) {
+			t.Errorf("call before the restart = %s %v, want systemctl %v: the brew daemon crash-looped against the lock and hit its start limit", prev.Name, prev.Args, want)
+		}
+	}
 }
 
 // Lifecycle commands must drive the unit that actually runs the daemon.

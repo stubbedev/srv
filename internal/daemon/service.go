@@ -207,10 +207,20 @@ func Uninstall() error {
 	if err != nil || !brewUnit.installed() {
 		return err
 	}
-	if err := Restart(); err != nil {
+	if err := resumeAfterLockContention(brewUnit); err != nil {
 		return fmt.Errorf("removed srv's unit, but restarting the brew services daemon failed: %w", err)
 	}
 	return nil
+}
+
+func resumeAfterLockContention(u unit) error {
+	if !platform.IsLinux() {
+		return restartLaunchd(u)
+	}
+	if err := shell.Run("systemctl", "--user", "reset-failed", u.name); err != nil {
+		return fmt.Errorf("failed to clear the start limit of %s: %w", u.name, err)
+	}
+	return restartSystemd(u)
 }
 
 // Restart restarts the daemon through whichever unit runs it.
